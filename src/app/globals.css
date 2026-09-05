@@ -16,16 +16,18 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Thermal Printer Styling */
+/* ================= THERMAL PRINTER ESC/POS CSS RULES ================= */
 @media print {
-  body {
+  html, body {
     background: #ffffff !important;
     color: #000000 !important;
     margin: 0 !important;
     padding: 0 !important;
+    width: 100% !important;
   }
 
-  .no-print {
+  /* Hide all regular web UI elements during physical print */
+  .no-print, header, aside, nav, button {
     display: none !important;
   }
 
@@ -33,7 +35,21 @@ body {
     display: block !important;
   }
 
+  .thermal-receipt {
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 auto !important;
+    padding: 2mm !important;
+    width: 100% !important;
+    font-size: 11px !important;
+    color: #000000 !important;
+    page-break-after: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Standard ESC/POS receipt roll margins */
   @page {
-    margin: 0;
+    margin: 0mm !important;
+    size: auto;
   }
 }
