@@ -1,0 +1,23 @@
+{
+  "app_name": "ශ්‍රී ලංකා POS",
+  "currency": "රු.",
+  "pos": {
+    "search_placeholder": "භාණ්ඩයේ නම හෝ බාර්කෝඩ් සොයන්න...",
+    "cart_empty": "බාස්කට් එක හිස්ය. භාණ්ඩයක් තෝරන්න.",
+    "subtotal": "මුළු එකතුව",
+    "discount": "වට්ටම්",
+    "tax": "බදු",
+    "total": "ගෙවිය යුතු මුදල",
+    "pay_cash": "මුදල් (Cash)",
+    "pay_card": "කාඩ්පත් (Card)",
+    "pay_qr": "ලංකා QR",
+    "cash_received": "ලැබුණු මුදල",
+    "change_due": "ඉතිරි මුදල",
+    "complete_sale": "විකිණීම සම්පූර්ණ කරන්න"
+  },
+  "roles": {
+    "owner": "හිමිකරු",
+    "manager": "කළමනාකරු",
+    "cashier": "මුදල් අයකැමි"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "app_name": "Sri Lanka POS",
+  "currency": "Rs.",
+  "pos": {
+    "search_placeholder": "Search product name or barcode (F2)...",
+    "cart_empty": "Cart is empty. Scan barcode or select an item.",
+    "subtotal": "Subtotal",
+    "discount": "Discount",
+    "tax": "Tax",
+    "total": "Total",
+    "pay_cash": "Cash",
+    "pay_card": "Card",
+    "pay_qr": "LankaQR",
+    "cash_received": "Cash Received",
+    "change_due": "Change Due",
+    "complete_sale": "Complete Sale"
+  },
+  "roles": {
+    "owner": "Owner",
+    "manager": "Manager",
+    "cashier": "Cashier"
+  }
+}
