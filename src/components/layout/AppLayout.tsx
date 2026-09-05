@@ -1,0 +1,166 @@
+"use client";
+
+import React from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
+import {
+  ShoppingCart,
+  LayoutDashboard,
+  Package,
+  Boxes,
+  Receipt,
+  Users,
+  BarChart3,
+  Settings,
+  LogOut,
+  Store,
+  Shield,
+  Menu,
+  X,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface AppLayoutProps {
+  children: React.ReactNode;
+}
+
+export default function AppLayout({ children }: AppLayoutProps) {
+  const pathname = usePathname();
+  const { data: session } = useSession();
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+
+  const role = session?.user?.role || "CASHIER";
+  const isOwner = role === "OWNER";
+  const isManager = role === "MANAGER" || isOwner;
+
+  const navItems = [
+    { label: "POS Counter", href: "/pos", icon: ShoppingCart, highlight: true },
+    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, minRole: "MANAGER" },
+    { label: "Products", href: "/products", icon: Package, minRole: "MANAGER" },
+    { label: "Inventory", href: "/inventory", icon: Boxes, minRole: "MANAGER" },
+    { label: "Sales History", href: "/sales", icon: Receipt },
+    { label: "Customers", href: "/customers", icon: Users },
+    { label: "Reports", href: "/reports", icon: BarChart3, minRole: "OWNER" },
+    { label: "Store Settings", href: "/settings", icon: Settings, minRole: "OWNER" },
+  ];
+
+  const visibleNav = navItems.filter((item) => {
+    if (!item.minRole) return true;
+    if (item.minRole === "OWNER") return isOwner;
+    if (item.minRole === "MANAGER") return isManager;
+    return true;
+  });
+
+  return (
+    <div className="min-h-screen flex flex-col md:flex-row bg-slate-100">
+      {/* Mobile Topbar */}
+      <header className="md:hidden flex items-center justify-between px-4 py-3 bg-slate-900 text-white sticky top-0 z-50">
+        <div className="flex items-center gap-2">
+          <Store className="w-5 h-5 text-blue-400" />
+          <span className="font-bold text-sm tracking-tight truncate max-w-[180px]">
+            {session?.user?.businessName || "Sri Lanka POS"}
+          </span>
+        </div>
+        <button
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="p-1 text-slate-300 hover:text-white"
+        >
+          {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        </button>
+      </header>
+
+      {/* Sidebar Navigation */}
+      <aside
+        className={cn(
+          "fixed md:static inset-y-0 left-0 z-40 w-64 bg-slate-900 text-slate-300 flex flex-col transition-transform duration-200 ease-in-out md:translate-x-0",
+          mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        {/* Brand */}
+        <div className="p-5 border-b border-slate-800 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
+            <Store className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-sm font-bold text-white truncate leading-tight">
+              {session?.user?.businessName || "Sri Lanka POS"}
+            </h1>
+            <p className="text-[11px] text-slate-400">Retail & Inventory</p>
+          </div>
+        </div>
+
+        {/* User Card */}
+        <div className="px-5 py-3.5 bg-slate-950/40 border-b border-slate-800 flex items-center justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-white truncate">
+              {session?.user?.name || session?.user?.username || "Cashier"}
+            </p>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full mt-0.5",
+                role === "OWNER"
+                  ? "bg-purple-950 text-purple-300 border border-purple-800/60"
+                  : role === "MANAGER"
+                  ? "bg-emerald-950 text-emerald-300 border border-emerald-800/60"
+                  : "bg-amber-950 text-amber-300 border border-amber-800/60"
+              )}
+            >
+              <Shield className="w-2.5 h-2.5" />
+              {role}
+            </span>
+          </div>
+          <button
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            title="Sign Out"
+            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Navigation Links */}
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+          {visibleNav.map((item) => {
+            const Icon = item.icon;
+            const active = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setMobileMenuOpen(false)}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all",
+                  active
+                    ? "bg-blue-600 text-white shadow-sm shadow-blue-500/30"
+                    : item.highlight
+                    ? "bg-slate-800/80 text-blue-300 hover:bg-slate-800 hover:text-white"
+                    : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                )}
+              >
+                <Icon className={cn("w-4 h-4 shrink-0", active ? "text-white" : "text-slate-400")} />
+                <span>{item.label}</span>
+                {item.highlight && !active && (
+                  <span className="ml-auto text-[9px] uppercase font-bold bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded">
+                    Fast
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Footer info */}
+        <div className="p-4 border-t border-slate-800 text-[11px] text-slate-500 flex items-center justify-between">
+          <span>🇱🇰 LKR Default</span>
+          <span>Asia/Colombo</span>
+        </div>
+      </aside>
+
+      {/* Main Content Viewport */}
+      <main className="flex-1 min-w-0 overflow-y-auto">
+        {children}
+      </main>
+    </div>
+  );
+}
