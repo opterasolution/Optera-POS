@@ -1,9 +1,9 @@
 import mongoose, { Schema, Document, Model, Types } from "mongoose";
 
-export type UserRole = "OWNER" | "MANAGER" | "CASHIER";
+export type UserRole = "SUPER_ADMIN" | "OWNER" | "MANAGER" | "CASHIER";
 
 export interface IUser extends Document {
-  businessId: Types.ObjectId;
+  businessId?: Types.ObjectId; // Optional for SUPER_ADMIN
   name: string;
   username: string;
   password: string; // Hashed with bcrypt
@@ -19,7 +19,7 @@ const UserSchema = new Schema<IUser>(
     businessId: {
       type: Schema.Types.ObjectId,
       ref: "Business",
-      required: true,
+      required: false, // Optional for Super Admin
       index: true,
     },
     name: { type: String, required: true, trim: true },
@@ -28,11 +28,12 @@ const UserSchema = new Schema<IUser>(
       required: true,
       trim: true,
       lowercase: true,
+      unique: true,
     },
     password: { type: String, required: true },
     role: {
       type: String,
-      enum: ["OWNER", "MANAGER", "CASHIER"],
+      enum: ["SUPER_ADMIN", "OWNER", "MANAGER", "CASHIER"],
       default: "CASHIER",
       required: true,
     },
@@ -41,9 +42,6 @@ const UserSchema = new Schema<IUser>(
   },
   { timestamps: true }
 );
-
-// Compound index: username must be unique per business
-UserSchema.index({ businessId: 1, username: 1 }, { unique: true });
 
 export const User: Model<IUser> =
   mongoose.models.User || mongoose.model<IUser>("User", UserSchema);

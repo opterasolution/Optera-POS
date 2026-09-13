@@ -50,6 +50,13 @@ export default function HomePage() {
             Launch POS Counter
           </Link>
         </div>
+
+        <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-center gap-2 text-xs text-slate-500">
+          <span>Commercial Platform Owner?</span>
+          <Link href="/admin" className="text-blue-600 hover:underline font-semibold">
+            Super Admin Control Center &rarr;
+          </Link>
+        </div>
       </div>
     </main>
   );

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Store, Lock, User, Eye, EyeOff, ShieldCheck, ArrowRight, AlertCircle } from "lucide-react";
+import { Store, Lock, User, Eye, EyeOff, ShieldCheck, ArrowRight, AlertCircle, Crown } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -31,9 +31,15 @@ export default function LoginPage() {
         return;
       }
 
-      // Check user role and route to the appropriate starting screen
-      // Default to /pos for quick cashier checkout
-      router.push("/pos");
+      // Check user role via me endpoint
+      const meRes = await fetch("/api/auth/me");
+      const meData = await meRes.json();
+
+      if (meData?.user?.role === "SUPER_ADMIN") {
+        router.push("/admin");
+      } else {
+        router.push("/pos");
+      }
       router.refresh();
     } catch {
       setErrorMessage("Unable to connect to the login service. Please check your network.");
@@ -55,16 +61,16 @@ export default function LoginPage() {
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-500/30 mb-3">
             <Store className="w-7 h-7" />
           </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Sri Lanka POS</h1>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Sri Lanka POS SaaS</h1>
           <p className="text-slate-400 text-xs mt-1">
-            Retail Counter & Business Management • Colombo (Asia/Colombo)
+            Commercial Multi-Tenant Retail Platform • Colombo (Asia/Colombo)
           </p>
         </div>
 
         {/* Login Box */}
         <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-md">
           <div className="flex items-center justify-between mb-5">
-            <h2 className="text-lg font-semibold text-white">Staff Login</h2>
+            <h2 className="text-lg font-semibold text-white">Sign In</h2>
             <span className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded-full">
               <ShieldCheck className="w-3.5 h-3.5" /> Secure Session
             </span>
@@ -80,7 +86,7 @@ export default function LoginPage() {
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                Username or Phone Number
+                Username or Login ID
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -90,7 +96,7 @@ export default function LoginPage() {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="e.g. admin or 0771234567"
+                  placeholder="e.g. superadmin, admin, or cashier"
                   required
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-900/90 border border-slate-700 rounded-xl text-white text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                 />
@@ -132,7 +138,7 @@ export default function LoginPage() {
                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               ) : (
                 <>
-                  <span>Sign In to POS Counter</span>
+                  <span>Sign In</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
@@ -144,30 +150,41 @@ export default function LoginPage() {
             <p className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-2 text-center">
               Quick Test Accounts (Click to Auto-Fill)
             </p>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => fillQuickCredentials("superadmin", "superadmin123")}
+                className="p-2 rounded-lg bg-amber-950/40 hover:bg-amber-900/60 border border-amber-800/60 text-left transition-colors"
+              >
+                <span className="flex items-center gap-1 text-[11px] font-bold text-amber-300">
+                  <Crown className="w-3 h-3" /> Super Admin
+                </span>
+                <span className="block text-[9px] text-amber-400/80 font-mono mt-0.5">superadmin</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => fillQuickCredentials("admin", "admin123")}
-                className="p-2.5 rounded-lg bg-slate-900/80 hover:bg-slate-700/80 border border-slate-700 text-left transition-colors"
+                className="p-2 rounded-lg bg-slate-900/80 hover:bg-slate-700/80 border border-slate-700 text-left transition-colors"
               >
-                <span className="block text-xs font-semibold text-white">Owner Account</span>
-                <span className="block text-[10px] text-slate-400">admin / admin123</span>
+                <span className="block text-[11px] font-semibold text-white">Client Owner</span>
+                <span className="block text-[9px] text-slate-400 font-mono mt-0.5">admin</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => fillQuickCredentials("cashier", "cashier123")}
-                className="p-2.5 rounded-lg bg-slate-900/80 hover:bg-slate-700/80 border border-slate-700 text-left transition-colors"
+                className="p-2 rounded-lg bg-slate-900/80 hover:bg-slate-700/80 border border-slate-700 text-left transition-colors"
               >
-                <span className="block text-xs font-semibold text-white">Cashier Account</span>
-                <span className="block text-[10px] text-slate-400">cashier / cashier123</span>
+                <span className="block text-[11px] font-semibold text-white">Cashier</span>
+                <span className="block text-[9px] text-slate-400 font-mono mt-0.5">cashier</span>
               </button>
             </div>
           </div>
         </div>
 
         <p className="text-center text-xs text-slate-500 mt-5">
-          Multi-Tenant Isolated Database • Sri Lanka Rupees (LKR)
+          Commercial Multi-Tenant SaaS Platform • LKR Currency
         </p>
       </div>
     </main>

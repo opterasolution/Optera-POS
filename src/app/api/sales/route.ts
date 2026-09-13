@@ -6,12 +6,13 @@ import { Business } from "@/models/Business";
 import { Customer } from "@/models/Customer";
 import { InventoryMovement } from "@/models/InventoryMovement";
 import { AuditLog } from "@/models/AuditLog";
-import { requireAuth } from "@/lib/tenant";
+import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 import { createSaleSchema } from "@/lib/validations/sale";
 
 export async function POST(req: Request) {
   try {
     const context = await requireAuth();
+    await verifyActiveSubscription(context.businessId);
     const body = await req.json();
 
     const parsed = createSaleSchema.safeParse(body);
@@ -260,7 +261,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, sale: demoSale }, { status: 201 });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to record sale";
-    const status = message.includes("Unauthorized") ? 401 : 500;
+    const status = message.includes("Unauthorized") ? 401 : message.includes("Store") || message.includes("Suspended") || message.includes("Expired") ? 403 : 500;
     return NextResponse.json({ success: false, error: message }, { status });
   }
 }

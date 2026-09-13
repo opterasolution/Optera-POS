@@ -1,5 +1,8 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
 
+export type SubscriptionPlan = "TRIAL" | "BASIC" | "PROFESSIONAL" | "ENTERPRISE";
+export type SubscriptionStatus = "TRIAL" | "ACTIVE" | "EXPIRED" | "SUSPENDED" | "CANCELLED";
+
 export interface IBusiness extends Document {
   name: string;
   businessType: string;
@@ -20,6 +23,14 @@ export interface IBusiness extends Document {
     footerMessage: string;
     showLogo: boolean;
     defaultWidth: "58mm" | "80mm";
+  };
+  subscription: {
+    plan: SubscriptionPlan;
+    status: SubscriptionStatus;
+    startDate: Date;
+    expiryDate: Date;
+    maxProducts?: number;
+    maxUsers?: number;
   };
   isActive: boolean;
   createdAt: Date;
@@ -47,6 +58,25 @@ const BusinessSchema = new Schema<IBusiness>(
       footerMessage: { type: String, default: "Please come again" },
       showLogo: { type: Boolean, default: false },
       defaultWidth: { type: String, enum: ["58mm", "80mm"], default: "58mm" },
+    },
+    subscription: {
+      plan: {
+        type: String,
+        enum: ["TRIAL", "BASIC", "PROFESSIONAL", "ENTERPRISE"],
+        default: "TRIAL",
+      },
+      status: {
+        type: String,
+        enum: ["TRIAL", "ACTIVE", "EXPIRED", "SUSPENDED", "CANCELLED"],
+        default: "TRIAL",
+      },
+      startDate: { type: Date, default: Date.now },
+      expiryDate: {
+        type: Date,
+        default: () => new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // Default 14-day free trial
+      },
+      maxProducts: { type: Number, default: 500 },
+      maxUsers: { type: Number, default: 5 },
     },
     isActive: { type: Boolean, default: true },
   },

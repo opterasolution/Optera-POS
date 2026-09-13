@@ -26,6 +26,7 @@ export const authOptions: NextAuthOptions = {
         }
 
         const { username, password } = parsed.data;
+        const normalizedUsername = username.toLowerCase().trim();
 
         // Check if MongoDB is configured
         const hasDb = Boolean(process.env.MONGODB_URI);
@@ -33,43 +34,53 @@ export const authOptions: NextAuthOptions = {
         if (hasDb) {
           await connectToDatabase();
 
-          // Find user by username
-          let user = await User.findOne({
-            username: username.toLowerCase(),
-            isActive: true,
-          });
+          // If no Super Admin exists, auto-initialize the Platform Super Admin account!
+          const superAdminCount = await User.countDocuments({ role: "SUPER_ADMIN" });
+          if (superAdminCount === 0) {
+            const hashedSuperPass = await bcrypt.hash("superadmin123", 10);
+            await User.create({
+              name: "Platform Master Admin",
+              username: "superadmin",
+              password: hashedSuperPass,
+              role: "SUPER_ADMIN",
+              isActive: true,
+            });
+          }
 
-          // If no users exist in database yet, automatically initialize the first default Owner account!
-          const userCount = await User.countDocuments();
-          if (userCount === 0) {
-            let defaultBusiness = await Business.findOne();
-            if (!defaultBusiness) {
-              defaultBusiness = await Business.create({
-                name: "Kandy Super Grocers",
-                businessType: "Grocery & Retail",
-                ownerName: "Shop Owner",
-                phone: "0771234567",
-                currency: "LKR",
-                taxSettings: {
-                  enabled: false,
-                  name: "VAT",
-                  rate: 0,
-                  type: "INCLUSIVE",
-                },
-              });
-            }
+          // If no client business exists yet, create initial demo business
+          const businessCount = await Business.countDocuments();
+          if (businessCount === 0) {
+            const initialBiz = await Business.create({
+              name: "Kandy Super Grocers",
+              businessType: "Grocery & Retail",
+              ownerName: "Sunil Perera",
+              phone: "0771234567",
+              currency: "LKR",
+              subscription: {
+                plan: "TRIAL",
+                status: "ACTIVE",
+                startDate: new Date(),
+                expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+              },
+            });
 
-            const hashedPassword = await bcrypt.hash("admin123", 10);
-            user = await User.create({
-              businessId: defaultBusiness._id,
+            const hashedAdminPass = await bcrypt.hash("admin123", 10);
+            await User.create({
+              businessId: initialBiz._id,
               name: "Store Administrator",
               username: "admin",
-              password: hashedPassword,
+              password: hashedAdminPass,
               role: "OWNER",
               phone: "0771234567",
               isActive: true,
             });
           }
+
+          // Find user by username
+          const user = await User.findOne({
+            username: normalizedUsername,
+            isActive: true,
+          });
 
           if (!user) {
             throw new Error("Invalid username or password");
@@ -81,43 +92,65 @@ export const authOptions: NextAuthOptions = {
             throw new Error("Invalid username or password");
           }
 
-          // Get business name for session
-          const business = await Business.findById(user.businessId).select("name");
+          // If Super Admin, return platform context
+          if (user.role === "SUPER_ADMIN") {
+            return {
+              id: user._id.toString(),
+              name: user.name,
+              username: user.username,
+              role: "SUPER_ADMIN" as UserRole,
+            };
+          }
+
+          // For client store users, fetch store name
+          const business = user.businessId ? await Business.findById(user.businessId).select("name") : null;
 
           return {
             id: user._id.toString(),
             name: user.name,
             username: user.username,
-            businessId: user.businessId.toString(),
+            businessId: user.businessId?.toString(),
             businessName: business ? business.name : "Sri Lanka POS",
             role: user.role as UserRole,
           };
         }
 
-        // Demo / Development fallback when MONGODB_URI is not yet configured in .env.local
-        if (username === "admin" && password === "admin123") {
+        // ================= DEMO / DEVELOPMENT FALLBACK (NO DB) =================
+        // 1. Platform Super Admin (Commercial SaaS Owner)
+        if (normalizedUsername === "superadmin" && password === "superadmin123") {
+          return {
+            id: "demo_superadmin_1",
+            name: "Platform Master Admin",
+            username: "superadmin",
+            role: "SUPER_ADMIN" as UserRole,
+          };
+        }
+
+        // 2. Client Store Owner
+        if (normalizedUsername === "admin" && password === "admin123") {
           return {
             id: "demo_owner_1",
             name: "Demo Store Owner",
             username: "admin",
             businessId: "demo_biz_001",
-            businessName: "Lanka Super Mart (Demo)",
+            businessName: "Lanka Super Mart (Client Shop)",
             role: "OWNER" as UserRole,
           };
         }
 
-        if (username === "cashier" && password === "cashier123") {
+        // 3. Client Store Cashier
+        if (normalizedUsername === "cashier" && password === "cashier123") {
           return {
             id: "demo_cashier_1",
             name: "Nimal Perera (Cashier)",
             username: "cashier",
             businessId: "demo_biz_001",
-            businessName: "Lanka Super Mart (Demo)",
+            businessName: "Lanka Super Mart (Client Shop)",
             role: "CASHIER" as UserRole,
           };
         }
 
-        throw new Error("Invalid credentials. Try admin / admin123 or cashier / cashier123");
+        throw new Error("Invalid credentials. Use superadmin, admin, or cashier.");
       },
     }),
   ],

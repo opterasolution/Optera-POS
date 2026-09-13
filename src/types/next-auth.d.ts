@@ -4,7 +4,7 @@ import { UserRole } from "@/models/User";
 declare module "next-auth" {
   interface User extends DefaultUser {
     id: string;
-    businessId: string;
+    businessId?: string;
     businessName?: string;
     role: UserRole;
     username: string;
@@ -13,7 +13,7 @@ declare module "next-auth" {
   interface Session {
     user: {
       id: string;
-      businessId: string;
+      businessId?: string;
       businessName?: string;
       role: UserRole;
       username: string;
@@ -24,7 +24,7 @@ declare module "next-auth" {
 declare module "next-auth/jwt" {
   interface JWT {
     id: string;
-    businessId: string;
+    businessId?: string;
     businessName?: string;
     role: UserRole;
     username: string;

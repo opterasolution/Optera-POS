@@ -31,10 +31,14 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
 
   const role = session?.user?.role || "CASHIER";
-  const isOwner = role === "OWNER";
+  const isSuperAdmin = role === "SUPER_ADMIN";
+  const isOwner = role === "OWNER" || isSuperAdmin;
   const isManager = role === "MANAGER" || isOwner;
 
   const navItems = [
+    ...(isSuperAdmin
+      ? [{ label: "Super Admin Portal", href: "/admin", icon: Shield, highlight: true }]
+      : []),
     { label: "POS Counter", href: "/pos", icon: ShoppingCart, highlight: true },
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, minRole: "MANAGER" },
     { label: "Products", href: "/products", icon: Package, minRole: "MANAGER" },
@@ -99,7 +103,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <span
               className={cn(
                 "inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full mt-0.5",
-                role === "OWNER"
+                role === "SUPER_ADMIN"
+                  ? "bg-rose-950 text-rose-300 border border-rose-800/60 font-bold tracking-wide"
+                  : role === "OWNER"
                   ? "bg-purple-950 text-purple-300 border border-purple-800/60"
                   : role === "MANAGER"
                   ? "bg-emerald-950 text-emerald-300 border border-emerald-800/60"
@@ -107,7 +113,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
               )}
             >
               <Shield className="w-2.5 h-2.5" />
-              {role}
+              {role === "SUPER_ADMIN" ? "SUPER ADMIN" : role}
             </span>
           </div>
           <button
