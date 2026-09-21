@@ -5,6 +5,8 @@ import { AuditLog } from "@/models/AuditLog";
 import { requireAuth, requireRole } from "@/lib/tenant";
 import { businessSettingsSchema } from "@/lib/validations/business";
 
+import { Product } from "@/models/Product";
+
 // Default fallback settings for Demo / initial shop
 const defaultBusinessData = {
   name: "Kandy Super Grocers",
@@ -14,6 +16,14 @@ const defaultBusinessData = {
   email: "owner@kandygrocers.lk",
   address: "No. 45, Peradeniya Road, Kandy",
   currency: "LKR",
+  subscription: {
+    plan: "BASIC" as const,
+    status: "ACTIVE" as const,
+    startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+    expiryDate: new Date(Date.now() + 25 * 24 * 60 * 60 * 1000).toISOString(),
+    maxProducts: 1000,
+    maxUsers: 5,
+  },
   taxSettings: {
     enabled: false,
     name: "VAT",
@@ -34,10 +44,19 @@ export async function GET() {
 
     if (Boolean(process.env.MONGODB_URI)) {
       await connectToDatabase();
-      const business = await Business.findById(context.businessId);
+      const [business, productCount] = await Promise.all([
+        Business.findById(context.businessId).lean(),
+        Product.countDocuments({ businessId: context.businessId, isActive: true }),
+      ]);
 
       if (business) {
-        return NextResponse.json({ success: true, business });
+        return NextResponse.json({
+          success: true,
+          business: {
+            ...business,
+            productCount: productCount || 0,
+          },
+        });
       }
     }
 
@@ -47,6 +66,7 @@ export async function GET() {
       business: {
         _id: context.businessId,
         ...defaultBusinessData,
+        productCount: 145,
       },
     });
   } catch (error: unknown) {

@@ -27,6 +27,11 @@ import {
   Check,
   AlertCircle,
   ExternalLink,
+  Eye,
+  Key,
+  Activity,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
 
@@ -87,6 +92,36 @@ export default function SuperAdminDashboard() {
   const [isLicenseModalOpen, setIsLicenseModalOpen] = useState(false);
   const [selectedBusiness, setSelectedBusiness] = useState<ClientBusiness | null>(null);
 
+  // Inspect Store & Staff modal
+  const [isInspectModalOpen, setIsInspectModalOpen] = useState(false);
+  const [inspectBiz, setInspectBiz] = useState<ClientBusiness | null>(null);
+  const [inspectUsers, setInspectUsers] = useState<Array<{
+    _id: string;
+    name: string;
+    username: string;
+    role: string;
+    phone?: string;
+    isActive: boolean;
+    createdAt: string;
+  }>>([]);
+  const [inspectLoading, setInspectLoading] = useState(false);
+  const [resettingUserId, setResettingUserId] = useState<string | null>(null);
+  const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetFeedback, setResetFeedback] = useState("");
+
+  // Platform Activities
+  const [activities, setActivities] = useState<Array<{
+    _id: string;
+    businessName: string;
+    userName: string;
+    action: string;
+    entityType: string;
+    details?: any;
+    createdAt: string;
+  }>>([]);
+  const [showActivityStream, setShowActivityStream] = useState(true);
+
   // Onboard form state
   const [newBiz, setNewBiz] = useState({
     name: "",
@@ -116,19 +151,24 @@ export default function SuperAdminDashboard() {
   async function loadData() {
     setLoading(true);
     try {
-      const [bizRes, statsRes] = await Promise.all([
+      const [bizRes, statsRes, actRes] = await Promise.all([
         fetch("/api/admin/businesses"),
         fetch("/api/admin/stats"),
+        fetch("/api/admin/activity"),
       ]);
 
       const bizData = await bizRes.json();
       const statsData = await statsRes.json();
+      const actData = await actRes.json();
 
       if (bizData.success) {
         setBusinesses(bizData.businesses);
       }
       if (statsData.success) {
         setStats(statsData.stats);
+      }
+      if (actData.success) {
+        setActivities(actData.activities);
       }
     } catch (err) {
       console.error("Failed to load super admin data:", err);
@@ -293,6 +333,65 @@ export default function SuperAdminDashboard() {
       loadData();
     } catch (err) {
       console.error("Failed to toggle status:", err);
+    }
+  }
+
+  // Open Store Inspection & Staff Modal
+  async function openInspectModal(biz: ClientBusiness) {
+    setInspectBiz(biz);
+    setIsInspectModalOpen(true);
+    setInspectLoading(true);
+    setResettingUserId(null);
+    setNewPasswordInput("");
+    setResetFeedback("");
+
+    try {
+      const res = await fetch(`/api/admin/businesses/${biz._id}/users`);
+      const data = await res.json();
+      if (data.success && data.users) {
+        setInspectUsers(data.users);
+      }
+    } catch (err) {
+      console.error("Failed to load store users:", err);
+    } finally {
+      setInspectLoading(false);
+    }
+  }
+
+  // Handle Owner/Staff Password Reset by Super Admin
+  async function handleResetPassword(userId: string) {
+    if (!inspectBiz || !newPasswordInput || newPasswordInput.length < 4) {
+      setResetFeedback("Password must be at least 4 characters.");
+      return;
+    }
+
+    setResetLoading(true);
+    setResetFeedback("");
+
+    try {
+      const res = await fetch(`/api/admin/businesses/${inspectBiz._id}/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "RESET_PASSWORD",
+          userId,
+          newPassword: newPasswordInput,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setResetFeedback(data.error || "Failed to reset password.");
+        return;
+      }
+
+      setResetFeedback("Password successfully updated!");
+      setResettingUserId(null);
+      setNewPasswordInput("");
+    } catch {
+      setResetFeedback("Network error resetting password.");
+    } finally {
+      setResetLoading(false);
     }
   }
 
@@ -665,6 +764,15 @@ export default function SuperAdminDashboard() {
                         <td className="py-3.5 px-4 text-right">
                           <div className="inline-flex items-center gap-1.5">
                             <button
+                              onClick={() => openInspectModal(biz)}
+                              className="px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition inline-flex items-center gap-1"
+                              title="Inspect Store Staff & Details"
+                            >
+                              <Eye className="w-3 h-3 text-slate-400" />
+                              <span>Inspect</span>
+                            </button>
+
+                            <button
                               onClick={() => openLicenseManager(biz)}
                               className="px-2.5 py-1 text-xs font-medium rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 transition"
                             >
@@ -689,6 +797,85 @@ export default function SuperAdminDashboard() {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+        </section>
+
+        {/* Platform Live Activity Feed */}
+        <section className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+          <div
+            onClick={() => setShowActivityStream(!showActivityStream)}
+            className="p-4 bg-slate-900 border-b border-slate-800/80 flex items-center justify-between cursor-pointer hover:bg-slate-800/50 transition"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                <Activity className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-xs font-bold text-white flex items-center gap-2">
+                  <span>Live Platform Activity Stream</span>
+                  <span className="text-[10px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded">
+                    Audit Log
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Real-time SaaS events across all Sri Lankan client stores
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <span>{activities.length} recent events</span>
+              {showActivityStream ? (
+                <ChevronUp className="w-4 h-4" />
+              ) : (
+                <ChevronDown className="w-4 h-4" />
+              )}
+            </div>
+          </div>
+
+          {showActivityStream && (
+            <div className="divide-y divide-slate-800/60 text-xs">
+              {activities.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 text-xs">
+                  No recent activity logged.
+                </div>
+              ) : (
+                activities.slice(0, 8).map((act) => (
+                  <div
+                    key={act._id}
+                    className="p-3.5 px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-slate-800/30 transition"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${
+                          act.action.includes("ONBOARD")
+                            ? "bg-blue-950 text-blue-300 border border-blue-800/60"
+                            : act.action.includes("EXTEND") || act.action.includes("RENEW")
+                            ? "bg-emerald-950 text-emerald-300 border border-emerald-800/60"
+                            : act.action.includes("SUSPEND")
+                            ? "bg-rose-950 text-rose-300 border border-rose-800/60"
+                            : "bg-slate-800 text-slate-300 border border-slate-700"
+                        }`}
+                      >
+                        {act.action.replace(/_/g, " ")}
+                      </span>
+                      <div>
+                        <span className="font-semibold text-white">
+                          {act.businessName}
+                        </span>
+                        <span className="text-slate-400 text-[11px] ml-2">
+                          by {act.userName}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-[11px] text-slate-500 font-mono">
+                      {formatSLDateTime(act.createdAt)}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           )}
         </section>
@@ -1114,6 +1301,179 @@ export default function SuperAdminDashboard() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: Inspect Store & Staff Accounts */}
+      {isInspectModalOpen && inspectBiz && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center">
+                  <Eye className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <span>{inspectBiz.name}</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                      {inspectBiz.subscription?.plan}
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Store details, registered staff members, and credentials support
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsInspectModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 text-xs">
+              {resetFeedback && (
+                <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{resetFeedback}</span>
+                </div>
+              )}
+
+              {/* Store Summary Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+                <div>
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wider block">Store Owner</span>
+                  <span className="font-semibold text-white mt-0.5 block">{inspectBiz.ownerName}</span>
+                  <span className="text-slate-400 font-mono text-[11px]">{inspectBiz.phone}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wider block">Category</span>
+                  <span className="font-semibold text-blue-400 mt-0.5 block">{inspectBiz.businessType}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wider block">Total Sales</span>
+                  <span className="font-semibold text-emerald-400 mt-0.5 block">
+                    {formatCurrency(inspectBiz.totalSalesVolume || 0)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wider block">Catalog Size</span>
+                  <span className="font-semibold text-slate-200 mt-0.5 block">
+                    {inspectBiz.productCount || 0} Products
+                  </span>
+                </div>
+              </div>
+
+              {/* Staff Accounts Table */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Registered Staff Accounts ({inspectUsers.length})</span>
+                  </h4>
+                </div>
+
+                {inspectLoading ? (
+                  <div className="p-8 text-center text-slate-400">
+                    <RefreshCw className="w-5 h-5 animate-spin mx-auto text-blue-500 mb-2" />
+                    Loading staff members...
+                  </div>
+                ) : (
+                  <div className="bg-slate-950/40 rounded-xl border border-slate-800 overflow-hidden">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-800 bg-slate-900/60 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                          <th className="py-2.5 px-3">Name</th>
+                          <th className="py-2.5 px-3">Login ID</th>
+                          <th className="py-2.5 px-3">Role</th>
+                          <th className="py-2.5 px-3">Phone</th>
+                          <th className="py-2.5 px-3 text-right">Support Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {inspectUsers.map((user) => (
+                          <tr key={user._id} className="hover:bg-slate-800/30 transition">
+                            <td className="py-2.5 px-3 font-medium text-white">{user.name}</td>
+                            <td className="py-2.5 px-3 font-mono text-slate-300">@{user.username}</td>
+                            <td className="py-2.5 px-3">
+                              <span
+                                className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                  user.role === "OWNER"
+                                    ? "bg-purple-950 text-purple-300 border border-purple-800/60"
+                                    : user.role === "MANAGER"
+                                    ? "bg-emerald-950 text-emerald-300 border border-emerald-800/60"
+                                    : "bg-amber-950 text-amber-300 border border-amber-800/60"
+                                }`}
+                              >
+                                {user.role}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-slate-400">{user.phone || "—"}</td>
+                            <td className="py-2.5 px-3 text-right">
+                              {resettingUserId === user._id ? (
+                                <div className="inline-flex items-center gap-1.5">
+                                  <input
+                                    type="text"
+                                    placeholder="New Password"
+                                    value={newPasswordInput}
+                                    onChange={(e) => setNewPasswordInput(e.target.value)}
+                                    className="px-2 py-1 bg-slate-900 border border-slate-700 rounded text-xs text-white placeholder-slate-500 w-28 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  />
+                                  <button
+                                    onClick={() => handleResetPassword(user._id)}
+                                    disabled={resetLoading}
+                                    className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[11px] font-semibold transition disabled:opacity-50"
+                                  >
+                                    {resetLoading ? "Saving..." : "Save"}
+                                  </button>
+                                  <button
+                                    onClick={() => setResettingUserId(null)}
+                                    className="p-1 text-slate-400 hover:text-white"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setResettingUserId(user._id);
+                                    setNewPasswordInput("");
+                                    setResetFeedback("");
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-[11px] transition"
+                                  title="Reset password for client support"
+                                >
+                                  <Key className="w-3 h-3 text-amber-400" />
+                                  <span>Reset PIN</span>
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t border-slate-800 flex items-center justify-between bg-slate-950/40">
+              <span className="text-[11px] text-slate-500">
+                Created on {new Date(inspectBiz.createdAt).toLocaleDateString("en-GB")}
+              </span>
+              <button
+                onClick={() => setIsInspectModalOpen(false)}
+                className="px-4 py-2 text-xs font-medium rounded-xl bg-slate-800 hover:bg-slate-700 text-white transition"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

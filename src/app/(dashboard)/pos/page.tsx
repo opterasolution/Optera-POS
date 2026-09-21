@@ -60,6 +60,11 @@ interface BusinessSettings {
   phone: string;
   address: string;
   currency: string;
+  subscription?: {
+    plan: string;
+    status: string;
+    expiryDate?: string;
+  };
   taxSettings: {
     enabled: boolean;
     name: string;
@@ -290,6 +295,16 @@ export default function POSPage() {
       setStatusMessage({ type: "error", text: "Cart is empty. Add products to proceed." });
       return;
     }
+
+    const subStatus = business?.subscription?.status;
+    if (subStatus === "SUSPENDED" || subStatus === "EXPIRED") {
+      setStatusMessage({
+        type: "error",
+        text: `Store License ${subStatus}: Counter billing is temporarily paused. Please contact platform support at 077 123 4567 to renew.`,
+      });
+      return;
+    }
+
     setCashReceived(Math.ceil(netTotal).toString());
     setIsCheckoutOpen(true);
   };
