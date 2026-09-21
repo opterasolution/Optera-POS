@@ -22,8 +22,19 @@ import {
   Sparkles,
   Printer,
   ChevronRight,
+  Wifi,
+  WifiOff,
+  RefreshCw,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/formatters";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import {
+  saveCatalogCache,
+  getCatalogCache,
+  decrementLocalStockCache,
+  enqueueOfflineSale,
+  OfflineSaleRecord,
+} from "@/lib/offline-storage";
 
 interface Product {
   _id: string;
@@ -80,6 +91,18 @@ interface BusinessSettings {
 
 export default function POSPage() {
   const { data: session } = useSession();
+  const businessId = (session?.user as any)?.businessId || "default";
+
+  // Offline Network Resilience Hook
+  const {
+    isOnline,
+    wasOffline,
+    queuedCount,
+    isSyncing,
+    lastSyncResult,
+    refreshQueueCount,
+    syncQueuedSales,
+  } = useNetworkStatus(businessId);
 
   // State
   const [products, setProducts] = useState<Product[]>([]);
@@ -112,7 +135,7 @@ export default function POSPage() {
   // Barcode input ref
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
-  // Load Products, Categories, and Business Settings
+  // Load Products, Categories, and Business Settings (with offline fallback cache)
   const loadInitialData = async () => {
     try {
       setLoading(true);
@@ -128,11 +151,32 @@ export default function POSPage() {
         bizRes.json(),
       ]);
 
-      if (prodData.success) setProducts(prodData.products || []);
-      if (catData.success) setCategories(catData.categories || []);
-      if (bizData.success) setBusiness(bizData.business);
+      const fetchedProducts = prodData.success ? prodData.products || [] : [];
+      const fetchedCategories = catData.success ? catData.categories || [] : [];
+      const fetchedBusiness = bizData.success ? bizData.business : null;
+
+      if (prodData.success) setProducts(fetchedProducts);
+      if (catData.success) setCategories(fetchedCategories);
+      if (bizData.success) setBusiness(fetchedBusiness);
+
+      // Cache catalog locally for offline availability
+      if (fetchedProducts.length > 0) {
+        saveCatalogCache(businessId, fetchedProducts, fetchedCategories, fetchedBusiness);
+      }
     } catch {
-      setStatusMessage({ type: "error", text: "Failed to initialize POS counter." });
+      // Internet / server unreachable -> Hydrate catalog from offline cache
+      const cached = getCatalogCache(businessId);
+      if (cached.products && cached.products.length > 0) {
+        setProducts(cached.products as Product[]);
+        if (cached.categories) setCategories(cached.categories as Category[]);
+        if (cached.settings) setBusiness(cached.settings);
+        setStatusMessage({
+          type: "success",
+          text: `Offline Counter Mode: Loaded ${cached.products.length} products from local device cache.`,
+        });
+      } else {
+        setStatusMessage({ type: "error", text: "Failed to initialize POS counter and no offline cache available." });
+      }
     } finally {
       setLoading(false);
     }
@@ -140,7 +184,18 @@ export default function POSPage() {
 
   useEffect(() => {
     loadInitialData();
-  }, []);
+  }, [businessId]);
+
+  // Alert & refresh catalog when background sync finishes successfully
+  useEffect(() => {
+    if (lastSyncResult && lastSyncResult.syncedCount > 0) {
+      setStatusMessage({
+        type: "success",
+        text: `Connection Restored: ${lastSyncResult.syncedCount} offline sale(s) uploaded to cloud database!`,
+      });
+      loadInitialData();
+    }
+  }, [lastSyncResult]);
 
   // Keyboard shortcut: focus barcode input on F2
   useEffect(() => {
@@ -309,7 +364,7 @@ export default function POSPage() {
     setIsCheckoutOpen(true);
   };
 
-  // Complete Sale Submission
+  // Complete Sale Submission (with offline fallback and automatic queueing)
   const handleCompleteSale = async () => {
     if (paymentMethod === "CASH" && cashGivenNum < netTotal) {
       alert(`Cash received (Rs. ${cashGivenNum}) is less than total bill (Rs. ${netTotal.toFixed(2)}).`);
@@ -318,23 +373,111 @@ export default function POSPage() {
 
     setSubmittingSale(true);
 
-    try {
-      const salePayload = {
-        items: cart.map((item) => ({
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          discount: item.discount,
-        })),
-        customerName: customerName.trim() || "Walk-in Customer",
-        customerPhone: customerPhone.trim() || undefined,
+    const salePayload = {
+      items: cart.map((item) => ({
+        productId: item.productId,
+        name: item.name,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discount: item.discount,
+        total: item.unitPrice * item.quantity - (item.discount || 0),
+      })),
+      customerName: customerName.trim() || "Walk-in Customer",
+      customerPhone: customerPhone.trim() || undefined,
+      discountTotal: totalDiscount,
+      paymentMethod,
+      cashReceived: paymentMethod === "CASH" ? cashGivenNum : undefined,
+      changeGiven: paymentMethod === "CASH" ? changeDue : undefined,
+      paymentReference: paymentReference.trim() || undefined,
+      subtotal,
+      taxTotal: taxAmount,
+      netTotal,
+    };
+
+    // Fallback: Record sale locally in offline queue and update local counter stock
+    const recordOfflineSale = () => {
+      const offlineId = `off_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const tempInvoiceNumber = `OFFLINE-INV-${Date.now().toString().slice(-6)}`;
+      const nowIso = new Date().toISOString();
+
+      const offlineRecord: OfflineSaleRecord = {
+        offlineId,
+        items: salePayload.items,
+        customerName: salePayload.customerName,
+        customerPhone: salePayload.customerPhone,
+        discountTotal: salePayload.discountTotal,
+        paymentMethod: salePayload.paymentMethod as any,
+        cashReceived: salePayload.cashReceived,
+        changeGiven: salePayload.changeGiven,
+        paymentReference: salePayload.paymentReference,
+        subtotal: salePayload.subtotal,
+        taxTotal: salePayload.taxTotal,
+        netTotal: salePayload.netTotal,
+        createdAt: nowIso,
+        tempInvoiceNumber,
+      };
+
+      // 1. Enqueue in offline local storage
+      enqueueOfflineSale(businessId, offlineRecord);
+
+      // 2. Decrement local stock cache
+      decrementLocalStockCache(
+        businessId,
+        cart.map((item) => ({ productId: item.productId, quantity: item.quantity }))
+      );
+
+      // 3. Update in-memory products state
+      setProducts((prev) => {
+        const soldMap = new Map(cart.map((i) => [i.productId, i.quantity]));
+        return prev.map((p) => {
+          const soldQty = soldMap.get(p._id);
+          if (soldQty) {
+            return { ...p, stockQuantity: Math.max(0, p.stockQuantity - soldQty) };
+          }
+          return p;
+        });
+      });
+
+      // 4. Set completedSale for receipt modal & printing
+      const completedSaleObj = {
+        _id: offlineId,
+        offlineId,
+        invoiceNumber: tempInvoiceNumber,
+        cashierName: session?.user?.name || "Cashier",
+        customerName: offlineRecord.customerName,
+        customerPhone: offlineRecord.customerPhone,
+        items: salePayload.items,
+        subtotal,
         discountTotal: totalDiscount,
+        taxTotal: taxAmount,
+        netTotal,
         paymentMethod,
         cashReceived: paymentMethod === "CASH" ? cashGivenNum : undefined,
         changeGiven: paymentMethod === "CASH" ? changeDue : undefined,
-        paymentReference: paymentReference.trim() || undefined,
+        createdAt: nowIso,
+        isOffline: true,
       };
 
+      setCompletedSale(completedSaleObj);
+      setIsCheckoutOpen(false);
+      setCart([]);
+      setOrderDiscount(0);
+      refreshQueueCount();
+
+      setStatusMessage({
+        type: "success",
+        text: `Offline Sale Recorded (${tempInvoiceNumber}): Stored safely on counter device. Ready for printing & queued for cloud sync.`,
+      });
+    };
+
+    // If counter is already marked offline, bypass HTTP request immediately
+    if (!isOnline) {
+      recordOfflineSale();
+      setSubmittingSale(false);
+      return;
+    }
+
+    try {
       const res = await fetch("/api/sales", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -353,8 +496,9 @@ export default function POSPage() {
       } else {
         alert(data.error || "Failed to complete sale.");
       }
-    } catch {
-      alert("Error communicating with server. Please try again.");
+    } catch (networkError) {
+      console.warn("Network drop encountered during checkout; recording offline sale:", networkError);
+      recordOfflineSale();
     } finally {
       setSubmittingSale(false);
     }
@@ -411,15 +555,66 @@ export default function POSPage() {
               </form>
 
               {/* Text Search */}
-              <div className="w-48 sm:w-64 relative hidden sm:block">
+              <div className="w-36 sm:w-56 relative hidden sm:block">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search item name..."
+                  placeholder="Search item..."
                   className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+              </div>
+
+              {/* Network Status & Offline Resilience Queue */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {isOnline ? (
+                  <span
+                    title="Counter connected to cloud services"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <Wifi className="w-3.5 h-3.5" />
+                    <span className="hidden md:inline">Online</span>
+                  </span>
+                ) : (
+                  <span
+                    title="Network drop detected. Operating safely in offline mode."
+                    className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs animate-pulse"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    <WifiOff className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Offline</span>
+                  </span>
+                )}
+
+                {queuedCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const res = await syncQueuedSales();
+                      if (res && res.syncedCount > 0) {
+                        setStatusMessage({
+                          type: "success",
+                          text: `Synced ${res.syncedCount} queued sale(s) with cloud database!`,
+                        });
+                        loadInitialData();
+                      } else if (!isOnline) {
+                        setStatusMessage({
+                          type: "error",
+                          text: "Internet connection is down. Queued sales remain safe locally and will sync when reconnected.",
+                        });
+                      }
+                    }}
+                    disabled={isSyncing}
+                    title="Click to trigger manual cloud sync of locally queued counter sales"
+                    className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition shadow-sm disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
+                    <span>{queuedCount} Queued</span>
+                    <span className="hidden xl:inline text-[10px] font-normal opacity-90">• Sync</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -709,6 +904,14 @@ export default function POSPage() {
                 </button>
               </div>
 
+              {/* Offline Warning in Modal */}
+              {!isOnline && (
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-center gap-2">
+                  <WifiOff className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Offline Counter Mode: Transaction will be stored locally and synced when connection returns.</span>
+                </div>
+              )}
+
               {/* Bill Amount Highlight */}
               <div className="p-4 rounded-xl bg-blue-50/80 border border-blue-100 text-center">
                 <span className="text-xs text-blue-700 font-medium">Total Amount Due</span>
@@ -852,7 +1055,11 @@ export default function POSPage() {
                   disabled={submittingSale || (paymentMethod === "CASH" && cashGivenNum < netTotal)}
                   className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/25 transition-all disabled:opacity-50"
                 >
-                  {submittingSale ? "Recording Sale..." : "Complete & Confirm Sale"}
+                  {submittingSale
+                    ? "Recording Sale..."
+                    : isOnline
+                    ? "Complete & Confirm Sale"
+                    : "Complete Sale (Offline Mode)"}
                 </button>
               </div>
             </div>
@@ -889,6 +1096,11 @@ export default function POSPage() {
                 </div>
 
                 <div className="border-t border-dashed border-slate-300 pt-1.5 space-y-0.5 text-[10px]">
+                  {(completedSale.isOffline || completedSale.invoiceNumber?.startsWith("OFFLINE-")) && (
+                    <div className="my-1 py-1 border border-dashed border-amber-600 bg-amber-50 text-amber-950 text-center font-bold text-[10px] uppercase tracking-wider print:border-black print:text-black">
+                      * OFFLINE COUNTER SALE *
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span>Invoice: {completedSale.invoiceNumber}</span>
                     <span>{new Date(completedSale.createdAt).toLocaleDateString()}</span>
@@ -954,6 +1166,16 @@ export default function POSPage() {
                   {business?.receiptSettings?.footerMessage || "Please come again!"}
                 </div>
               </div>
+
+              {/* Offline Warning Notice */}
+              {(completedSale.isOffline || completedSale.invoiceNumber?.startsWith("OFFLINE-")) && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 flex items-start gap-2 print:hidden">
+                  <WifiOff className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Offline Resilience Active:</span> Broadband is disconnected. This sale was saved locally to counter device memory and stock updated. It will auto-sync with the cloud when internet reconnects.
+                  </div>
+                </div>
+              )}
 
               {/* Action Buttons */}
               <div className="flex items-center gap-2 pt-2">

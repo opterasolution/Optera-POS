@@ -33,6 +33,7 @@ export interface ThermalReceiptProps {
     cashReceived?: number;
     changeGiven?: number;
     paymentReference?: string;
+    isOffline?: boolean;
     createdAt: string | Date;
   };
   width?: "58mm" | "80mm";
@@ -74,6 +75,11 @@ export default function ThermalReceipt({
 
       {/* Invoice Meta Section */}
       <div className="border-t border-dashed border-zinc-400 my-2 pt-2 space-y-0.5 text-[10px]">
+        {(sale.isOffline || sale.invoiceNumber.startsWith("OFFLINE-")) && (
+          <div className="my-1 py-0.5 border border-dashed border-amber-600 bg-amber-50 text-amber-950 text-center font-bold text-[9px] uppercase tracking-wider print:border-black print:text-black">
+            * OFFLINE COUNTER SALE *
+          </div>
+        )}
         <div className="flex justify-between">
           <span className="font-bold">INVOICE:</span>
           <span className="font-bold">{sale.invoiceNumber}</span>
