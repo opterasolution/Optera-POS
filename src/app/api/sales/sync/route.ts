@@ -7,6 +7,7 @@ import { Business } from "@/models/Business";
 import { Customer } from "@/models/Customer";
 import { InventoryMovement } from "@/models/InventoryMovement";
 import { AuditLog } from "@/models/AuditLog";
+import { Shift } from "@/models/Shift";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 
 interface OfflineSaleItemPayload {
@@ -28,6 +29,7 @@ interface OfflineSalePayload {
   paymentReference?: string;
   registerId?: string;
   registerName?: string;
+  shiftId?: string;
   createdAt?: string;
 }
 
@@ -70,6 +72,7 @@ export async function POST(req: Request) {
           paymentReference,
           registerId,
           registerName,
+          shiftId,
           createdAt,
         } = saleItem;
 
@@ -192,6 +195,19 @@ export async function POST(req: Request) {
           customerId = customer._id;
         }
 
+        // Resolve shiftId (use provided or active shift for register)
+        let resolvedShiftId = shiftId && shiftId.trim() ? new Types.ObjectId(shiftId) : undefined;
+        if (!resolvedShiftId && registerId && registerId.trim()) {
+          const activeShift = await Shift.findOne({
+            businessId,
+            registerId: new Types.ObjectId(registerId),
+            status: "OPEN",
+          });
+          if (activeShift) {
+            resolvedShiftId = activeShift._id;
+          }
+        }
+
         // 6. Create permanent Sale record
         const sale = await Sale.create({
           businessId,
@@ -213,6 +229,7 @@ export async function POST(req: Request) {
           paymentReference,
           registerId: registerId && registerId.trim() ? new Types.ObjectId(registerId) : undefined,
           registerName: registerName?.trim() || "Counter 01 (Main)",
+          shiftId: resolvedShiftId,
           status: "COMPLETED",
           createdAt: createdAt ? new Date(createdAt) : new Date(),
         });

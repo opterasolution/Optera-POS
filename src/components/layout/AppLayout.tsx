@@ -64,6 +64,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { label: "Products", href: "/products", icon: Package, minRole: "MANAGER" },
     { label: "Inventory", href: "/inventory", icon: Boxes, minRole: "MANAGER" },
     { label: "Sales History", href: "/sales", icon: Receipt },
+    { label: "Shifts & Drawers", href: "/shifts", icon: Clock },
     { label: "Customers", href: "/customers", icon: Users },
     { label: "Reports", href: "/reports", icon: BarChart3, minRole: "OWNER" },
     { label: "Store Settings", href: "/settings", icon: Settings, minRole: "OWNER" },

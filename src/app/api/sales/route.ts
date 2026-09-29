@@ -7,6 +7,7 @@ import { Business } from "@/models/Business";
 import { Customer } from "@/models/Customer";
 import { InventoryMovement } from "@/models/InventoryMovement";
 import { AuditLog } from "@/models/AuditLog";
+import { Shift } from "@/models/Shift";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 import { createSaleSchema } from "@/lib/validations/sale";
 
@@ -34,6 +35,7 @@ export async function POST(req: Request) {
       paymentReference,
       registerId,
       registerName,
+      shiftId,
     } = parsed.data;
 
     if (Boolean(process.env.MONGODB_URI)) {
@@ -177,7 +179,20 @@ export async function POST(req: Request) {
         customerId = customer._id;
       }
 
-      // 8. Create Sale record
+      // 8. Determine active shift if not explicitly provided
+      let resolvedShiftId = shiftId && shiftId.trim() ? new Types.ObjectId(shiftId) : undefined;
+      if (!resolvedShiftId && registerId && registerId.trim()) {
+        const activeShift = await Shift.findOne({
+          businessId,
+          registerId: new Types.ObjectId(registerId),
+          status: "OPEN",
+        });
+        if (activeShift) {
+          resolvedShiftId = activeShift._id;
+        }
+      }
+
+      // 9. Create Sale record
       const sale = await Sale.create({
         businessId,
         invoiceNumber,
@@ -197,6 +212,7 @@ export async function POST(req: Request) {
         paymentReference,
         registerId: registerId && registerId.trim() ? new Types.ObjectId(registerId) : undefined,
         registerName: registerName?.trim() || "Counter 01 (Main)",
+        shiftId: resolvedShiftId,
         status: "COMPLETED",
       });
 
@@ -279,6 +295,7 @@ export async function GET(req: Request) {
     const paymentMethod = searchParams.get("paymentMethod");
     const dateRange = searchParams.get("dateRange") || "all";
     const registerId = searchParams.get("registerId");
+    const shiftId = searchParams.get("shiftId");
 
     if (Boolean(process.env.MONGODB_URI)) {
       await connectToDatabase();
@@ -293,6 +310,10 @@ export async function GET(req: Request) {
 
       if (registerId && registerId !== "all") {
         filter.registerId = registerId;
+      }
+
+      if (shiftId && shiftId !== "all") {
+        filter.shiftId = shiftId;
       }
 
       if (query) {

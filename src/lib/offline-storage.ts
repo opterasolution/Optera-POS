@@ -41,6 +41,7 @@ export interface OfflineSaleRecord {
   paymentReference?: string;
   registerId?: string;
   registerName?: string;
+  shiftId?: string;
   subtotal: number;
   taxTotal: number;
   netTotal: number;
