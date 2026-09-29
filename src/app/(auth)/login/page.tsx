@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Store, Lock, User, Eye, EyeOff, ShieldCheck, ArrowRight, AlertCircle, Crown } from "lucide-react";
+import { Store, Lock, User, Eye, EyeOff, ShieldCheck, ArrowRight, AlertCircle, Crown, Sparkles } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -145,8 +146,20 @@ export default function LoginPage() {
             </button>
           </form>
 
+          {/* Create New Store Action */}
+          <div className="mt-4 pt-4 border-t border-slate-700/60 text-center">
+            <span className="text-xs text-slate-400">Need a POS for your shop? </span>
+            <Link
+              href="/register"
+              className="text-xs font-bold text-blue-400 hover:text-blue-300 transition inline-flex items-center gap-1"
+            >
+              <span>Start 14-Day Free Trial</span>
+              <ArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
+
           {/* Quick Demo Credentials Assistant */}
-          <div className="mt-6 pt-5 border-t border-slate-700/60">
+          <div className="mt-4 pt-4 border-t border-slate-700/60">
             <p className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold mb-2 text-center">
               Quick Test Accounts (Click to Auto-Fill)
             </p>
@@ -183,7 +196,18 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p className="text-center text-xs text-slate-500 mt-5">
+        {/* Start Trial Banner */}
+        <div className="mt-4 text-center">
+          <Link
+            href="/register"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 hover:text-blue-300 border border-blue-500/20 text-xs font-bold transition-all shadow-sm"
+          >
+            <Sparkles className="w-4 h-4 text-amber-400" />
+            <span>Register New Store (14-Day Free Trial)</span>
+          </Link>
+        </div>
+
+        <p className="text-center text-xs text-slate-500 mt-4">
           Commercial Multi-Tenant SaaS Platform • LKR Currency
         </p>
       </div>

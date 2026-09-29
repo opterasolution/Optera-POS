@@ -16,6 +16,10 @@ import {
   Store,
   Clock,
   CheckCircle,
+  CheckCircle2,
+  X,
+  Settings,
+  Printer,
 } from "lucide-react";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
 
@@ -51,6 +55,7 @@ export default function DashboardPage() {
   const { data: session } = useSession();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showChecklist, setShowChecklist] = useState(true);
 
   useEffect(() => {
     async function loadDashboard() {
@@ -105,6 +110,85 @@ export default function DashboardPage() {
             </Link>
           </div>
         </div>
+
+        {/* Store Launch & Getting Started Checklist */}
+        {showChecklist && (
+          <div className="bg-gradient-to-r from-blue-900/10 via-indigo-900/10 to-blue-950/5 border border-blue-200/80 rounded-2xl p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Store Setup & Launch Checklist
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Complete these essential steps to get the most out of your 14-day free trial.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowChecklist(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-200/50 transition cursor-pointer"
+                title="Dismiss checklist"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-2">
+              <div className="p-3 bg-white rounded-xl border border-slate-200 flex items-start gap-2.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-xs font-bold text-slate-900">Store Registered</div>
+                  <div className="text-[11px] text-slate-500">14-Day Free Trial Active</div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-white rounded-xl border border-slate-200 flex items-start gap-2.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-xs font-bold text-slate-900">Inventory Seeded</div>
+                  <div className="text-[11px] text-slate-500">{stats.totalProducts} Starter Products</div>
+                </div>
+              </div>
+
+              <Link
+                href="/pos"
+                className={`p-3 bg-white rounded-xl border transition flex items-start gap-2.5 ${
+                  stats.todayTransactions > 0
+                    ? "border-emerald-200 hover:border-emerald-300"
+                    : "border-blue-300 ring-2 ring-blue-500/20 hover:border-blue-400"
+                }`}
+              >
+                {stats.todayTransactions > 0 ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <ShoppingCart className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <div className="text-xs font-bold text-slate-900">
+                    {stats.todayTransactions > 0 ? "First Sale Completed!" : "Ring Up First Sale"}
+                  </div>
+                  <div className="text-[11px] text-blue-600 font-medium">Open POS Counter →</div>
+                </div>
+              </Link>
+
+              <Link
+                href="/settings"
+                className="p-3 bg-white rounded-xl border border-slate-200 hover:border-slate-300 transition flex items-start gap-2.5"
+              >
+                <Printer className="w-4 h-4 text-slate-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-xs font-bold text-slate-900">Printer & Receipts</div>
+                  <div className="text-[11px] text-slate-500">Customize 58mm/80mm →</div>
+                </div>
+              </Link>
+            </div>
+          </div>
+        )}
 
         {/* 4 Key Metric Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

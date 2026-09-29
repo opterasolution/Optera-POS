@@ -32,6 +32,9 @@ export interface IBusiness extends Document {
     maxProducts?: number;
     maxUsers?: number;
   };
+  onboardingCompleted?: boolean;
+  onboardingStep?: number;
+  catalogPreset?: string;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -78,6 +81,9 @@ const BusinessSchema = new Schema<IBusiness>(
       maxProducts: { type: Number, default: 500 },
       maxUsers: { type: Number, default: 5 },
     },
+    onboardingCompleted: { type: Boolean, default: false },
+    onboardingStep: { type: Number, default: 1 },
+    catalogPreset: { type: String, default: "GROCERY" },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }
