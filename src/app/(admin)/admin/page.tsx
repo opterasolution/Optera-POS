@@ -32,8 +32,15 @@ import {
   Activity,
   ChevronDown,
   ChevronUp,
+  Receipt,
+  FileText,
+  DollarSign,
+  BadgePercent,
 } from "lucide-react";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
+import SubscriptionInvoiceReceipt, {
+  SubscriptionInvoiceData,
+} from "@/components/receipts/SubscriptionInvoiceReceipt";
 
 interface BusinessSubscription {
   plan: "TRIAL" | "BASIC" | "PROFESSIONAL" | "ENTERPRISE";
@@ -86,6 +93,56 @@ export default function SuperAdminDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [planFilter, setPlanFilter] = useState<string>("ALL");
+
+  // Tab Navigation: "STORES" | "BILLING" | "ACTIVITIES"
+  const [activeTab, setActiveTab] = useState<"STORES" | "BILLING" | "ACTIVITIES">("STORES");
+
+  // Billing & Invoices state
+  const [invoices, setInvoices] = useState<SubscriptionInvoiceData[]>([]);
+  const [billingSummary, setBillingSummary] = useState<{
+    totalCollected: number;
+    totalInvoicesCount: number;
+    thisMonthCollected: number;
+    thisMonthCount: number;
+    activePayingShops: number;
+    upcomingExpirations: Array<{
+      _id: string;
+      name: string;
+      ownerName: string;
+      phone: string;
+      subscription: {
+        plan: string;
+        status: string;
+        expiryDate: string;
+      };
+    }>;
+    methodStats: Array<{ _id: string; total: number; count: number }>;
+  } | null>(null);
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [billingSearchQuery, setBillingSearchQuery] = useState("");
+  const [billingStatusFilter, setBillingStatusFilter] = useState("ALL");
+
+  // Record Subscription Payment Modal state
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [paymentForm, setPaymentForm] = useState({
+    businessId: "",
+    plan: "BASIC" as "BASIC" | "PROFESSIONAL" | "ENTERPRISE",
+    billingCycle: "MONTHLY" as "MONTHLY" | "QUARTERLY" | "BI_ANNUAL" | "ANNUAL",
+    durationMonths: 1,
+    amount: 3500,
+    discountAmount: 0,
+    paymentMethod: "BANK_TRANSFER" as "BANK_TRANSFER" | "CASH" | "ONLINE_CARD" | "CHEQUE" | "OTHER",
+    bankName: "Commercial Bank of Ceylon",
+    paymentReference: "",
+    paymentDate: new Date().toISOString().split("T")[0],
+    notes: "",
+    autoExtendLicense: true,
+  });
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const [paymentFeedback, setPaymentFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // Selected Invoice for Official Receipt Modal
+  const [selectedReceiptInvoice, setSelectedReceiptInvoice] = useState<SubscriptionInvoiceData | null>(null);
 
   // Modal states
   const [isOnboardOpen, setIsOnboardOpen] = useState(false);
@@ -151,15 +208,17 @@ export default function SuperAdminDashboard() {
   async function loadData() {
     setLoading(true);
     try {
-      const [bizRes, statsRes, actRes] = await Promise.all([
+      const [bizRes, statsRes, actRes, billRes] = await Promise.all([
         fetch("/api/admin/businesses"),
         fetch("/api/admin/stats"),
         fetch("/api/admin/activity"),
+        fetch("/api/admin/billing"),
       ]);
 
       const bizData = await bizRes.json();
       const statsData = await statsRes.json();
       const actData = await actRes.json();
+      const billData = await billRes.json();
 
       if (bizData.success) {
         setBusinesses(bizData.businesses);
@@ -169,6 +228,10 @@ export default function SuperAdminDashboard() {
       }
       if (actData.success) {
         setActivities(actData.activities);
+      }
+      if (billData.success) {
+        setInvoices(billData.invoices || []);
+        setBillingSummary(billData.summary || null);
       }
     } catch (err) {
       console.error("Failed to load super admin data:", err);
@@ -395,6 +458,109 @@ export default function SuperAdminDashboard() {
     }
   }
 
+  // Pricing calculation helper
+  function calculateSubscriptionPricing(plan: string, cycle: string) {
+    const rates: Record<string, number> = {
+      BASIC: 3500,
+      PROFESSIONAL: 7500,
+      ENTERPRISE: 15000,
+      TRIAL: 0,
+    };
+    const monthlyRate = rates[plan] || 3500;
+    let months = 1;
+    let discount = 0;
+
+    if (cycle === "QUARTERLY") months = 3;
+    else if (cycle === "BI_ANNUAL") months = 6;
+    else if (cycle === "ANNUAL") {
+      months = 12;
+      discount = monthlyRate * 2; // 2 months free prepay incentive
+    }
+
+    const totalBeforeDiscount = monthlyRate * months;
+    const finalAmount = Math.max(0, totalBeforeDiscount - discount);
+
+    return { durationMonths: months, amount: finalAmount, discountAmount: discount };
+  }
+
+  // Open Record Payment Modal for a business
+  function openRecordPaymentForStore(biz?: ClientBusiness | { _id: string; name: string; subscription?: any }) {
+    const targetBizId = biz?._id || (businesses[0]?._id || "");
+    const foundBiz = businesses.find((b) => b._id === targetBizId);
+    const plan = (foundBiz?.subscription?.plan === "TRIAL" ? "BASIC" : foundBiz?.subscription?.plan) || "BASIC";
+    const pricing = calculateSubscriptionPricing(plan, "MONTHLY");
+
+    setPaymentForm({
+      businessId: targetBizId,
+      plan: plan as any,
+      billingCycle: "MONTHLY",
+      durationMonths: pricing.durationMonths,
+      amount: pricing.amount,
+      discountAmount: pricing.discountAmount,
+      paymentMethod: "BANK_TRANSFER",
+      bankName: "Commercial Bank of Ceylon",
+      paymentReference: "",
+      paymentDate: new Date().toISOString().split("T")[0],
+      notes: foundBiz ? `Subscription renewal for ${foundBiz.name}` : "",
+      autoExtendLicense: true,
+    });
+    setPaymentFeedback(null);
+    setIsPaymentModalOpen(true);
+  }
+
+  // Handle plan or cycle change in payment form
+  function handlePaymentPlanOrCycleChange(newPlan: string, newCycle: string) {
+    const pricing = calculateSubscriptionPricing(newPlan, newCycle);
+    setPaymentForm((prev) => ({
+      ...prev,
+      plan: newPlan as any,
+      billingCycle: newCycle as any,
+      durationMonths: pricing.durationMonths,
+      amount: pricing.amount,
+      discountAmount: pricing.discountAmount,
+    }));
+  }
+
+  // Submit recorded subscription payment
+  async function handleRecordPaymentSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!paymentForm.businessId) {
+      setPaymentFeedback({ type: "error", text: "Please select a client store." });
+      return;
+    }
+
+    setPaymentSubmitting(true);
+    setPaymentFeedback(null);
+
+    try {
+      const res = await fetch("/api/admin/billing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(paymentForm),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setPaymentFeedback({ type: "error", text: data.error || "Failed to record payment." });
+        return;
+      }
+
+      setPaymentFeedback({ type: "success", text: data.message || "Payment recorded successfully!" });
+      loadData();
+
+      setTimeout(() => {
+        setIsPaymentModalOpen(false);
+        if (data.invoice) {
+          setSelectedReceiptInvoice(data.invoice);
+        }
+      }, 1000);
+    } catch {
+      setPaymentFeedback({ type: "error", text: "Network error recording payment." });
+    } finally {
+      setPaymentSubmitting(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* Top Super Admin Header */}
@@ -512,9 +678,55 @@ export default function SuperAdminDashboard() {
           </div>
         </section>
 
-        {/* Action Header & Filtering Bar */}
-        <section className="space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        {/* Navigation Tabs: Stores | Billing & Revenue | Activity */}
+        <div className="flex items-center gap-2 border-b border-slate-800 pb-2 overflow-x-auto">
+          <button
+            onClick={() => setActiveTab("STORES")}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+              activeTab === "STORES"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20"
+                : "bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800"
+            }`}
+          >
+            <Store className="w-4 h-4" />
+            <span>Client Stores ({businesses.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("BILLING")}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+              activeTab === "BILLING"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20"
+                : "bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800"
+            }`}
+          >
+            <CreditCard className="w-4 h-4" />
+            <span>Billing & Revenue</span>
+            {billingSummary?.upcomingExpirations && billingSummary.upcomingExpirations.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-slate-950 font-extrabold text-[10px]">
+                {billingSummary.upcomingExpirations.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab("ACTIVITIES")}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+              activeTab === "ACTIVITIES"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20"
+                : "bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800"
+            }`}
+          >
+            <Activity className="w-4 h-4" />
+            <span>Platform Activity ({activities.length})</span>
+          </button>
+        </div>
+
+        {/* ================= TAB 1: CLIENT STORES ================= */}
+        {activeTab === "STORES" && (
+          <div className="space-y-4">
+            <section className="space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
                 <span>Client Store Directory</span>
@@ -764,6 +976,15 @@ export default function SuperAdminDashboard() {
                         <td className="py-3.5 px-4 text-right">
                           <div className="inline-flex items-center gap-1.5">
                             <button
+                              onClick={() => openRecordPaymentForStore(biz)}
+                              className="px-2 py-1 text-xs font-semibold rounded-lg bg-emerald-950/40 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-800/60 transition inline-flex items-center gap-1"
+                              title="Record Subscription Payment"
+                            >
+                              <CreditCard className="w-3 h-3 text-emerald-400" />
+                              <span>+ Payment</span>
+                            </button>
+
+                            <button
                               onClick={() => openInspectModal(biz)}
                               className="px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition inline-flex items-center gap-1"
                               title="Inspect Store Staff & Details"
@@ -800,85 +1021,381 @@ export default function SuperAdminDashboard() {
             </div>
           )}
         </section>
+      </div>
+    )}
 
-        {/* Platform Live Activity Feed */}
-        <section className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
-          <div
-            onClick={() => setShowActivityStream(!showActivityStream)}
-            className="p-4 bg-slate-900 border-b border-slate-800/80 flex items-center justify-between cursor-pointer hover:bg-slate-800/50 transition"
-          >
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
-                <Activity className="w-4 h-4" />
-              </div>
+        {/* ================= TAB 2: BILLING & REVENUE HUB ================= */}
+        {activeTab === "BILLING" && (
+          <div className="space-y-6">
+            {/* Top Bar: Title & + Record Payment Button */}
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
-                <h3 className="text-xs font-bold text-white flex items-center gap-2">
-                  <span>Live Platform Activity Stream</span>
-                  <span className="text-[10px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded">
-                    Audit Log
-                  </span>
-                </h3>
-                <p className="text-[11px] text-slate-400">
-                  Real-time SaaS events across all Sri Lankan client stores
+                <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                  <CreditCard className="w-5 h-5 text-blue-400" />
+                  <span>SaaS Subscription Billing & Invoices</span>
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Record client payments, track recurring revenue, and issue official SaaS expense receipts.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={loadData}
+                  disabled={loading}
+                  className="p-2 text-slate-400 hover:text-white bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl transition"
+                  title="Refresh Billing Data"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => openRecordPaymentForStore()}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ Record Subscription Payment</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Billing Revenue KPI Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-1">
+                <div className="flex items-center justify-between text-slate-400 text-xs">
+                  <span>Total Collected</span>
+                  <DollarSign className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div className="text-2xl font-black text-emerald-400 font-mono">
+                  {formatCurrency(billingSummary?.totalCollected || 0)}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  {billingSummary?.totalInvoicesCount || invoices.length} total invoice payment(s)
+                </p>
+              </div>
+
+              <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-1">
+                <div className="flex items-center justify-between text-slate-400 text-xs">
+                  <span>This Month Collected</span>
+                  <Calendar className="w-4 h-4 text-blue-400" />
+                </div>
+                <div className="text-2xl font-black text-blue-400 font-mono">
+                  {formatCurrency(billingSummary?.thisMonthCollected || 0)}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  {billingSummary?.thisMonthCount || 0} payment(s) in current calendar month
+                </p>
+              </div>
+
+              <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-1">
+                <div className="flex items-center justify-between text-slate-400 text-xs">
+                  <span>Monthly Recurring Rev (MRR)</span>
+                  <TrendingUp className="w-4 h-4 text-indigo-400" />
+                </div>
+                <div className="text-2xl font-black text-indigo-300 font-mono">
+                  {formatCurrency(stats?.estimatedMRR || 0)}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  From {billingSummary?.activePayingShops || stats?.activeSubscriptions || 0} active paying shops
+                </p>
+              </div>
+
+              <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-1">
+                <div className="flex items-center justify-between text-slate-400 text-xs">
+                  <span>Renewals Due (14 Days)</span>
+                  <Clock className="w-4 h-4 text-amber-400" />
+                </div>
+                <div className="text-2xl font-black text-amber-400 font-mono">
+                  {billingSummary?.upcomingExpirations?.length || 0}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Stores requiring license extension
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <span>{activities.length} recent events</span>
-              {showActivityStream ? (
-                <ChevronUp className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
+            {/* Upcoming Expirations Action Banner */}
+            {billingSummary?.upcomingExpirations && billingSummary.upcomingExpirations.length > 0 && (
+              <div className="bg-amber-950/30 border border-amber-800/60 rounded-2xl p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-amber-300 font-bold text-xs uppercase tracking-wider">
+                    <AlertTriangle className="w-4 h-4 text-amber-400" />
+                    <span>Upcoming Store License Expirations (Next 14 Days)</span>
+                  </div>
+                  <span className="text-[11px] text-amber-400/80">
+                    Reach out to owners to collect renewal fees
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {billingSummary.upcomingExpirations.map((exp) => {
+                    const daysLeft = Math.ceil(
+                      (new Date(exp.subscription.expiryDate).getTime() - Date.now()) /
+                        (1000 * 60 * 60 * 24)
+                    );
+                    return (
+                      <div
+                        key={exp._id}
+                        className="bg-slate-900/90 border border-amber-800/40 rounded-xl p-3.5 flex flex-col justify-between gap-3"
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-2">
+                            <h4 className="font-bold text-white text-xs truncate">{exp.name}</h4>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase shrink-0 ${
+                                daysLeft <= 3
+                                  ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                                  : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                              }`}
+                            >
+                              {daysLeft <= 0 ? "Expired" : `${daysLeft}d left`}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-1">
+                            Owner: <span className="text-slate-300 font-medium">{exp.ownerName}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-400">
+                            Current Plan: <span className="text-blue-400 font-mono">{exp.subscription.plan}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => openRecordPaymentForStore(exp)}
+                            className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 shadow-sm cursor-pointer"
+                          >
+                            <CreditCard className="w-3.5 h-3.5" />
+                            <span>Record Renewal</span>
+                          </button>
+                          <a
+                            href={`tel:${exp.phone}`}
+                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition"
+                            title={`Call ${exp.phone}`}
+                          >
+                            <Phone className="w-3.5 h-3.5 text-blue-400" />
+                          </a>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Invoices Search and Filter Bar */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search invoices by number, store name, reference code..."
+                  value={billingSearchQuery}
+                  onChange={(e) => setBillingSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                {["ALL", "PAID", "PENDING"].map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => setBillingStatusFilter(st)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+                      billingStatusFilter === st
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800"
+                    }`}
+                  >
+                    {st === "ALL" ? "All Invoices" : st}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Subscription Invoices Table */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950 text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="p-3.5 pl-5">Invoice #</th>
+                      <th className="p-3.5">Client Store</th>
+                      <th className="p-3.5">Plan & Billing Cycle</th>
+                      <th className="p-3.5">Coverage Period</th>
+                      <th className="p-3.5 text-right">Amount (LKR)</th>
+                      <th className="p-3.5">Payment Method</th>
+                      <th className="p-3.5 text-center">Status</th>
+                      <th className="p-3.5 pr-5 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                    {invoices.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="p-8 text-center text-slate-500 text-xs">
+                          No subscription invoices recorded yet. Click "+ Record Subscription Payment" above.
+                        </td>
+                      </tr>
+                    ) : (
+                      invoices
+                        .filter((inv) => {
+                          const q = billingSearchQuery.toLowerCase();
+                          const matches =
+                            !q ||
+                            inv.invoiceNumber.toLowerCase().includes(q) ||
+                            inv.businessName.toLowerCase().includes(q) ||
+                            inv.ownerName.toLowerCase().includes(q) ||
+                            (inv.paymentReference || "").toLowerCase().includes(q);
+                          const matchesStatus =
+                            billingStatusFilter === "ALL" || inv.status === billingStatusFilter;
+                          return matches && matchesStatus;
+                        })
+                        .map((inv) => (
+                          <tr key={inv._id || inv.invoiceNumber} className="hover:bg-slate-800/40 transition">
+                            <td className="p-3.5 pl-5 font-mono font-bold text-blue-400">
+                              {inv.invoiceNumber}
+                            </td>
+                            <td className="p-3.5">
+                              <div className="font-semibold text-white">{inv.businessName}</div>
+                              <div className="text-[11px] text-slate-400">{inv.ownerName} • {inv.phone}</div>
+                            </td>
+                            <td className="p-3.5">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-950 text-blue-300 border border-blue-800/60">
+                                {inv.plan}
+                              </span>
+                              <span className="text-[11px] text-slate-400 ml-1.5 capitalize">
+                                {inv.billingCycle.toLowerCase().replace(/_/g, " ")} ({inv.durationMonths}m)
+                              </span>
+                            </td>
+                            <td className="p-3.5 font-mono text-[11px] text-slate-400">
+                              {new Date(inv.periodStart).toLocaleDateString("en-GB")} –{" "}
+                              {new Date(inv.periodEnd).toLocaleDateString("en-GB")}
+                            </td>
+                            <td className="p-3.5 text-right font-mono font-bold text-white text-xs">
+                              {formatCurrency(inv.amount)}
+                            </td>
+                            <td className="p-3.5">
+                              <span className="capitalize text-slate-300 font-medium">
+                                {inv.paymentMethod.replace(/_/g, " ").toLowerCase()}
+                              </span>
+                              {inv.paymentReference && (
+                                <div className="text-[10px] font-mono text-slate-500">
+                                  Ref: {inv.paymentReference}
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-3.5 text-center">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                  inv.status === "PAID"
+                                    ? "bg-emerald-950 text-emerald-300 border border-emerald-800/60"
+                                    : "bg-amber-950 text-amber-300 border border-amber-800/60"
+                                }`}
+                              >
+                                {inv.status}
+                              </span>
+                            </td>
+                            <td className="p-3.5 pr-5 text-right">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedReceiptInvoice(inv)}
+                                className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+                              >
+                                <Receipt className="w-3.5 h-3.5" />
+                                <span>View Receipt</span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
+        )}
 
-          {showActivityStream && (
-            <div className="divide-y divide-slate-800/60 text-xs">
-              {activities.length === 0 ? (
-                <div className="p-8 text-center text-slate-500 text-xs">
-                  No recent activity logged.
+        {/* ================= TAB 3: PLATFORM LIVE ACTIVITY FEED ================= */}
+        {activeTab === "ACTIVITIES" && (
+          <section className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+            <div
+              onClick={() => setShowActivityStream(!showActivityStream)}
+              className="p-4 bg-slate-900 border-b border-slate-800/80 flex items-center justify-between cursor-pointer hover:bg-slate-800/50 transition"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                  <Activity className="w-4 h-4" />
                 </div>
-              ) : (
-                activities.slice(0, 8).map((act) => (
-                  <div
-                    key={act._id}
-                    className="p-3.5 px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-slate-800/30 transition"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${
-                          act.action.includes("ONBOARD")
-                            ? "bg-blue-950 text-blue-300 border border-blue-800/60"
-                            : act.action.includes("EXTEND") || act.action.includes("RENEW")
-                            ? "bg-emerald-950 text-emerald-300 border border-emerald-800/60"
-                            : act.action.includes("SUSPEND")
-                            ? "bg-rose-950 text-rose-300 border border-rose-800/60"
-                            : "bg-slate-800 text-slate-300 border border-slate-700"
-                        }`}
-                      >
-                        {act.action.replace(/_/g, " ")}
-                      </span>
-                      <div>
-                        <span className="font-semibold text-white">
-                          {act.businessName}
+                <div>
+                  <h3 className="text-xs font-bold text-white flex items-center gap-2">
+                    <span>Live Platform Activity Stream</span>
+                    <span className="text-[10px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded">
+                      Audit Log
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Real-time SaaS events across all Sri Lankan client stores
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <span>{activities.length} recent events</span>
+                {showActivityStream ? (
+                  <ChevronUp className="w-4 h-4" />
+                ) : (
+                  <ChevronDown className="w-4 h-4" />
+                )}
+              </div>
+            </div>
+
+            {showActivityStream && (
+              <div className="divide-y divide-slate-800/60 text-xs">
+                {activities.length === 0 ? (
+                  <div className="p-8 text-center text-slate-500 text-xs">
+                    No recent activity logged.
+                  </div>
+                ) : (
+                  activities.slice(0, 15).map((act) => (
+                    <div
+                      key={act._id}
+                      className="p-3.5 px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-slate-800/30 transition"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${
+                            act.action.includes("ONBOARD")
+                              ? "bg-blue-950 text-blue-300 border border-blue-800/60"
+                              : act.action.includes("PAYMENT") || act.action.includes("EXTEND") || act.action.includes("RENEW")
+                              ? "bg-emerald-950 text-emerald-300 border border-emerald-800/60"
+                              : act.action.includes("SUSPEND")
+                              ? "bg-rose-950 text-rose-300 border border-rose-800/60"
+                              : "bg-slate-800 text-slate-300 border border-slate-700"
+                          }`}
+                        >
+                          {act.action.replace(/_/g, " ")}
                         </span>
-                        <span className="text-slate-400 text-[11px] ml-2">
-                          by {act.userName}
-                        </span>
+                        <div>
+                          <span className="font-semibold text-white">
+                            {act.businessName}
+                          </span>
+                          <span className="text-slate-400 text-[11px] ml-2">
+                            by {act.userName}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] text-slate-500 font-mono">
+                        {formatSLDateTime(act.createdAt)}
                       </div>
                     </div>
-
-                    <div className="text-[11px] text-slate-500 font-mono">
-                      {formatSLDateTime(act.createdAt)}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </section>
+                  ))
+                )}
+              </div>
+            )}
+          </section>
+        )}
       </main>
 
       {/* MODAL 1: Onboard New Client Business */}
@@ -1469,13 +1986,318 @@ export default function SuperAdminDashboard() {
               </span>
               <button
                 onClick={() => setIsInspectModalOpen(false)}
-                className="px-4 py-2 text-xs font-medium rounded-xl bg-slate-800 hover:bg-slate-700 text-white transition"
+                className="px-4 py-2 text-xs font-medium rounded-xl bg-slate-800 hover:bg-slate-700 text-white transition cursor-pointer"
               >
                 Close
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* ================= MODAL 4: RECORD SUBSCRIPTION PAYMENT ================= */}
+      {isPaymentModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-600/20 text-emerald-400 flex items-center justify-center">
+                  <CreditCard className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Record Subscription Payment</h3>
+                  <p className="text-[11px] text-slate-400">
+                    Issues official SaaS expense invoice & extends shop license
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsPaymentModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleRecordPaymentSubmit} className="flex-1 overflow-y-auto p-6 space-y-4 text-xs">
+              {paymentFeedback && (
+                <div
+                  className={`p-3 rounded-xl border text-xs flex items-center gap-2 ${
+                    paymentFeedback.type === "success"
+                      ? "bg-emerald-950/60 border-emerald-800 text-emerald-300"
+                      : "bg-rose-950/60 border-rose-800 text-rose-300"
+                  }`}
+                >
+                  {paymentFeedback.type === "success" ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>{paymentFeedback.text}</span>
+                </div>
+              )}
+
+              {/* Client Store Selection */}
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  Select Client Store *
+                </label>
+                <select
+                  required
+                  value={paymentForm.businessId}
+                  onChange={(e) => {
+                    const selectedId = e.target.value;
+                    const b = businesses.find((x) => x._id === selectedId);
+                    const plan = (b?.subscription?.plan === "TRIAL" ? "BASIC" : b?.subscription?.plan) || "BASIC";
+                    handlePaymentPlanOrCycleChange(plan, paymentForm.billingCycle);
+                    setPaymentForm((prev) => ({
+                      ...prev,
+                      businessId: selectedId,
+                      notes: b ? `Subscription renewal for ${b.name}` : prev.notes,
+                    }));
+                  }}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                >
+                  <option value="">-- Choose a store --</option>
+                  {businesses.map((b) => (
+                    <option key={b._id} value={b._id}>
+                      {b.name} ({b.ownerName} • {b.subscription?.plan || "BASIC"})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Plan Selection */}
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  Subscription Plan Tier *
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: "BASIC", label: "Basic", price: "Rs. 3,500/mo" },
+                    { id: "PROFESSIONAL", label: "Professional", price: "Rs. 7,500/mo" },
+                    { id: "ENTERPRISE", label: "Enterprise", price: "Rs. 15,000/mo" },
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => handlePaymentPlanOrCycleChange(p.id, paymentForm.billingCycle)}
+                      className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                        paymentForm.plan === p.id
+                          ? "bg-blue-600/20 border-blue-500 text-white"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="font-bold text-xs">{p.label}</div>
+                      <div className="text-[10px] text-blue-400 mt-0.5">{p.price}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Billing Cycle */}
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  Billing Cycle & Prepayment *
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: "MONTHLY", label: "1 Month", badge: null },
+                    { id: "QUARTERLY", label: "3 Months", badge: null },
+                    { id: "BI_ANNUAL", label: "6 Months", badge: null },
+                    { id: "ANNUAL", label: "12 Months", badge: "2 Mos Free" },
+                  ].map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => handlePaymentPlanOrCycleChange(paymentForm.plan, c.id)}
+                      className={`p-2 rounded-xl border text-center transition cursor-pointer relative ${
+                        paymentForm.billingCycle === c.id
+                          ? "bg-indigo-600/20 border-indigo-500 text-white font-bold"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
+                      }`}
+                    >
+                      {c.badge && (
+                        <span className="absolute -top-1.5 -right-1 px-1.5 py-0.2 bg-emerald-500 text-[9px] font-black text-slate-950 rounded-full">
+                          {c.badge}
+                        </span>
+                      )}
+                      <div className="text-xs">{c.label}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Amount & Discount Inputs */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Amount Paid (LKR) *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={0}
+                    value={paymentForm.amount}
+                    onChange={(e) =>
+                      setPaymentForm({ ...paymentForm, amount: parseFloat(e.target.value) || 0 })
+                    }
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Prepayment Discount (LKR)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={paymentForm.discountAmount}
+                    onChange={(e) =>
+                      setPaymentForm({ ...paymentForm, discountAmount: parseFloat(e.target.value) || 0 })
+                    }
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-emerald-400 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                  />
+                </div>
+              </div>
+
+              {/* Payment Method & Bank */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Payment Method *
+                  </label>
+                  <select
+                    value={paymentForm.paymentMethod}
+                    onChange={(e) =>
+                      setPaymentForm({ ...paymentForm, paymentMethod: e.target.value as any })
+                    }
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  >
+                    <option value="BANK_TRANSFER">Bank Transfer (Deposit / EFT)</option>
+                    <option value="CASH">Cash Payment (In-Person)</option>
+                    <option value="ONLINE_CARD">Online Credit/Debit Card</option>
+                    <option value="CHEQUE">Company Cheque</option>
+                    <option value="OTHER">Other LankaPay</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Bank / Channel Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Commercial Bank, Sampath, BOC"
+                    value={paymentForm.bankName}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, bankName: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  />
+                </div>
+              </div>
+
+              {/* Reference Number & Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Bank Reference / Slip ID
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. COMM-TXN-89472"
+                    value={paymentForm.paymentReference}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paymentReference: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Payment Date *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={paymentForm.paymentDate}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  />
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  Internal Remarks / Invoice Notes
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Annual renewal prepayment for 2026/2027"
+                  value={paymentForm.notes}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                />
+              </div>
+
+              {/* Auto Extend Toggle */}
+              <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-white">Automatically Extend Store License</div>
+                  <div className="text-[11px] text-slate-400">
+                    Sets status to ACTIVE and extends expiry date by {paymentForm.durationMonths} month(s)
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={paymentForm.autoExtendLicense}
+                  onChange={(e) =>
+                    setPaymentForm({ ...paymentForm, autoExtendLicense: e.target.checked })
+                  }
+                  className="w-4 h-4 text-emerald-600 rounded bg-slate-900 border-slate-700 focus:ring-emerald-500"
+                />
+              </div>
+
+              {/* Modal Buttons */}
+              <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsPaymentModalOpen(false)}
+                  className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={paymentSubmitting}
+                  className="inline-flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition disabled:opacity-50 cursor-pointer"
+                >
+                  {paymentSubmitting ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Recording...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Confirm & Issue Receipt</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL 5: OFFICIAL SUBSCRIPTION INVOICE RECEIPT MODAL ================= */}
+      {selectedReceiptInvoice && (
+        <SubscriptionInvoiceReceipt
+          invoice={selectedReceiptInvoice}
+          onClose={() => setSelectedReceiptInvoice(null)}
+        />
       )}
     </div>
   );

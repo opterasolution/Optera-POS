@@ -24,6 +24,9 @@ import {
   X,
 } from "lucide-react";
 import { formatCurrency, isValidSLPhone } from "@/lib/formatters";
+import SubscriptionInvoiceReceipt, {
+  SubscriptionInvoiceData,
+} from "@/components/receipts/SubscriptionInvoiceReceipt";
 
 export default function SettingsPage() {
   const { data: session } = useSession();
@@ -33,6 +36,11 @@ export default function SettingsPage() {
 
   // Tab State: profile | staff | subscription
   const [activeTab, setActiveTab] = useState<"profile" | "staff" | "subscription">("profile");
+
+  // Store Subscription Invoices State
+  const [storeInvoices, setStoreInvoices] = useState<SubscriptionInvoiceData[]>([]);
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [selectedReceipt, setSelectedReceipt] = useState<SubscriptionInvoiceData | null>(null);
 
   // Staff State
   const [staffList, setStaffList] = useState<Array<{
@@ -145,8 +153,24 @@ export default function SettingsPage() {
       }
     }
 
+    async function loadInvoices() {
+      setInvoicesLoading(true);
+      try {
+        const res = await fetch("/api/business/invoices");
+        const data = await res.json();
+        if (data.success && data.invoices) {
+          setStoreInvoices(data.invoices);
+        }
+      } catch {
+        console.error("Failed to load store invoices");
+      } finally {
+        setInvoicesLoading(false);
+      }
+    }
+
     loadSettings();
     loadStaff();
+    loadInvoices();
   }, []);
 
   const handleAddStaff = async (e: React.FormEvent) => {
@@ -1033,6 +1057,112 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
+
+            {/* Billing & Official Expense Receipts History */}
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+              <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-blue-600" />
+                    <span>Payment Receipts & Invoices</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Official Sri Lanka POS SaaS payment receipts for tax and accounting records
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInvoicesLoading(true);
+                    fetch("/api/business/invoices")
+                      .then((res) => res.json())
+                      .then((data) => {
+                        if (data.success && data.invoices) setStoreInvoices(data.invoices);
+                      })
+                      .catch((err) => console.error(err))
+                      .finally(() => setInvoicesLoading(false));
+                  }}
+                  className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
+                  title="Refresh receipts"
+                >
+                  <RefreshCw className={`w-4 h-4 ${invoicesLoading ? "animate-spin text-blue-600" : ""}`} />
+                </button>
+              </div>
+
+              {invoicesLoading ? (
+                <div className="p-8 text-center text-xs text-slate-400">Loading invoice history...</div>
+              ) : storeInvoices.length === 0 ? (
+                <div className="p-8 text-center">
+                  <Receipt className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-xs font-semibold text-slate-600">No payment receipts found</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Official receipts will appear here whenever a subscription payment is recorded by platform support.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100">
+                        <th className="py-3 px-4">Invoice #</th>
+                        <th className="py-3 px-4">Plan / Cycle</th>
+                        <th className="py-3 px-4">Amount Paid</th>
+                        <th className="py-3 px-4">Payment Method</th>
+                        <th className="py-3 px-4">Payment Date</th>
+                        <th className="py-3 px-4">Coverage Period</th>
+                        <th className="py-3 px-4 text-right">Official Receipt</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {storeInvoices.map((inv) => (
+                        <tr key={inv._id} className="hover:bg-slate-50/70 transition">
+                          <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                            {inv.invoiceNumber}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="font-semibold text-slate-800">{inv.plan}</span>
+                            <span className="text-slate-400 ml-1 text-[11px]">({inv.billingCycle.toLowerCase()})</span>
+                          </td>
+                          <td className="py-3 px-4 font-bold text-emerald-700">
+                            {formatCurrency(inv.amount)}
+                          </td>
+                          <td className="py-3 px-4 text-slate-600">
+                            <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-[10px]">
+                              {inv.paymentMethod.replace("_", " ")}
+                            </span>
+                            {inv.paymentReference && (
+                              <div className="text-[10px] text-slate-400 font-mono mt-0.5">Ref: {inv.paymentReference}</div>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-slate-600">
+                            {new Date(inv.paidAt || inv.issuedAt || Date.now()).toLocaleDateString("en-GB", {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                            })}
+                          </td>
+                          <td className="py-3 px-4 text-slate-600 text-[11px]">
+                            {new Date(inv.periodStart).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" })}
+                            {" → "}
+                            {new Date(inv.periodEnd).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" })}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedReceipt(inv)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg text-xs transition"
+                            >
+                              <Receipt className="w-3.5 h-3.5" />
+                              <span>View Receipt</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </>
@@ -1164,6 +1294,14 @@ export default function SettingsPage() {
           </form>
         </div>
       </div>
+    )}
+
+    {/* Subscription Invoice Receipt Modal */}
+    {selectedReceipt && (
+      <SubscriptionInvoiceReceipt
+        invoice={selectedReceipt}
+        onClose={() => setSelectedReceipt(null)}
+      />
     )}
       </div>
     </AppLayout>

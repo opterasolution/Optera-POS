@@ -6,3 +6,4 @@ export { InventoryMovement, type IInventoryMovement, type MovementType } from ".
 export { Sale, type ISale, type ISaleItem, type PaymentMethod, type SaleStatus } from "./Sale";
 export { Customer, type ICustomer } from "./Customer";
 export { AuditLog, type IAuditLog } from "./AuditLog";
+export { SubscriptionInvoice, type ISubscriptionInvoice } from "./SubscriptionInvoice";
