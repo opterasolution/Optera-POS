@@ -31,6 +31,7 @@ export interface IBusiness extends Document {
     expiryDate: Date;
     maxProducts?: number;
     maxUsers?: number;
+    maxRegisters?: number;
   };
   onboardingCompleted?: boolean;
   onboardingStep?: number;
@@ -80,6 +81,7 @@ const BusinessSchema = new Schema<IBusiness>(
       },
       maxProducts: { type: Number, default: 500 },
       maxUsers: { type: Number, default: 5 },
+      maxRegisters: { type: Number, default: 2 },
     },
     onboardingCompleted: { type: Boolean, default: false },
     onboardingStep: { type: Number, default: 1 },

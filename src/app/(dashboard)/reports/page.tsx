@@ -16,6 +16,7 @@ import {
   Percent,
   Coins,
   Package,
+  Monitor,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/formatters";
 
@@ -32,6 +33,7 @@ interface ReportData {
     lowStockCount: number;
   };
   paymentBreakdown: Record<string, { count: number; total: number }>;
+  registerBreakdown?: Record<string, { registerName: string; count: number; total: number }>;
   topProducts: Array<{
     name: string;
     unitsSold: number;
@@ -86,6 +88,8 @@ export default function ReportsPage() {
     summary.totalRevenue > 0
       ? Math.round((summary.estimatedGrossProfit / summary.totalRevenue) * 100)
       : 0;
+
+  const registerList = Object.values(data?.registerBreakdown || {});
 
   return (
     <AppLayout>
@@ -184,12 +188,12 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* Middle Section: Payment Methods Split + Profit Breakdown */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Middle Section: Payment Methods Split + Counter Breakdown + Profit Formula */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Card 1: Payment Method Breakdown */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
             <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-              <Coins className="w-4 h-4 text-blue-600" /> Payment Methods Distribution
+              <Coins className="w-4 h-4 text-blue-600" /> Payment Methods
             </h3>
 
             <div className="space-y-3">
@@ -197,7 +201,7 @@ export default function ReportsPage() {
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
                 <div className="flex justify-between items-center text-xs font-semibold mb-1">
                   <span className="flex items-center gap-1.5 text-emerald-800">
-                    <Banknote className="w-3.5 h-3.5" /> Cash (Retail Counter)
+                    <Banknote className="w-3.5 h-3.5" /> Cash (Counter)
                   </span>
                   <span className="font-mono text-slate-900">{formatCurrency(cashTotal)}</span>
                 </div>
@@ -237,7 +241,7 @@ export default function ReportsPage() {
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
                 <div className="flex justify-between items-center text-xs font-semibold mb-1">
                   <span className="flex items-center gap-1.5 text-purple-800">
-                    <QrCode className="w-3.5 h-3.5" /> LankaQR / Mobile QR
+                    <QrCode className="w-3.5 h-3.5" /> LankaQR
                   </span>
                   <span className="font-mono text-slate-900">{formatCurrency(qrTotal)}</span>
                 </div>
@@ -255,7 +259,47 @@ export default function ReportsPage() {
             </div>
           </div>
 
-          {/* Card 2: Transparent Profit & Loss Formula */}
+          {/* Card 2: Sales by Counter / Terminal */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+            <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+              <Monitor className="w-4 h-4 text-blue-600" /> Sales by Counter
+            </h3>
+
+            <div className="space-y-3">
+              {registerList.length > 0 ? (
+                registerList.map((item, idx) => {
+                  const regPercent = Math.round((item.total / totalRev) * 100);
+                  return (
+                    <div key={idx} className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                      <div className="flex justify-between items-center text-xs font-semibold mb-1">
+                        <span className="flex items-center gap-1.5 text-blue-900 truncate">
+                          <Monitor className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                          <span className="truncate">{item.registerName}</span>
+                        </span>
+                        <span className="font-mono text-slate-900 shrink-0">{formatCurrency(item.total)}</span>
+                      </div>
+                      <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                        <div
+                          className="bg-blue-600 h-full rounded-full transition-all"
+                          style={{ width: `${Math.min(100, Math.max(0, regPercent))}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+                        <span>{item.count} transaction{item.count !== 1 ? "s" : ""}</span>
+                        <span>{regPercent}% of total</span>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-8 text-slate-400 text-xs">
+                  No counter sales recorded yet.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Card 3: Transparent Profit & Loss Formula */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
             <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-emerald-600" /> Transparent Profit Calculation

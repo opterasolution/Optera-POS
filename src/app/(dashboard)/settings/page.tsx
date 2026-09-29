@@ -22,11 +22,26 @@ import {
   Phone,
   Package,
   X,
+  Monitor,
+  Trash2,
+  Plus,
 } from "lucide-react";
 import { formatCurrency, isValidSLPhone } from "@/lib/formatters";
 import SubscriptionInvoiceReceipt, {
   SubscriptionInvoiceData,
 } from "@/components/receipts/SubscriptionInvoiceReceipt";
+
+interface RegisterItem {
+  _id: string;
+  registerNumber: string;
+  name: string;
+  location?: string;
+  printerWidth?: "58mm" | "80mm";
+  isDefault?: boolean;
+  isActive?: boolean;
+  salesCount?: number;
+  createdAt?: string;
+}
 
 export default function SettingsPage() {
   const { data: session } = useSession();
@@ -34,13 +49,28 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Tab State: profile | staff | subscription
-  const [activeTab, setActiveTab] = useState<"profile" | "staff" | "subscription">("profile");
+  // Tab State: profile | staff | registers | subscription
+  const [activeTab, setActiveTab] = useState<"profile" | "staff" | "registers" | "subscription">("profile");
 
   // Store Subscription Invoices State
   const [storeInvoices, setStoreInvoices] = useState<SubscriptionInvoiceData[]>([]);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<SubscriptionInvoiceData | null>(null);
+
+  // Registers State
+  const [registersList, setRegistersList] = useState<RegisterItem[]>([]);
+  const [registersLoading, setRegistersLoading] = useState(false);
+  const [registerQuota, setRegisterQuota] = useState({ maxRegisters: 2, totalCount: 1, canAddMore: true });
+  const [isAddRegisterOpen, setIsAddRegisterOpen] = useState(false);
+  const [newRegister, setNewRegister] = useState({
+    name: "",
+    registerNumber: "",
+    location: "",
+    printerWidth: "58mm" as "58mm" | "80mm",
+    isDefault: false,
+  });
+  const [addRegisterLoading, setAddRegisterLoading] = useState(false);
+  const [addRegisterError, setAddRegisterError] = useState("");
 
   // Staff State
   const [staffList, setStaffList] = useState<Array<{
@@ -168,10 +198,94 @@ export default function SettingsPage() {
       }
     }
 
+    async function loadRegisters() {
+      setRegistersLoading(true);
+      try {
+        const res = await fetch("/api/registers");
+        const data = await res.json();
+        if (data.success && data.registers) {
+          setRegistersList(data.registers);
+          if (data.quota) setRegisterQuota(data.quota);
+        }
+      } catch {
+        console.error("Failed to load registers list");
+      } finally {
+        setRegistersLoading(false);
+      }
+    }
+
     loadSettings();
     loadStaff();
     loadInvoices();
+    loadRegisters();
   }, []);
+
+  const handleAddRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddRegisterLoading(true);
+    setAddRegisterError("");
+
+    try {
+      const res = await fetch("/api/registers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newRegister),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setAddRegisterError(data.error || "Failed to create register");
+        setAddRegisterLoading(false);
+        return;
+      }
+
+      setIsAddRegisterOpen(false);
+      setNewRegister({
+        name: "",
+        registerNumber: "",
+        location: "",
+        printerWidth: "58mm",
+        isDefault: false,
+      });
+
+      // Refresh registers
+      const regRes = await fetch("/api/registers");
+      const regJson = await regRes.json();
+      if (regJson.success) {
+        setRegistersList(regJson.registers);
+        if (regJson.quota) setRegisterQuota(regJson.quota);
+      }
+
+      setStatusMessage({
+        type: "success",
+        text: `Counter "${data.register?.name || newRegister.name}" created successfully!`,
+      });
+    } catch {
+      setAddRegisterError("Network error creating checkout counter.");
+    } finally {
+      setAddRegisterLoading(false);
+    }
+  };
+
+  const handleDeleteRegister = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to remove or deactivate counter "${name}"?`)) return;
+    try {
+      const res = await fetch(`/api/registers/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({ type: "success", text: data.message });
+        const regRes = await fetch("/api/registers");
+        const regJson = await regRes.json();
+        if (regJson.success) {
+          setRegistersList(regJson.registers);
+          if (regJson.quota) setRegisterQuota(regJson.quota);
+        }
+      } else {
+        setStatusMessage({ type: "error", text: data.error || "Failed to remove register" });
+      }
+    } catch {
+      setStatusMessage({ type: "error", text: "Network error removing register." });
+    }
+  };
 
   const handleAddStaff = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -307,6 +421,21 @@ export default function SettingsPage() {
               </button>
             )}
 
+            {activeTab === "registers" && (
+              <button
+                onClick={() => {
+                  if (!registerQuota.canAddMore) {
+                    alert(`Plan Quota Reached: Your current plan allows ${registerQuota.maxRegisters} counter(s). Please upgrade to add more.`);
+                    return;
+                  }
+                  setIsAddRegisterOpen(true);
+                }}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold transition-all shadow-sm"
+              >
+                <Monitor className="w-4 h-4" /> Add Register / Counter
+              </button>
+            )}
+
             {activeTab === "subscription" && (
               <a
                 href="tel:0771234567"
@@ -341,6 +470,17 @@ export default function SettingsPage() {
             }`}
           >
             <Users className="w-4 h-4" /> Staff & Cashiers ({staffList.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("registers")}
+            className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 ${
+              activeTab === "registers"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-slate-500 hover:text-slate-900"
+            }`}
+          >
+            <Monitor className="w-4 h-4" /> Registers & Terminals ({registersList.length})
           </button>
           <button
             type="button"
@@ -912,7 +1052,150 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* 3. Subscription & License Tab */}
+        {/* 3. Registers & Terminals Tab */}
+        {activeTab === "registers" && (
+          <div className="space-y-6">
+            {/* Quota & Capacity Banner */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                  <Monitor className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    SaaS Terminal Quota: {registerQuota.totalCount} / {registerQuota.maxRegisters} Active
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Your store subscription allows up to {registerQuota.maxRegisters} physical checkout counter(s) or billing devices.
+                  </p>
+                </div>
+              </div>
+
+              {!registerQuota.canAddMore ? (
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium">
+                  <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Terminal Limit Reached</span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsAddRegisterOpen(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-sm transition shrink-0"
+                >
+                  <Plus className="w-4 h-4" /> Add Register / Counter
+                </button>
+              )}
+            </div>
+
+            {/* Main Registers Directory Table */}
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Physical Registers & Billing Terminals</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Configure hardware terminals, assign default counters, and set individual receipt roll widths.
+                  </p>
+                </div>
+              </div>
+
+              {registersLoading ? (
+                <div className="p-12 text-center text-slate-400 text-xs">
+                  <RefreshCw className="w-5 h-5 animate-spin mx-auto text-blue-500 mb-2" />
+                  Loading store checkout counters...
+                </div>
+              ) : registersList.length === 0 ? (
+                <div className="p-12 text-center text-slate-400 text-xs">
+                  No checkout counters found.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+                        <th className="py-3 px-4">Register ID</th>
+                        <th className="py-3 px-4">Counter Name</th>
+                        <th className="py-3 px-4">Location / Zone</th>
+                        <th className="py-3 px-4">Thermal Printer</th>
+                        <th className="py-3 px-4">Status</th>
+                        <th className="py-3 px-4 text-right">Transactions</th>
+                        <th className="py-3 px-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {registersList.map((reg) => (
+                        <tr key={reg._id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="py-3.5 px-4 font-mono font-bold text-slate-900">
+                            {reg.registerNumber}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <div className="font-semibold text-slate-800 flex items-center gap-1.5">
+                              {reg.name}
+                              {reg.isDefault && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                                  Default
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4 text-slate-600">
+                            {reg.location || "Main Sales Floor"}
+                          </td>
+                          <td className="py-3.5 px-4 font-mono text-slate-600">
+                            <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-semibold border border-slate-200">
+                              {reg.printerWidth || "58mm"}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            {reg.isActive !== false ? (
+                              <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-700">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                                Active
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
+                                <span className="w-2 h-2 rounded-full bg-slate-300" />
+                                Inactive
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-right font-mono text-slate-600">
+                            {reg.salesCount ?? "—"}
+                          </td>
+                          <td className="py-3.5 px-4 text-right">
+                            {reg.isDefault && registersList.length === 1 ? (
+                              <span className="text-[10px] text-slate-400 italic">Primary Counter</span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteRegister(reg._id, reg.name)}
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                                title={reg.salesCount && reg.salesCount > 0 ? "Deactivate counter (preserves past sales)" : "Delete counter"}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Sri Lanka Multi-Terminal Guide Callout */}
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-xs text-slate-600 space-y-2">
+              <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                <Store className="w-4 h-4 text-blue-600" /> How Multi-Counter Deployment Works
+              </div>
+              <p className="leading-relaxed">
+                Log into this POS dashboard on each physical counter's PC, laptop, or Android tablet. Use the counter selector in the top bar to set that device's active station (e.g. <strong>Counter 01</strong> for Main Checkout and <strong>Counter 02</strong> for Express Lane). All transactions, stock decrements, and thermal receipts will be permanently isolated and attributed to that terminal.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* 4. Subscription & License Tab */}
         {activeTab === "subscription" && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -1020,6 +1303,26 @@ export default function SettingsPage() {
                         width: `${Math.min(
                           100,
                           ((staffList.length / (subscriptionData?.maxUsers || 5)) * 100)
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-xs text-slate-700 mb-1">
+                    <span>Checkout Terminals</span>
+                    <span className="font-bold">
+                      {registerQuota.totalCount} / {registerQuota.maxRegisters}
+                    </span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-indigo-500 rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          ((registerQuota.totalCount / (registerQuota.maxRegisters || 1)) * 100)
                         )}%`,
                       }}
                     />
@@ -1166,6 +1469,128 @@ export default function SettingsPage() {
           </div>
         )}
       </>
+    )}
+
+    {/* Add Register / Terminal Modal */}
+    {isAddRegisterOpen && (
+      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
+          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center">
+                <Monitor className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Add Checkout Register</h3>
+                <p className="text-[11px] text-slate-500">Configure new checkout counter / physical terminal</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setIsAddRegisterOpen(false)}
+              className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <form onSubmit={handleAddRegister} className="p-6 space-y-4">
+            {addRegisterError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{addRegisterError}</span>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Counter Name *</label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. Counter 02 (Express Lane), Bakery Counter"
+                value={newRegister.name}
+                onChange={(e) => setNewRegister({ ...newRegister, name: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Register ID / Code</label>
+                <input
+                  type="text"
+                  placeholder="e.g. REG-02"
+                  value={newRegister.registerNumber}
+                  onChange={(e) => setNewRegister({ ...newRegister, registerNumber: e.target.value.toUpperCase() })}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Location / Zone</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Front Entrance"
+                  value={newRegister.location}
+                  onChange={(e) => setNewRegister({ ...newRegister, location: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Receipt Paper Width</label>
+              <select
+                value={newRegister.printerWidth}
+                onChange={(e) => setNewRegister({ ...newRegister, printerWidth: e.target.value as "58mm" | "80mm" })}
+                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="58mm">58mm (2-inch standard thermal roll)</option>
+                <option value="80mm">80mm (3-inch wide supermarket roll)</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <input
+                type="checkbox"
+                id="regDefault"
+                checked={newRegister.isDefault}
+                onChange={(e) => setNewRegister({ ...newRegister, isDefault: e.target.checked })}
+                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              />
+              <label htmlFor="regDefault" className="text-xs text-slate-700 select-none">
+                Make this the store's primary / default counter
+              </label>
+            </div>
+
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsAddRegisterOpen(false)}
+                className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={addRegisterLoading}
+                className="inline-flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-sm transition disabled:opacity-50"
+              >
+                {addRegisterLoading ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Creating...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Create Counter</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
     )}
 
     {/* Add Staff Modal */}

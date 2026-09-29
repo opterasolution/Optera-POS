@@ -7,3 +7,4 @@ export { Sale, type ISale, type ISaleItem, type PaymentMethod, type SaleStatus }
 export { Customer, type ICustomer } from "./Customer";
 export { AuditLog, type IAuditLog } from "./AuditLog";
 export { SubscriptionInvoice, type ISubscriptionInvoice } from "./SubscriptionInvoice";
+export { Register, type IRegister } from "./Register";

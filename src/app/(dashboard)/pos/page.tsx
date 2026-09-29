@@ -25,6 +25,7 @@ import {
   Wifi,
   WifiOff,
   RefreshCw,
+  Monitor,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/formatters";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
@@ -35,6 +36,14 @@ import {
   enqueueOfflineSale,
   OfflineSaleRecord,
 } from "@/lib/offline-storage";
+
+interface RegisterOption {
+  _id: string;
+  name: string;
+  registerNumber: string;
+  printerWidth?: "58mm" | "80mm";
+  isDefault?: boolean;
+}
 
 interface Product {
   _id: string;
@@ -107,6 +116,8 @@ export default function POSPage() {
   // State
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [registers, setRegisters] = useState<RegisterOption[]>([]);
+  const [selectedRegister, setSelectedRegister] = useState<RegisterOption | null>(null);
   const [business, setBusiness] = useState<BusinessSettings | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -135,36 +146,55 @@ export default function POSPage() {
   // Barcode input ref
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
-  // Load Products, Categories, and Business Settings (with offline fallback cache)
+  // Load Products, Categories, Registers, and Business Settings (with offline fallback cache)
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const [prodRes, catRes, bizRes] = await Promise.all([
+      const [prodRes, catRes, bizRes, regRes] = await Promise.all([
         fetch("/api/products"),
         fetch("/api/categories"),
         fetch("/api/business"),
+        fetch("/api/registers"),
       ]);
 
-      const [prodData, catData, bizData] = await Promise.all([
+      const [prodData, catData, bizData, regData] = await Promise.all([
         prodRes.json(),
         catRes.json(),
         bizRes.json(),
+        regRes.json(),
       ]);
 
       const fetchedProducts = prodData.success ? prodData.products || [] : [];
       const fetchedCategories = catData.success ? catData.categories || [] : [];
       const fetchedBusiness = bizData.success ? bizData.business : null;
+      const fetchedRegisters: RegisterOption[] = regData.success ? regData.registers || [] : [];
 
       if (prodData.success) setProducts(fetchedProducts);
       if (catData.success) setCategories(fetchedCategories);
       if (bizData.success) setBusiness(fetchedBusiness);
+
+      if (regData.success && fetchedRegisters.length > 0) {
+        setRegisters(fetchedRegisters);
+        if (typeof window !== "undefined") {
+          localStorage.setItem(`slpos_${businessId}_saved_registers`, JSON.stringify(fetchedRegisters));
+          const savedRegId = localStorage.getItem(`slpos_${businessId}_register`);
+          const found =
+            fetchedRegisters.find((r) => r._id === savedRegId) ||
+            fetchedRegisters.find((r) => r.isDefault) ||
+            fetchedRegisters[0];
+          if (found) {
+            setSelectedRegister(found);
+            localStorage.setItem(`slpos_${businessId}_register`, found._id);
+          }
+        }
+      }
 
       // Cache catalog locally for offline availability
       if (fetchedProducts.length > 0) {
         saveCatalogCache(businessId, fetchedProducts, fetchedCategories, fetchedBusiness);
       }
     } catch {
-      // Internet / server unreachable -> Hydrate catalog from offline cache
+      // Internet / server unreachable -> Hydrate catalog and registers from offline cache
       const cached = getCatalogCache(businessId);
       if (cached.products && cached.products.length > 0) {
         setProducts(cached.products as Product[]);
@@ -176,6 +206,22 @@ export default function POSPage() {
         });
       } else {
         setStatusMessage({ type: "error", text: "Failed to initialize POS counter and no offline cache available." });
+      }
+
+      if (typeof window !== "undefined") {
+        try {
+          const cachedRegs = localStorage.getItem(`slpos_${businessId}_saved_registers`);
+          if (cachedRegs) {
+            const parsedRegs: RegisterOption[] = JSON.parse(cachedRegs);
+            setRegisters(parsedRegs);
+            const savedRegId = localStorage.getItem(`slpos_${businessId}_register`);
+            const found =
+              parsedRegs.find((r) => r._id === savedRegId) ||
+              parsedRegs.find((r) => r.isDefault) ||
+              parsedRegs[0];
+            if (found) setSelectedRegister(found);
+          }
+        } catch {}
       }
     } finally {
       setLoading(false);
@@ -373,7 +419,13 @@ export default function POSPage() {
 
     setSubmittingSale(true);
 
+    const regNameFormatted = selectedRegister
+      ? `${selectedRegister.registerNumber} - ${selectedRegister.name}`
+      : undefined;
+
     const salePayload = {
+      registerId: selectedRegister?._id,
+      registerName: regNameFormatted,
       items: cart.map((item) => ({
         productId: item.productId,
         name: item.name,
@@ -402,6 +454,8 @@ export default function POSPage() {
 
       const offlineRecord: OfflineSaleRecord = {
         offlineId,
+        registerId: selectedRegister?._id,
+        registerName: regNameFormatted,
         items: salePayload.items,
         customerName: salePayload.customerName,
         customerPhone: salePayload.customerPhone,
@@ -444,6 +498,8 @@ export default function POSPage() {
         offlineId,
         invoiceNumber: tempInvoiceNumber,
         cashierName: session?.user?.name || "Cashier",
+        registerName: regNameFormatted,
+        registerNumber: selectedRegister?.registerNumber,
         customerName: offlineRecord.customerName,
         customerPhone: offlineRecord.customerPhone,
         items: salePayload.items,
@@ -565,6 +621,37 @@ export default function POSPage() {
                   className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+
+              {/* Register / Terminal Selector */}
+              {registers.length > 0 && (
+                <div className="flex items-center shrink-0">
+                  <div
+                    className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-xl text-xs bg-white border border-slate-300 shadow-2xs hover:border-slate-400"
+                    title="Current Terminal / Counter Assignment"
+                  >
+                    <Monitor className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                    <select
+                      value={selectedRegister?._id || ""}
+                      onChange={(e) => {
+                        const found = registers.find((r) => r._id === e.target.value);
+                        if (found) {
+                          setSelectedRegister(found);
+                          if (typeof window !== "undefined") {
+                            localStorage.setItem(`slpos_${businessId}_register`, found._id);
+                          }
+                        }
+                      }}
+                      className="bg-transparent border-none text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer max-w-[110px] sm:max-w-[140px] truncate"
+                    >
+                      {registers.map((r) => (
+                        <option key={r._id} value={r._id}>
+                          {r.registerNumber}: {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
 
               {/* Network Status & Offline Resilience Queue */}
               <div className="flex items-center gap-1.5 shrink-0">
@@ -1109,6 +1196,12 @@ export default function POSPage() {
                     <span>Cashier: {completedSale.cashierName}</span>
                     <span>Method: {completedSale.paymentMethod}</span>
                   </div>
+                  {completedSale.registerName && (
+                    <div className="flex justify-between font-semibold text-blue-700 print:text-black">
+                      <span>Counter:</span>
+                      <span>{completedSale.registerName}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="border-t border-slate-300 pt-1.5 space-y-1">

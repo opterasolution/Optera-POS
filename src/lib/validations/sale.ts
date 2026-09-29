@@ -15,6 +15,8 @@ export const createSaleSchema = z.object({
   cashReceived: z.number().min(0).optional(),
   changeGiven: z.number().min(0).optional(),
   paymentReference: z.string().optional().or(z.literal("")),
+  registerId: z.string().optional().or(z.literal("")),
+  registerName: z.string().optional().or(z.literal("")),
 });
 
 export type CreateSaleInput = z.infer<typeof createSaleSchema>;

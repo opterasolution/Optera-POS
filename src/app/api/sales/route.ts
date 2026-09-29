@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Types } from "mongoose";
 import { connectToDatabase } from "@/lib/db";
 import { Sale, ISaleItem } from "@/models/Sale";
 import { Product } from "@/models/Product";
@@ -31,6 +32,8 @@ export async function POST(req: Request) {
       paymentMethod,
       cashReceived,
       paymentReference,
+      registerId,
+      registerName,
     } = parsed.data;
 
     if (Boolean(process.env.MONGODB_URI)) {
@@ -192,6 +195,8 @@ export async function POST(req: Request) {
         cashReceived: paymentMethod === "CASH" ? cashReceived : undefined,
         changeGiven: paymentMethod === "CASH" ? calculatedChange : undefined,
         paymentReference,
+        registerId: registerId && registerId.trim() ? new Types.ObjectId(registerId) : undefined,
+        registerName: registerName?.trim() || "Counter 01 (Main)",
         status: "COMPLETED",
       });
 
@@ -273,6 +278,7 @@ export async function GET(req: Request) {
     const query = searchParams.get("q")?.trim();
     const paymentMethod = searchParams.get("paymentMethod");
     const dateRange = searchParams.get("dateRange") || "all";
+    const registerId = searchParams.get("registerId");
 
     if (Boolean(process.env.MONGODB_URI)) {
       await connectToDatabase();
@@ -283,6 +289,10 @@ export async function GET(req: Request) {
 
       if (paymentMethod && paymentMethod !== "all") {
         filter.paymentMethod = paymentMethod;
+      }
+
+      if (registerId && registerId !== "all") {
+        filter.registerId = registerId;
       }
 
       if (query) {

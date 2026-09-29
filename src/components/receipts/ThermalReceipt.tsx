@@ -19,6 +19,8 @@ export interface ThermalReceiptProps {
     cashierName: string;
     customerName?: string;
     customerPhone?: string;
+    registerName?: string;
+    registerNumber?: string;
     items: Array<{
       name: string;
       unitPrice: number;
@@ -92,6 +94,12 @@ export default function ThermalReceipt({
           <span>CASHIER:</span>
           <span>{sale.cashierName}</span>
         </div>
+        {sale.registerName && (
+          <div className="flex justify-between">
+            <span>REGISTER:</span>
+            <span>{sale.registerName}</span>
+          </div>
+        )}
         <div className="flex justify-between">
           <span>CUSTOMER:</span>
           <span>{sale.customerName || "Walk-in Customer"}</span>

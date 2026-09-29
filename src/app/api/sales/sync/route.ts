@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Types } from "mongoose";
 import { connectToDatabase } from "@/lib/db";
 import { Sale, ISaleItem } from "@/models/Sale";
 import { Product } from "@/models/Product";
@@ -25,6 +26,8 @@ interface OfflineSalePayload {
   paymentMethod: "CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "OTHER";
   cashReceived?: number;
   paymentReference?: string;
+  registerId?: string;
+  registerName?: string;
   createdAt?: string;
 }
 
@@ -65,6 +68,8 @@ export async function POST(req: Request) {
           paymentMethod,
           cashReceived,
           paymentReference,
+          registerId,
+          registerName,
           createdAt,
         } = saleItem;
 
@@ -206,6 +211,8 @@ export async function POST(req: Request) {
           cashReceived: paymentMethod === "CASH" ? cashReceived : undefined,
           changeGiven: calculatedChange,
           paymentReference,
+          registerId: registerId && registerId.trim() ? new Types.ObjectId(registerId) : undefined,
+          registerName: registerName?.trim() || "Counter 01 (Main)",
           status: "COMPLETED",
           createdAt: createdAt ? new Date(createdAt) : new Date(),
         });

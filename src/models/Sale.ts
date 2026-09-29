@@ -32,6 +32,9 @@ export interface ISale extends Document {
   cashReceived?: number;
   changeGiven?: number;
   paymentReference?: string;
+  registerId?: Types.ObjectId;
+  registerName?: string;
+  registerNumber?: string;
   offlineId?: string; // Client-generated UUID for idempotent synchronization
   status: SaleStatus;
   createdAt: Date;
@@ -84,6 +87,9 @@ const SaleSchema = new Schema<ISale>(
     cashReceived: { type: Number, min: 0 },
     changeGiven: { type: Number, min: 0 },
     paymentReference: { type: String, trim: true },
+    registerId: { type: Schema.Types.ObjectId, ref: "Register", index: true },
+    registerName: { type: String, trim: true },
+    registerNumber: { type: String, trim: true },
     offlineId: { type: String, trim: true, sparse: true, index: true },
     status: {
       type: String,
@@ -96,6 +102,7 @@ const SaleSchema = new Schema<ISale>(
 
 SaleSchema.index({ businessId: 1, invoiceNumber: 1 }, { unique: true });
 SaleSchema.index({ businessId: 1, offlineId: 1 }, { sparse: true });
+SaleSchema.index({ businessId: 1, registerId: 1, createdAt: -1 });
 SaleSchema.index({ businessId: 1, createdAt: -1 });
 
 export const Sale: Model<ISale> =

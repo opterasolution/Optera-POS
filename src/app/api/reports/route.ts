@@ -60,6 +60,9 @@ export async function GET(req: Request) {
       // 3. Product Sales Aggregation
       const productStats: Record<string, { name: string; quantity: number; revenue: number; cost: number }> = {};
 
+      // 4. Register / Counter Breakdown
+      const registerStats: Record<string, { name: string; count: number; total: number }> = {};
+
       sales.forEach((sale) => {
         totalRevenue += sale.netTotal || 0;
         totalDiscount += sale.discountTotal || 0;
@@ -71,6 +74,14 @@ export async function GET(req: Request) {
         }
         paymentBreakdown[pm].count += 1;
         paymentBreakdown[pm].total += sale.netTotal;
+
+        // Register attribution
+        const regName = sale.registerName || "Counter 01 (Main)";
+        if (!registerStats[regName]) {
+          registerStats[regName] = { name: regName, count: 0, total: 0 };
+        }
+        registerStats[regName].count += 1;
+        registerStats[regName].total += sale.netTotal || 0;
 
         sale.items.forEach((item) => {
           const itemCost = (item.costPrice || 0) * (item.quantity || 1);
@@ -105,6 +116,9 @@ export async function GET(req: Request) {
         .sort((a, b) => b.revenue - a.revenue)
         .slice(0, 8);
 
+      // Register breakdown sorted by total revenue
+      const registerBreakdown = Object.values(registerStats).sort((a, b) => b.total - a.total);
+
       // Inventory health
       const lowStockCount = await Product.countDocuments({
         businessId,
@@ -127,6 +141,7 @@ export async function GET(req: Request) {
         },
         paymentBreakdown,
         topProducts,
+        registerBreakdown,
       });
     }
 

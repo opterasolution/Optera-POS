@@ -14,6 +14,7 @@ import {
   ArrowRight,
   TrendingUp,
   FileText,
+  Monitor,
 } from "lucide-react";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
 
@@ -23,6 +24,9 @@ interface SaleRecord {
   cashierName: string;
   customerName: string;
   customerPhone?: string;
+  registerId?: string;
+  registerName?: string;
+  registerNumber?: string;
   items: Array<{
     name: string;
     unitPrice: number;
@@ -42,6 +46,7 @@ interface SaleRecord {
 
 export default function SalesPage() {
   const [sales, setSales] = useState<SaleRecord[]>([]);
+  const [registers, setRegisters] = useState<Array<{ _id: string; name: string; registerNumber: string }>>([]);
   const [summary, setSummary] = useState({ totalRevenue: 0, totalBills: 0 });
   const [loading, setLoading] = useState(true);
 
@@ -49,15 +54,27 @@ export default function SalesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("all");
   const [dateRange, setDateRange] = useState("all");
+  const [selectedRegisterId, setSelectedRegisterId] = useState("all");
 
   // Receipt Modal State
   const [selectedSale, setSelectedSale] = useState<SaleRecord | null>(null);
+
+  useEffect(() => {
+    fetch("/api/registers")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.registers) {
+          setRegisters(data.registers);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const loadSales = async () => {
     try {
       setLoading(true);
       const res = await fetch(
-        `/api/sales?q=${encodeURIComponent(searchQuery)}&paymentMethod=${paymentMethod}&dateRange=${dateRange}`
+        `/api/sales?q=${encodeURIComponent(searchQuery)}&paymentMethod=${paymentMethod}&dateRange=${dateRange}&registerId=${selectedRegisterId}`
       );
       const data = await res.json();
       if (data.success) {
@@ -73,7 +90,7 @@ export default function SalesPage() {
 
   useEffect(() => {
     loadSales();
-  }, [searchQuery, paymentMethod, dateRange]);
+  }, [searchQuery, paymentMethod, dateRange, selectedRegisterId]);
 
   const triggerPrint = () => {
     window.print();
@@ -136,6 +153,22 @@ export default function SalesPage() {
               <option value="month">This Month</option>
             </select>
 
+            {/* Counter / Register Filter */}
+            {registers.length > 0 && (
+              <select
+                value={selectedRegisterId}
+                onChange={(e) => setSelectedRegisterId(e.target.value)}
+                className="px-3 py-2 border border-slate-200 rounded-xl bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none font-medium"
+              >
+                <option value="all">All Counters</option>
+                {registers.map((r) => (
+                  <option key={r._id} value={r._id}>
+                    {r.registerNumber}: {r.name}
+                  </option>
+                ))}
+              </select>
+            )}
+
             {/* Payment Method Filter */}
             <select
               value={paymentMethod}
@@ -159,6 +192,7 @@ export default function SalesPage() {
                 <tr>
                   <th className="py-3 px-4">Invoice #</th>
                   <th className="py-3 px-4">Date & Time</th>
+                  <th className="py-3 px-4">Counter</th>
                   <th className="py-3 px-4">Cashier</th>
                   <th className="py-3 px-4">Customer</th>
                   <th className="py-3 px-4">Payment</th>
@@ -170,7 +204,7 @@ export default function SalesPage() {
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-slate-400">
+                    <td colSpan={9} className="py-12 text-center text-slate-400">
                       Loading sales invoices...
                     </td>
                   </tr>
@@ -182,6 +216,17 @@ export default function SalesPage() {
                       </td>
                       <td className="py-3 px-4 font-mono text-[11px] text-slate-500">
                         {formatSLDateTime(sale.createdAt)}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                          <Monitor className="w-2.5 h-2.5 text-blue-500 shrink-0" />
+                          {sale.registerNumber || "REG-01"}
+                        </span>
+                        <div className="text-[10px] text-slate-400 truncate max-w-[110px]">
+                          {sale.registerName?.includes(" - ")
+                            ? sale.registerName.split(" - ")[1]
+                            : sale.registerName || "Main Counter"}
+                        </div>
                       </td>
                       <td className="py-3 px-4 text-slate-700">{sale.cashierName}</td>
                       <td className="py-3 px-4">
@@ -268,6 +313,12 @@ export default function SalesPage() {
                     <span>Cashier: {selectedSale.cashierName}</span>
                     <span>Customer: {selectedSale.customerName}</span>
                   </div>
+                  {selectedSale.registerName && (
+                    <div className="flex justify-between text-blue-700 font-semibold">
+                      <span>Counter:</span>
+                      <span>{selectedSale.registerName}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="border-t border-slate-300 pt-1.5 space-y-1">
