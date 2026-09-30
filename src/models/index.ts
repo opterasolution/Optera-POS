@@ -10,3 +10,6 @@ export { SubscriptionInvoice, type ISubscriptionInvoice } from "./SubscriptionIn
 export { Register, type IRegister } from "./Register";
 export { Shift, type IShift, type ICashMovement, type ShiftStatus, type CashMovementType } from "./Shift";
 export { CreditTransaction, type ICreditTransaction, type CreditTransactionType, type CreditPaymentMethod } from "./CreditTransaction";
+export { Branch, type IBranch, type BranchType } from "./Branch";
+export { BranchStock, type IBranchStock } from "./BranchStock";
+export { StockTransfer, type IStockTransfer, type StockTransferStatus, type IStockTransferItem } from "./StockTransfer";

@@ -1,16 +1,25 @@
 import mongoose, { Schema, Document, Model, Types } from "mongoose";
 
-export type MovementType = "SALE" | "RESTOCK" | "ADJUSTMENT" | "DAMAGE" | "RETURN";
+export type MovementType =
+  | "SALE"
+  | "RESTOCK"
+  | "ADJUSTMENT"
+  | "DAMAGE"
+  | "RETURN"
+  | "TRANSFER_OUT"
+  | "TRANSFER_IN";
 
 export interface IInventoryMovement extends Document {
   businessId: Types.ObjectId;
   productId: Types.ObjectId;
+  branchId?: Types.ObjectId;
+  transferId?: Types.ObjectId;
   type: MovementType;
   quantityChange: number; // e.g. -3 or +10
   previousStock: number;
   newStock: number;
   reason?: string;
-  referenceId?: string; // e.g. invoice number
+  referenceId?: string; // e.g. invoice number or STN number
   createdBy?: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -30,9 +39,19 @@ const InventoryMovementSchema = new Schema<IInventoryMovement>(
       required: true,
       index: true,
     },
+    branchId: {
+      type: Schema.Types.ObjectId,
+      ref: "Branch",
+      index: true,
+    },
+    transferId: {
+      type: Schema.Types.ObjectId,
+      ref: "StockTransfer",
+      index: true,
+    },
     type: {
       type: String,
-      enum: ["SALE", "RESTOCK", "ADJUSTMENT", "DAMAGE", "RETURN"],
+      enum: ["SALE", "RESTOCK", "ADJUSTMENT", "DAMAGE", "RETURN", "TRANSFER_OUT", "TRANSFER_IN"],
       required: true,
     },
     quantityChange: { type: Number, required: true },

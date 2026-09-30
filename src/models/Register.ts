@@ -5,6 +5,8 @@ export interface IRegister extends Document {
   registerNumber: string; // e.g. "REG-01", "REG-02"
   name: string; // e.g. "Counter 01 (Main Register)", "Express Counter"
   location?: string; // e.g. "Ground Floor", "Section B"
+  branchId?: Types.ObjectId;
+  branchName?: string;
   printerWidth: "58mm" | "80mm";
   isDefault: boolean;
   isActive: boolean;
@@ -32,6 +34,15 @@ const RegisterSchema = new Schema<IRegister>(
       trim: true,
     },
     location: {
+      type: String,
+      trim: true,
+    },
+    branchId: {
+      type: Schema.Types.ObjectId,
+      ref: "Branch",
+      index: true,
+    },
+    branchName: {
       type: String,
       trim: true,
     },
