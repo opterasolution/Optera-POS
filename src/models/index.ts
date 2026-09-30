@@ -19,3 +19,4 @@ export { SupplierPayment, type ISupplierPayment, type SupplierPaymentMethod } fr
 export { Promotion, type IPromotion, type PromotionType, type PromoDiscountType } from "./Promotion";
 export { SaleReturn, type ISaleReturn, type ISaleReturnItem, type ReturnCondition, type RefundMethod } from "./SaleReturn";
 export { CreditNote, type ICreditNote, type ICreditNoteRedemption, type CreditNoteStatus } from "./CreditNote";
+export { Expense, type IExpense, type ExpenseCategory, type ExpensePaymentMethod, type ExpensePaidFrom } from "./Expense";
