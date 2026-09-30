@@ -24,6 +24,7 @@ import {
   FileText,
   Tag,
   RotateCcw,
+  Barcode,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -67,6 +68,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, minRole: "MANAGER" },
     { label: "Products", href: "/products", icon: Package, minRole: "MANAGER" },
     { label: "Inventory", href: "/inventory", icon: Boxes, minRole: "MANAGER" },
+    { label: "Barcode & Labels", href: "/labels", icon: Barcode, minRole: "MANAGER" },
     { label: "Purchases & Vendors", href: "/purchases", icon: FileText, minRole: "MANAGER" },
     { label: "Transfers & Branches", href: "/transfers", icon: Truck, minRole: "MANAGER" },
     { label: "Sales History", href: "/sales", icon: Receipt },
