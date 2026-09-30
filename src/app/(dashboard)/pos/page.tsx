@@ -35,10 +35,17 @@ import {
   FileText,
   BookOpen,
   Wallet,
+  MessageSquare,
+  Send,
+  Check,
+  Copy,
+  Share2,
+  Phone,
 } from "lucide-react";
 import ShiftZReportReceipt, { ShiftZReportData } from "@/components/receipts/ShiftZReportReceipt";
 import CreditSettlementReceipt, { CreditSettlementData } from "@/components/receipts/CreditSettlementReceipt";
 import { formatCurrency } from "@/lib/formatters";
+import { formatWhatsAppReceipt, buildWhatsAppUrl, toWhatsAppPhone } from "@/lib/notifications";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import {
   saveCatalogCache,
@@ -162,6 +169,9 @@ export default function POSPage() {
 
   // Post-Sale Modal & Receipt State
   const [completedSale, setCompletedSale] = useState<any | null>(null);
+  const [whatsappPhoneInput, setWhatsappPhoneInput] = useState("");
+  const [copiedPublicReceipt, setCopiedPublicReceipt] = useState(false);
+  const [showWhatsAppSection, setShowWhatsAppSection] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Shift & Cash Drawer Reconciliation State
@@ -869,6 +879,8 @@ export default function POSPage() {
       }
 
       setCompletedSale(completedSaleObj);
+      setWhatsappPhoneInput(offlineRecord.customerPhone || customerPhone || "");
+      setShowWhatsAppSection(Boolean(offlineRecord.customerPhone || customerPhone));
       setIsCheckoutOpen(false);
       setCart([]);
       setOrderDiscount(0);
@@ -899,6 +911,8 @@ export default function POSPage() {
 
       if (data.success) {
         setCompletedSale(data.sale);
+        setWhatsappPhoneInput(data.sale.customerPhone || customerPhone || "");
+        setShowWhatsAppSection(Boolean(data.sale.customerPhone || customerPhone));
         if (paymentMethod === "CREDIT" && matchedCustomer) {
           setMatchedCustomer((prev: any) =>
             prev ? { ...prev, currentBalance: (prev.currentBalance || 0) + netTotal } : null
@@ -1824,23 +1838,118 @@ export default function POSPage() {
                 </div>
               )}
 
+              {/* WhatsApp Digital E-Receipt Section */}
+              <div className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-xl space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="font-bold text-emerald-900 flex items-center gap-1.5">
+                    <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>WhatsApp Digital E-Receipt</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowWhatsAppSection(!showWhatsAppSection)}
+                    className="text-[11px] font-semibold text-emerald-700 hover:underline"
+                  >
+                    {showWhatsAppSection ? "Hide" : "Send Digital Receipt"}
+                  </button>
+                </div>
+
+                {showWhatsAppSection && (
+                  <div className="space-y-2 pt-1 border-t border-emerald-100">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Customer Mobile Number (WhatsApp)
+                      </label>
+                      <div className="relative">
+                        <Phone className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={whatsappPhoneInput}
+                          onChange={(e) => setWhatsappPhoneInput(e.target.value)}
+                          placeholder="e.g. 077 123 4567 or 0712345678"
+                          className="w-full pl-9 pr-3 py-1.5 text-xs font-mono border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <a
+                        href={buildWhatsAppUrl(
+                          whatsappPhoneInput,
+                          formatWhatsAppReceipt({
+                            sale: completedSale,
+                            business: business || {},
+                            publicReceiptUrl:
+                              typeof window !== "undefined"
+                                ? `${window.location.origin}/receipt/${completedSale._id || completedSale.invoiceNumber}`
+                                : undefined,
+                          })
+                        )}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Send on WhatsApp</span>
+                      </a>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (typeof window !== "undefined") {
+                            const url = `${window.location.origin}/receipt/${completedSale._id || completedSale.invoiceNumber}`;
+                            navigator.clipboard.writeText(url);
+                            setCopiedPublicReceipt(true);
+                            setTimeout(() => setCopiedPublicReceipt(false), 2000);
+                          }
+                        }}
+                        className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold border border-slate-200 shadow-2xs flex items-center gap-1 transition"
+                      >
+                        {copiedPublicReceipt ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <span className="text-emerald-700 font-bold">Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Copy Link</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Action Buttons */}
-              <div className="flex items-center gap-2 pt-2">
+              <div className="flex flex-col sm:flex-row items-center gap-2 pt-2">
                 <button
                   type="button"
                   onClick={triggerPrint}
-                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm"
+                  className="w-full sm:flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm"
                 >
                   <Printer className="w-4 h-4" />
-                  <span>Print Thermal Receipt</span>
+                  <span>Print Receipt</span>
                 </button>
+
+                {!showWhatsAppSection && (
+                  <button
+                    type="button"
+                    onClick={() => setShowWhatsAppSection(true)}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-bold border border-emerald-200 flex items-center justify-center gap-1.5 transition"
+                  >
+                    <MessageSquare className="w-4 h-4 text-emerald-600" />
+                    <span>WhatsApp</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
                   onClick={() => setCompletedSale(null)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold"
+                  className="w-full sm:w-auto px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold"
                 >
-                  Next Sale (New Cart)
+                  Next Sale
                 </button>
               </div>
             </div>

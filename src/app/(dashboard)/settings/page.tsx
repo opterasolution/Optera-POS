@@ -25,6 +25,8 @@ import {
   Monitor,
   Trash2,
   Plus,
+  Building,
+  MessageSquare,
 } from "lucide-react";
 import { formatCurrency, isValidSLPhone } from "@/lib/formatters";
 import SubscriptionInvoiceReceipt, {
@@ -125,6 +127,17 @@ export default function SettingsPage() {
       showLogo: false,
       defaultWidth: "58mm" as "58mm" | "80mm",
     },
+    bankDetails: {
+      bankName: "",
+      branchName: "",
+      accountNumber: "",
+      accountName: "",
+    },
+    notificationSettings: {
+      whatsappEnabled: true,
+      autoPromptWhatsappReceipt: true,
+      defaultReminderTemplate: "",
+    },
   });
 
   useEffect(() => {
@@ -158,6 +171,17 @@ export default function SettingsPage() {
               footerMessage: data.business.receiptSettings?.footerMessage || "Please come again!",
               showLogo: data.business.receiptSettings?.showLogo || false,
               defaultWidth: data.business.receiptSettings?.defaultWidth || "58mm",
+            },
+            bankDetails: {
+              bankName: data.business.bankDetails?.bankName || "",
+              branchName: data.business.bankDetails?.branchName || "",
+              accountNumber: data.business.bankDetails?.accountNumber || "",
+              accountName: data.business.bankDetails?.accountName || "",
+            },
+            notificationSettings: {
+              whatsappEnabled: data.business.notificationSettings?.whatsappEnabled ?? true,
+              autoPromptWhatsappReceipt: data.business.notificationSettings?.autoPromptWhatsappReceipt ?? true,
+              defaultReminderTemplate: data.business.notificationSettings?.defaultReminderTemplate || "",
             },
           });
         }
@@ -831,6 +855,151 @@ export default function SettingsPage() {
                         placeholder="Goods returnable within 3 days with receipt."
                         className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
                       />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Store Bank Account & WhatsApp Digital Communications */}
+                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+                  <div className="flex items-center gap-2.5 pb-4 mb-4 border-b border-slate-100 font-semibold text-slate-900 text-sm">
+                    <Building className="w-4 h-4 text-emerald-600" /> Bank Details & WhatsApp Notifications
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Bank Section Header */}
+                    <div className="p-3 bg-emerald-50/70 border border-emerald-100 rounded-xl text-xs text-emerald-900 space-y-1">
+                      <span className="font-bold flex items-center gap-1.5">
+                        <Building className="w-3.5 h-3.5 text-emerald-600" /> Store Bank Account for Debt Settlements
+                      </span>
+                      <p className="text-[11px] text-emerald-700 leading-relaxed">
+                        These bank deposit details are automatically attached to WhatsApp reminders sent to &quot;Naya Potha&quot; credit customers and printed on vendor settlement vouchers.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Bank Name
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.bankDetails.bankName}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              bankDetails: { ...formData.bankDetails, bankName: e.target.value },
+                            })
+                          }
+                          placeholder="e.g. Commercial Bank / BOC / Sampath"
+                          className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Branch Name
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.bankDetails.branchName}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              bankDetails: { ...formData.bankDetails, branchName: e.target.value },
+                            })
+                          }
+                          placeholder="e.g. Peradeniya Branch / Kandy City"
+                          className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Account Number
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.bankDetails.accountNumber}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              bankDetails: { ...formData.bankDetails, accountNumber: e.target.value },
+                            })
+                          }
+                          placeholder="e.g. 1002345678"
+                          className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Account Holder Name
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.bankDetails.accountName}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              bankDetails: { ...formData.bankDetails, accountName: e.target.value },
+                            })
+                          }
+                          placeholder="e.g. Kandy Super Grocers"
+                          className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {/* WhatsApp Digital Notifications Section */}
+                    <div className="pt-3 border-t border-slate-100 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                            <MessageSquare className="w-3.5 h-3.5 text-emerald-600" /> Prompt WhatsApp Receipt on POS Checkout
+                          </div>
+                          <p className="text-[11px] text-slate-500">
+                            Display a 1-click WhatsApp dispatch button immediately when completing a sale at the counter.
+                          </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={formData.notificationSettings.autoPromptWhatsappReceipt}
+                            onChange={(e) =>
+                              setFormData({
+                                ...formData,
+                                notificationSettings: {
+                                  ...formData.notificationSettings,
+                                  autoPromptWhatsappReceipt: e.target.checked,
+                                },
+                              })
+                            }
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                        </label>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Custom Debt Reminder Opening / Note (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.notificationSettings.defaultReminderTemplate}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              notificationSettings: {
+                                ...formData.notificationSettings,
+                                defaultReminderTemplate: e.target.value,
+                              },
+                            })
+                          }
+                          placeholder="e.g. Kindly arrange settlement at your earliest convenience."
+                          className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -14,6 +14,8 @@ export interface ICustomer extends Document {
   creditLimit: number;
   currentBalance: number;
   nicNumber?: string;
+  lastReminderSentAt?: Date;
+  reminderCount?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -38,6 +40,8 @@ const CustomerSchema = new Schema<ICustomer>(
     creditLimit: { type: Number, default: 0, min: 0 },
     currentBalance: { type: Number, default: 0, min: 0 },
     nicNumber: { type: String, trim: true },
+    lastReminderSentAt: { type: Date },
+    reminderCount: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

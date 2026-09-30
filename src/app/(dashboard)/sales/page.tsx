@@ -15,8 +15,14 @@ import {
   TrendingUp,
   FileText,
   Monitor,
+  MessageSquare,
+  Send,
+  Check,
+  Copy,
+  Share2,
 } from "lucide-react";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
+import { formatWhatsAppReceipt, buildWhatsAppUrl } from "@/lib/notifications";
 
 interface SaleRecord {
   _id: string;
@@ -58,6 +64,8 @@ export default function SalesPage() {
 
   // Receipt Modal State
   const [selectedSale, setSelectedSale] = useState<SaleRecord | null>(null);
+  const [business, setBusiness] = useState<any | null>(null);
+  const [copiedReceipt, setCopiedReceipt] = useState(false);
 
   useEffect(() => {
     fetch("/api/registers")
@@ -65,6 +73,15 @@ export default function SalesPage() {
       .then((data) => {
         if (data.success && data.registers) {
           setRegisters(data.registers);
+        }
+      })
+      .catch(() => {});
+
+    fetch("/api/business")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.business) {
+          setBusiness(data.business);
         }
       })
       .catch(() => {});
@@ -373,8 +390,56 @@ export default function SalesPage() {
                 </div>
               </div>
 
+              {/* Digital E-Receipt Sharing Row */}
+              <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                <a
+                  href={buildWhatsAppUrl(
+                    selectedSale.customerPhone,
+                    formatWhatsAppReceipt({
+                      sale: selectedSale,
+                      business: business || {},
+                      publicReceiptUrl:
+                        typeof window !== "undefined"
+                          ? `${window.location.origin}/receipt/${selectedSale._id || selectedSale.invoiceNumber}`
+                          : undefined,
+                    })
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>Send via WhatsApp</span>
+                </a>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (typeof window !== "undefined") {
+                      const url = `${window.location.origin}/receipt/${selectedSale._id || selectedSale.invoiceNumber}`;
+                      navigator.clipboard.writeText(url);
+                      setCopiedReceipt(true);
+                      setTimeout(() => setCopiedReceipt(false), 2000);
+                    }
+                  }}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1 transition"
+                >
+                  {copiedReceipt ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="text-emerald-700 font-bold">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Copy Link</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
               {/* Action Buttons */}
-              <div className="flex items-center gap-2 pt-2">
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={triggerPrint}

@@ -24,6 +24,17 @@ export interface IBusiness extends Document {
     showLogo: boolean;
     defaultWidth: "58mm" | "80mm";
   };
+  bankDetails?: {
+    bankName?: string;
+    branchName?: string;
+    accountNumber?: string;
+    accountName?: string;
+  };
+  notificationSettings?: {
+    whatsappEnabled: boolean;
+    autoPromptWhatsappReceipt: boolean;
+    defaultReminderTemplate?: string;
+  };
   subscription: {
     plan: SubscriptionPlan;
     status: SubscriptionStatus;
@@ -62,6 +73,17 @@ const BusinessSchema = new Schema<IBusiness>(
       footerMessage: { type: String, default: "Please come again" },
       showLogo: { type: Boolean, default: false },
       defaultWidth: { type: String, enum: ["58mm", "80mm"], default: "58mm" },
+    },
+    bankDetails: {
+      bankName: { type: String, trim: true },
+      branchName: { type: String, trim: true },
+      accountNumber: { type: String, trim: true },
+      accountName: { type: String, trim: true },
+    },
+    notificationSettings: {
+      whatsappEnabled: { type: Boolean, default: true },
+      autoPromptWhatsappReceipt: { type: Boolean, default: true },
+      defaultReminderTemplate: { type: String, trim: true },
     },
     subscription: {
       plan: {

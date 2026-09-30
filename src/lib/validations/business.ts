@@ -23,6 +23,21 @@ export const businessSettingsSchema = z.object({
     showLogo: z.boolean().default(false),
     defaultWidth: z.enum(["58mm", "80mm"]).default("58mm"),
   }),
+  bankDetails: z
+    .object({
+      bankName: z.string().optional().or(z.literal("")),
+      branchName: z.string().optional().or(z.literal("")),
+      accountNumber: z.string().optional().or(z.literal("")),
+      accountName: z.string().optional().or(z.literal("")),
+    })
+    .optional(),
+  notificationSettings: z
+    .object({
+      whatsappEnabled: z.boolean().default(true),
+      autoPromptWhatsappReceipt: z.boolean().default(true),
+      defaultReminderTemplate: z.string().max(500).optional().or(z.literal("")),
+    })
+    .optional(),
 });
 
 export type BusinessSettingsInput = z.infer<typeof businessSettingsSchema>;
