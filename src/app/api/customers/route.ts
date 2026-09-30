@@ -18,6 +18,9 @@ const defaultDemoCustomers = [
     visitCount: 6,
     lastVisit: new Date().toISOString(),
     notes: "Regular customer, prefers Ceylon tea",
+    loyaltyPoints: 124,
+    lifetimePointsEarned: 154,
+    lifetimePointsRedeemed: 30,
   },
   {
     _id: "cust_2",
@@ -29,6 +32,9 @@ const defaultDemoCustomers = [
     visitCount: 4,
     lastVisit: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     notes: "Buys weekly groceries",
+    loyaltyPoints: 86,
+    lifetimePointsEarned: 86,
+    lifetimePointsRedeemed: 0,
   },
   {
     _id: "cust_3",
@@ -40,6 +46,9 @@ const defaultDemoCustomers = [
     visitCount: 2,
     lastVisit: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
     notes: "",
+    loyaltyPoints: 34,
+    lifetimePointsEarned: 34,
+    lifetimePointsRedeemed: 0,
   },
 ];
 

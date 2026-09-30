@@ -36,6 +36,14 @@ export interface ThermalReceiptProps {
     changeGiven?: number;
     paymentReference?: string;
     isOffline?: boolean;
+    pointsEarned?: number;
+    pointsRedeemed?: number;
+    loyaltyDiscount?: number;
+    appliedPromotions?: Array<{
+      name: string;
+      code?: string;
+      discountAmount: number;
+    }>;
     createdAt: string | Date;
   };
   width?: "58mm" | "80mm";
@@ -143,7 +151,25 @@ export default function ThermalReceipt({
           <span>{formatCurrency(sale.subtotal)}</span>
         </div>
 
-        {sale.discountTotal && sale.discountTotal > 0 ? (
+        {sale.appliedPromotions && sale.appliedPromotions.length > 0 && (
+          <div className="space-y-0.5 text-zinc-700">
+            {sale.appliedPromotions.map((p, idx) => (
+              <div key={idx} className="flex justify-between text-[10px]">
+                <span className="truncate pr-1">PROMO ({p.name}):</span>
+                <span>-{formatCurrency(p.discountAmount)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {sale.loyaltyDiscount && sale.loyaltyDiscount > 0 ? (
+          <div className="flex justify-between text-zinc-700 text-[10px]">
+            <span>REWARDS ({sale.pointsRedeemed || 0} pts):</span>
+            <span>-{formatCurrency(sale.loyaltyDiscount)}</span>
+          </div>
+        ) : null}
+
+        {sale.discountTotal && sale.discountTotal > 0 && (!sale.appliedPromotions || sale.appliedPromotions.length === 0) && (!sale.loyaltyDiscount || sale.loyaltyDiscount === 0) ? (
           <div className="flex justify-between text-zinc-700">
             <span>Discount:</span>
             <span>-{formatCurrency(sale.discountTotal)}</span>
@@ -203,6 +229,27 @@ export default function ThermalReceipt({
             </div>
           )}
         </div>
+
+        {/* Loyalty Points Earned / Redeemed Block */}
+        {(Boolean(sale.pointsEarned && sale.pointsEarned > 0) || Boolean(sale.pointsRedeemed && sale.pointsRedeemed > 0)) && (
+          <div className="border-t border-dashed border-zinc-400 mt-2 pt-1 text-[10px] space-y-0.5 text-center">
+            <div className="font-bold uppercase tracking-wider text-[9px] text-zinc-800">
+              * LOYALTY REWARDS SUMMARY *
+            </div>
+            {sale.pointsEarned && sale.pointsEarned > 0 ? (
+              <div className="flex justify-between text-zinc-700 font-semibold">
+                <span>Points Earned Today:</span>
+                <span>+{sale.pointsEarned} pts</span>
+              </div>
+            ) : null}
+            {sale.pointsRedeemed && sale.pointsRedeemed > 0 ? (
+              <div className="flex justify-between text-zinc-700 font-semibold">
+                <span>Points Redeemed:</span>
+                <span>-{sale.pointsRedeemed} pts</span>
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
 
       {/* Footer Return Policy */}

@@ -64,6 +64,10 @@ export async function GET(
         paymentMethod: sale.paymentMethod,
         cashReceived: sale.cashReceived,
         changeGiven: sale.changeGiven,
+        pointsEarned: sale.pointsEarned,
+        pointsRedeemed: sale.pointsRedeemed,
+        loyaltyDiscount: sale.loyaltyDiscount,
+        appliedPromotions: sale.appliedPromotions,
         createdAt: sale.createdAt,
       };
 

@@ -38,6 +38,14 @@ export const businessSettingsSchema = z.object({
       defaultReminderTemplate: z.string().max(500).optional().or(z.literal("")),
     })
     .optional(),
+  loyaltySettings: z
+    .object({
+      enabled: z.boolean().default(true),
+      pointsPerSpend: z.number().min(1, "Points spend threshold must be at least 1").default(100),
+      redemptionRate: z.number().min(0.01, "Redemption rate must be positive").default(1),
+      minPointsToRedeem: z.number().min(0).default(50),
+    })
+    .optional(),
 });
 
 export type BusinessSettingsInput = z.infer<typeof businessSettingsSchema>;

@@ -41,12 +41,24 @@ import {
   Copy,
   Share2,
   Phone,
+  Tag,
+  Award,
+  Gift,
+  Coins,
 } from "lucide-react";
 import ShiftZReportReceipt, { ShiftZReportData } from "@/components/receipts/ShiftZReportReceipt";
 import CreditSettlementReceipt, { CreditSettlementData } from "@/components/receipts/CreditSettlementReceipt";
 import { formatCurrency } from "@/lib/formatters";
 import { formatWhatsAppReceipt, buildWhatsAppUrl, toWhatsAppPhone } from "@/lib/notifications";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import {
+  evaluatePromotions,
+  calculateLoyaltyPointsEarned,
+  calculateLoyaltyRedemptionDiscount,
+  PromotionRule,
+  CartEvaluationItem,
+  LoyaltySettingsConfig,
+} from "@/lib/promotions";
 import {
   saveCatalogCache,
   getCatalogCache,
@@ -149,6 +161,19 @@ export default function POSPage() {
   const [customerName, setCustomerName] = useState("Walk-in Customer");
   const [customerPhone, setCustomerPhone] = useState("");
   const [orderDiscount, setOrderDiscount] = useState(0);
+
+  // Promotions & Customer Loyalty Rewards State
+  const [promotions, setPromotions] = useState<PromotionRule[]>([]);
+  const [loyaltySettings, setLoyaltySettings] = useState<LoyaltySettingsConfig>({
+    enabled: true,
+    pointsPerSpend: 100,
+    redemptionRate: 1,
+    minPointsToRedeem: 50,
+  });
+  const [couponCode, setCouponCode] = useState("");
+  const [couponInput, setCouponInput] = useState("");
+  const [redeemLoyaltyPoints, setRedeemLoyaltyPoints] = useState(false);
+  const [pointsToRedeemInput, setPointsToRedeemInput] = useState<number>(0);
 
   // Checkout Modal State
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
@@ -465,18 +490,20 @@ export default function POSPage() {
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const [prodRes, catRes, bizRes, regRes] = await Promise.all([
+      const [prodRes, catRes, bizRes, regRes, promoRes] = await Promise.all([
         fetch("/api/products"),
         fetch("/api/categories"),
         fetch("/api/business"),
         fetch("/api/registers"),
+        fetch("/api/promotions"),
       ]);
 
-      const [prodData, catData, bizData, regData] = await Promise.all([
+      const [prodData, catData, bizData, regData, promoData] = await Promise.all([
         prodRes.json(),
         catRes.json(),
         bizRes.json(),
         regRes.json(),
+        promoRes.json(),
       ]);
 
       const fetchedProducts = prodData.success ? prodData.products || [] : [];
@@ -487,6 +514,10 @@ export default function POSPage() {
       if (prodData.success) setProducts(fetchedProducts);
       if (catData.success) setCategories(fetchedCategories);
       if (bizData.success) setBusiness(fetchedBusiness);
+      if (promoData.success) {
+        setPromotions(promoData.promotions || []);
+        if (promoData.loyaltySettings) setLoyaltySettings(promoData.loyaltySettings);
+      }
 
       if (regData.success && fetchedRegisters.length > 0) {
         setRegisters(fetchedRegisters);
@@ -679,9 +710,51 @@ export default function POSPage() {
     }
   };
 
-  // Financial Calculations
+  // Financial Calculations & Promotions Engine Evaluation
   const subtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-  const totalDiscount = orderDiscount;
+
+  // Evaluate active promotions against cart
+  const cartEvalItems: CartEvaluationItem[] = cart.map((item) => {
+    const prod = products.find((p) => p._id === item.productId);
+    const catId = typeof prod?.categoryId === "object" ? prod?.categoryId?._id : prod?.categoryId;
+    return {
+      productId: item.productId,
+      name: item.name,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      categoryId: catId,
+      subtotal: item.unitPrice * item.quantity,
+    };
+  });
+
+  const promoResult = evaluatePromotions(
+    cartEvalItems,
+    subtotal,
+    promotions,
+    couponCode || undefined
+  );
+
+  // Evaluate loyalty points redemption
+  const customerAvailablePoints = matchedCustomer?.loyaltyPoints || 0;
+  const billAfterPromo = Math.max(0, subtotal - promoResult.totalPromoDiscount - orderDiscount);
+  const maxUsablePoints = Math.min(
+    customerAvailablePoints,
+    Math.floor(billAfterPromo / (loyaltySettings.redemptionRate || 1))
+  );
+  const pointsToRedeem = redeemLoyaltyPoints
+    ? pointsToRedeemInput > 0
+      ? Math.min(pointsToRedeemInput, customerAvailablePoints)
+      : maxUsablePoints
+    : 0;
+
+  const loyaltyResult = calculateLoyaltyRedemptionDiscount(
+    pointsToRedeem,
+    customerAvailablePoints,
+    billAfterPromo,
+    loyaltySettings
+  );
+
+  const totalDiscount = Math.round((orderDiscount + promoResult.totalPromoDiscount + (redeemLoyaltyPoints ? loyaltyResult.discountAmount : 0)) * 100) / 100;
 
   // Sri Lanka Tax Calculation
   const isTaxEnabled = business?.taxSettings?.enabled || false;
@@ -689,17 +762,20 @@ export default function POSPage() {
   const isExclusive = business?.taxSettings?.type === "EXCLUSIVE";
 
   let taxAmount = 0;
-  let netTotal = subtotal - totalDiscount;
+  let netTotal = Math.max(0, subtotal - totalDiscount);
 
   if (isTaxEnabled) {
     if (isExclusive) {
-      taxAmount = ((subtotal - totalDiscount) * taxRate) / 100;
+      taxAmount = (netTotal * taxRate) / 100;
       netTotal += taxAmount;
     } else {
       // Inclusive: tax is already inside the price
       taxAmount = (netTotal * taxRate) / (100 + taxRate);
     }
   }
+
+  // Points that will be earned on this transaction
+  const pointsEarnedOnSale = calculateLoyaltyPointsEarned(netTotal, loyaltySettings);
 
   // Cash Change Calculation
   const cashGivenNum = parseFloat(cashReceived) || 0;
@@ -799,6 +875,9 @@ export default function POSPage() {
       subtotal,
       taxTotal: taxAmount,
       netTotal,
+      pointsRedeemed: redeemLoyaltyPoints ? pointsToRedeem : 0,
+      loyaltyDiscount: redeemLoyaltyPoints ? loyaltyResult.discountAmount : 0,
+      appliedPromotions: promoResult.appliedPromotions,
     };
 
     // Fallback: Record sale locally in offline queue and update local counter stock
@@ -868,6 +947,10 @@ export default function POSPage() {
         paymentMethod,
         cashReceived: paymentMethod === "CASH" ? cashGivenNum : undefined,
         changeGiven: paymentMethod === "CASH" ? changeDue : undefined,
+        pointsEarned: pointsEarnedOnSale,
+        pointsRedeemed: redeemLoyaltyPoints ? pointsToRedeem : 0,
+        loyaltyDiscount: redeemLoyaltyPoints ? loyaltyResult.discountAmount : 0,
+        appliedPromotions: promoResult.appliedPromotions,
         createdAt: nowIso,
         isOffline: true,
       };
@@ -884,6 +967,10 @@ export default function POSPage() {
       setIsCheckoutOpen(false);
       setCart([]);
       setOrderDiscount(0);
+      setCouponCode("");
+      setCouponInput("");
+      setRedeemLoyaltyPoints(false);
+      setPointsToRedeemInput(0);
       refreshQueueCount();
       if (selectedRegister?._id) fetchCurrentShift(selectedRegister._id);
 
@@ -921,6 +1008,10 @@ export default function POSPage() {
         setIsCheckoutOpen(false);
         setCart([]);
         setOrderDiscount(0);
+        setCouponCode("");
+        setCouponInput("");
+        setRedeemLoyaltyPoints(false);
+        setPointsToRedeemInput(0);
         // Refresh product stock & active shift metrics
         loadInitialData();
         if (selectedRegister?._id) fetchCurrentShift(selectedRegister._id);
@@ -1369,15 +1460,83 @@ export default function POSPage() {
 
           {/* Financial Summary & Pay Action */}
           <div className="p-4 border-t border-slate-200 bg-slate-50 space-y-2.5">
+            {/* Coupon Code Input Row */}
+            <div className="flex items-center gap-1.5 pb-1">
+              <div className="relative flex-1">
+                <Tag className="w-3 h-3 absolute left-2 top-2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Coupon Code (e.g. MEGA5)"
+                  value={couponInput}
+                  onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                  className="w-full pl-6 pr-2 py-1 text-xs font-mono uppercase border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+              {couponCode ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCouponCode("");
+                    setCouponInput("");
+                  }}
+                  className="px-2 py-1 text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-lg"
+                >
+                  Clear
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setCouponCode(couponInput.trim().toUpperCase())}
+                  disabled={!couponInput.trim()}
+                  className="px-2.5 py-1 text-xs font-semibold bg-slate-800 text-white hover:bg-slate-900 rounded-lg disabled:opacity-40"
+                >
+                  Apply
+                </button>
+              )}
+            </div>
+
             <div className="space-y-1 text-xs">
               <div className="flex justify-between text-slate-600">
                 <span>Subtotal:</span>
                 <span className="font-mono">{formatCurrency(subtotal)}</span>
               </div>
 
-              {/* Discount Row */}
+              {/* Applied Promotions Breakdown */}
+              {promoResult.appliedPromotions.length > 0 && (
+                <div className="space-y-1 py-1">
+                  {promoResult.appliedPromotions.map((p, idx) => (
+                    <div
+                      key={idx}
+                      className="flex justify-between items-center text-xs text-emerald-800 bg-emerald-50/80 px-2 py-1 rounded border border-emerald-100"
+                    >
+                      <span className="flex items-center gap-1 truncate pr-1">
+                        <Tag className="w-3 h-3 text-emerald-600 shrink-0" />
+                        <span className="truncate">{p.name}:</span>
+                      </span>
+                      <span className="font-mono font-bold shrink-0">
+                        -{formatCurrency(p.discountAmount)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Loyalty Points Redeemed Row */}
+              {redeemLoyaltyPoints && loyaltyResult.discountAmount > 0 && (
+                <div className="flex justify-between items-center text-xs text-purple-800 bg-purple-50/80 px-2 py-1 rounded border border-purple-100">
+                  <span className="flex items-center gap-1">
+                    <Award className="w-3 h-3 text-purple-600 shrink-0" />
+                    <span>Loyalty Rewards ({pointsToRedeem} pts):</span>
+                  </span>
+                  <span className="font-mono font-bold">
+                    -{formatCurrency(loyaltyResult.discountAmount)}
+                  </span>
+                </div>
+              )}
+
+              {/* Manual Discount Row */}
               <div className="flex justify-between items-center text-slate-600">
-                <span>Discount (Rs.):</span>
+                <span>Cashier Discount (Rs.):</span>
                 <input
                   type="number"
                   min="0"
@@ -1397,6 +1556,16 @@ export default function POSPage() {
                     {isExclusive ? " excl." : " incl."}):
                   </span>
                   <span className="font-mono">{formatCurrency(taxAmount)}</span>
+                </div>
+              )}
+
+              {/* Loyalty Points Earned Preview */}
+              {loyaltySettings.enabled && pointsEarnedOnSale > 0 && (
+                <div className="flex justify-between text-[11px] text-purple-700 pt-0.5">
+                  <span className="flex items-center gap-1">
+                    <Coins className="w-3 h-3" /> Reward Points Earned:
+                  </span>
+                  <span className="font-bold">+{pointsEarnedOnSale} pts</span>
                 </div>
               )}
 
@@ -1448,6 +1617,66 @@ export default function POSPage() {
                   {formatCurrency(netTotal)}
                 </div>
               </div>
+
+              {/* Customer Loyalty Points Redemption Block */}
+              {loyaltySettings.enabled && matchedCustomer && (
+                <div className="p-3.5 bg-purple-50/70 border border-purple-200 rounded-xl space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 font-bold text-purple-950">
+                      <Award className="w-4 h-4 text-purple-700" />
+                      <span>Customer Loyalty Points</span>
+                    </div>
+                    <span className="font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-full text-[11px]">
+                      {(matchedCustomer.loyaltyPoints || 0).toLocaleString()} pts available
+                    </span>
+                  </div>
+
+                  {(matchedCustomer.loyaltyPoints || 0) >= (loyaltySettings.minPointsToRedeem || 50) ? (
+                    <div className="pt-1.5 border-t border-purple-200/60 space-y-2">
+                      <label className="flex items-center justify-between cursor-pointer">
+                        <span className="text-slate-700 font-medium">Redeem points for bill discount?</span>
+                        <input
+                          type="checkbox"
+                          checked={redeemLoyaltyPoints}
+                          onChange={(e) => {
+                            setRedeemLoyaltyPoints(e.target.checked);
+                            if (e.target.checked && pointsToRedeemInput === 0) {
+                              setPointsToRedeemInput(maxUsablePoints);
+                            }
+                          }}
+                          className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500 cursor-pointer"
+                        />
+                      </label>
+
+                      {redeemLoyaltyPoints && (
+                        <div className="p-2 bg-white rounded-lg border border-purple-200 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1">
+                            <span className="text-slate-600 font-medium">Points to use:</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max={maxUsablePoints}
+                              value={pointsToRedeemInput || maxUsablePoints}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 0;
+                                setPointsToRedeemInput(Math.min(val, maxUsablePoints));
+                              }}
+                              className="w-20 px-2 py-0.5 border border-purple-300 rounded font-mono font-bold text-purple-900 text-center text-xs"
+                            />
+                          </div>
+                          <span className="font-bold text-emerald-700 font-mono">
+                            -{formatCurrency(loyaltyResult.discountAmount)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-purple-700">
+                      Minimum {loyaltySettings.minPointsToRedeem || 50} points required to redeem rewards (Customer has {matchedCustomer.loyaltyPoints || 0} pts).
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Payment Method Selector Pills */}
               <div className="grid grid-cols-2 gap-2">

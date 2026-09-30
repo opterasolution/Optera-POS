@@ -9,6 +9,7 @@ import { InventoryMovement } from "@/models/InventoryMovement";
 import { AuditLog } from "@/models/AuditLog";
 import { Shift } from "@/models/Shift";
 import { CreditTransaction } from "@/models/CreditTransaction";
+import { Promotion } from "@/models/Promotion";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 import { createSaleSchema } from "@/lib/validations/sale";
 
@@ -37,6 +38,9 @@ export async function POST(req: Request) {
       registerId,
       registerName,
       shiftId,
+      pointsRedeemed,
+      loyaltyDiscount,
+      appliedPromotions,
     } = parsed.data;
 
     if (Boolean(process.env.MONGODB_URI)) {
@@ -151,9 +155,10 @@ export async function POST(req: Request) {
       const totalSalesCount = await Sale.countDocuments({ businessId });
       const invoiceNumber = `INV-${year}-${(totalSalesCount + 1).toString().padStart(5, "0")}`;
 
-      // 7. Handle Customer assignment or creation & Credit verification
+      // 7. Handle Customer assignment or creation & Credit verification & Loyalty Points
       let customerId = undefined;
       let customerDoc: any = null;
+      let pointsEarned = 0;
 
       if (customerPhone && customerPhone.trim() !== "") {
         customerDoc = await Customer.findOne({
@@ -169,6 +174,9 @@ export async function POST(req: Request) {
             totalSpent: netTotal,
             visitCount: 1,
             lastVisit: new Date(),
+            loyaltyPoints: 0,
+            lifetimePointsEarned: 0,
+            lifetimePointsRedeemed: 0,
           });
         } else {
           customerDoc.totalSpent += netTotal;
@@ -177,9 +185,52 @@ export async function POST(req: Request) {
           if (customerName && customerName !== "Walk-in Customer") {
             customerDoc.name = customerName;
           }
-          await customerDoc.save();
         }
         customerId = customerDoc._id;
+
+        // If loyalty points are being redeemed, verify and deduct
+        if (pointsRedeemed && pointsRedeemed > 0) {
+          const availablePoints = customerDoc.loyaltyPoints || 0;
+          const minPoints = business?.loyaltySettings?.minPointsToRedeem || 50;
+          if (availablePoints < minPoints) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: `Minimum ${minPoints} loyalty points required to redeem rewards (Customer has ${availablePoints} pts).`,
+              },
+              { status: 400 }
+            );
+          }
+          if (pointsRedeemed > availablePoints) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: `Cannot redeem ${pointsRedeemed} points. Customer only has ${availablePoints} points available.`,
+              },
+              { status: 400 }
+            );
+          }
+          customerDoc.loyaltyPoints = Math.max(0, availablePoints - pointsRedeemed);
+          customerDoc.lifetimePointsRedeemed = (customerDoc.lifetimePointsRedeemed || 0) + pointsRedeemed;
+        }
+
+        // Accrue loyalty points earned on this net purchase
+        if (business?.loyaltySettings?.enabled !== false && netTotal > 0) {
+          const spendPerPoint = business?.loyaltySettings?.pointsPerSpend || 100;
+          pointsEarned = Math.floor(netTotal / spendPerPoint);
+          customerDoc.loyaltyPoints = (customerDoc.loyaltyPoints || 0) + pointsEarned;
+          customerDoc.lifetimePointsEarned = (customerDoc.lifetimePointsEarned || 0) + pointsEarned;
+        }
+
+        await customerDoc.save();
+      } else if (pointsRedeemed && pointsRedeemed > 0) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "A registered customer phone number is required to redeem loyalty points.",
+          },
+          { status: 400 }
+        );
       }
 
       // If sale is on CREDIT (Naya Potha), enforce credit qualification and ceilings
@@ -221,6 +272,15 @@ export async function POST(req: Request) {
         await customerDoc.save();
       }
 
+      // Increment usage count on applied promotions
+      if (appliedPromotions && appliedPromotions.length > 0) {
+        for (const ap of appliedPromotions) {
+          if (ap.promoId && Types.ObjectId.isValid(ap.promoId)) {
+            await Promotion.findByIdAndUpdate(ap.promoId, { $inc: { usageCount: 1 } });
+          }
+        }
+      }
+
       // 8. Determine active shift if not explicitly provided
       let resolvedShiftId = shiftId && shiftId.trim() ? new Types.ObjectId(shiftId) : undefined;
       if (!resolvedShiftId && registerId && registerId.trim()) {
@@ -256,6 +316,15 @@ export async function POST(req: Request) {
         registerName: registerName?.trim() || "Counter 01 (Main)",
         shiftId: resolvedShiftId,
         isCreditSale: paymentMethod === "CREDIT",
+        pointsEarned,
+        pointsRedeemed: pointsRedeemed || 0,
+        loyaltyDiscount: loyaltyDiscount || 0,
+        appliedPromotions: appliedPromotions?.map((ap) => ({
+          promoId: ap.promoId && Types.ObjectId.isValid(ap.promoId) ? new Types.ObjectId(ap.promoId) : undefined,
+          name: ap.name,
+          code: ap.code,
+          discountAmount: ap.discountAmount,
+        })),
         status: "COMPLETED",
       });
 
@@ -317,7 +386,15 @@ export async function POST(req: Request) {
         action: "SALE_COMPLETED",
         entityType: "Sale",
         entityId: sale._id.toString(),
-        details: { invoiceNumber, netTotal, paymentMethod, itemsCount: items.length },
+        details: {
+          invoiceNumber,
+          netTotal,
+          paymentMethod,
+          itemsCount: items.length,
+          pointsEarned,
+          pointsRedeemed: pointsRedeemed || 0,
+          promotionsCount: appliedPromotions?.length || 0,
+        },
       });
 
       return NextResponse.json({ success: true, sale }, { status: 201 });
@@ -345,6 +422,10 @@ export async function POST(req: Request) {
       paymentMethod,
       cashReceived: paymentMethod === "CASH" ? cashReceived : undefined,
       changeGiven: paymentMethod === "CASH" ? Math.max(0, (cashReceived || 0) - (subtotalCalc - discountTotal)) : undefined,
+      pointsEarned: Math.floor((subtotalCalc - discountTotal) / 100),
+      pointsRedeemed: pointsRedeemed || 0,
+      loyaltyDiscount: loyaltyDiscount || 0,
+      appliedPromotions: appliedPromotions || [],
       status: "COMPLETED",
       createdAt: new Date().toISOString(),
     };

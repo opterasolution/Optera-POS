@@ -16,3 +16,4 @@ export { StockTransfer, type IStockTransfer, type StockTransferStatus, type ISto
 export { Supplier, type ISupplier } from "./Supplier";
 export { PurchaseOrder, type IPurchaseOrder, type PurchaseOrderStatus, type IPurchaseOrderItem } from "./PurchaseOrder";
 export { SupplierPayment, type ISupplierPayment, type SupplierPaymentMethod } from "./SupplierPayment";
+export { Promotion, type IPromotion, type PromotionType, type PromoDiscountType } from "./Promotion";

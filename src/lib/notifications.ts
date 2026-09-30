@@ -60,6 +60,14 @@ export interface ReceiptMessageOptions {
     paymentMethod: string;
     cashReceived?: number;
     changeGiven?: number;
+    pointsEarned?: number;
+    pointsRedeemed?: number;
+    loyaltyDiscount?: number;
+    appliedPromotions?: Array<{
+      name: string;
+      code?: string;
+      discountAmount: number;
+    }>;
   };
   business: {
     name?: string;
@@ -118,7 +126,20 @@ export function formatWhatsAppReceipt({
   text += `*Items Purchased:*\n${itemsText}${moreItemsText}\n`;
   text += `---------------------------------\n`;
   text += `*Subtotal:* ${formatCurrency(sale.subtotal)}\n`;
-  if ((sale.discountTotal || 0) > 0) {
+
+  // Applied Promotions breakdown
+  if (sale.appliedPromotions && sale.appliedPromotions.length > 0) {
+    for (const p of sale.appliedPromotions) {
+      text += `*Promo (${p.name}):* -${formatCurrency(p.discountAmount)}\n`;
+    }
+  }
+
+  // Loyalty Discount
+  if (sale.loyaltyDiscount && sale.loyaltyDiscount > 0) {
+    text += `*Loyalty Discount (${sale.pointsRedeemed || 0} pts):* -${formatCurrency(sale.loyaltyDiscount)}\n`;
+  }
+
+  if ((sale.discountTotal || 0) > 0 && (!sale.appliedPromotions || sale.appliedPromotions.length === 0) && (!sale.loyaltyDiscount || sale.loyaltyDiscount === 0)) {
     text += `*Discount:* -${formatCurrency(sale.discountTotal)}\n`;
   }
   if ((sale.taxTotal || 0) > 0) {
@@ -126,6 +147,18 @@ export function formatWhatsAppReceipt({
   }
   text += `*NET TOTAL:* *${formatCurrency(sale.netTotal)}*\n`;
   text += `${paymentDetails}\n`;
+
+  // Loyalty Points Rewards breakdown
+  if ((sale.pointsEarned && sale.pointsEarned > 0) || (sale.pointsRedeemed && sale.pointsRedeemed > 0)) {
+    text += `---------------------------------\n`;
+    text += `⭐ *Loyalty Rewards Summary:*\n`;
+    if (sale.pointsEarned && sale.pointsEarned > 0) {
+      text += `• Points Earned: +${sale.pointsEarned} pts\n`;
+    }
+    if (sale.pointsRedeemed && sale.pointsRedeemed > 0) {
+      text += `• Points Redeemed: -${sale.pointsRedeemed} pts\n`;
+    }
+  }
   text += `---------------------------------\n`;
 
   if (publicReceiptUrl) {

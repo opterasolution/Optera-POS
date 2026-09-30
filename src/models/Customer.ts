@@ -16,6 +16,9 @@ export interface ICustomer extends Document {
   nicNumber?: string;
   lastReminderSentAt?: Date;
   reminderCount?: number;
+  loyaltyPoints?: number;
+  lifetimePointsEarned?: number;
+  lifetimePointsRedeemed?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -42,6 +45,9 @@ const CustomerSchema = new Schema<ICustomer>(
     nicNumber: { type: String, trim: true },
     lastReminderSentAt: { type: Date },
     reminderCount: { type: Number, default: 0 },
+    loyaltyPoints: { type: Number, default: 0, min: 0 },
+    lifetimePointsEarned: { type: Number, default: 0, min: 0 },
+    lifetimePointsRedeemed: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );

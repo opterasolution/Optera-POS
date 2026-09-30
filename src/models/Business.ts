@@ -35,6 +35,12 @@ export interface IBusiness extends Document {
     autoPromptWhatsappReceipt: boolean;
     defaultReminderTemplate?: string;
   };
+  loyaltySettings?: {
+    enabled: boolean;
+    pointsPerSpend: number;
+    redemptionRate: number;
+    minPointsToRedeem: number;
+  };
   subscription: {
     plan: SubscriptionPlan;
     status: SubscriptionStatus;
@@ -84,6 +90,12 @@ const BusinessSchema = new Schema<IBusiness>(
       whatsappEnabled: { type: Boolean, default: true },
       autoPromptWhatsappReceipt: { type: Boolean, default: true },
       defaultReminderTemplate: { type: String, trim: true },
+    },
+    loyaltySettings: {
+      enabled: { type: Boolean, default: true },
+      pointsPerSpend: { type: Number, default: 100, min: 1 },
+      redemptionRate: { type: Number, default: 1, min: 0.01 },
+      minPointsToRedeem: { type: Number, default: 50, min: 0 },
     },
     subscription: {
       plan: {

@@ -22,6 +22,7 @@ import {
   Clock,
   Truck,
   FileText,
+  Tag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -70,6 +71,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { label: "Sales History", href: "/sales", icon: Receipt },
     { label: "Shifts & Drawers", href: "/shifts", icon: Clock },
     { label: "Customers", href: "/customers", icon: Users },
+    { label: "Promotions & Loyalty", href: "/promotions", icon: Tag, minRole: "MANAGER" },
     { label: "Reports", href: "/reports", icon: BarChart3, minRole: "OWNER" },
     { label: "Store Settings", href: "/settings", icon: Settings, minRole: "OWNER" },
   ];

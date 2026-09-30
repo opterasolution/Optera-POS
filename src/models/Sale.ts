@@ -39,6 +39,15 @@ export interface ISale extends Document {
   isCreditSale?: boolean;
   creditTransactionId?: Types.ObjectId;
   offlineId?: string; // Client-generated UUID for idempotent synchronization
+  pointsEarned?: number;
+  pointsRedeemed?: number;
+  loyaltyDiscount?: number;
+  appliedPromotions?: Array<{
+    promoId?: Types.ObjectId;
+    name: string;
+    code?: string;
+    discountAmount: number;
+  }>;
   status: SaleStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -97,6 +106,17 @@ const SaleSchema = new Schema<ISale>(
     isCreditSale: { type: Boolean, default: false },
     creditTransactionId: { type: Schema.Types.ObjectId, ref: "CreditTransaction" },
     offlineId: { type: String, trim: true, sparse: true, index: true },
+    pointsEarned: { type: Number, default: 0, min: 0 },
+    pointsRedeemed: { type: Number, default: 0, min: 0 },
+    loyaltyDiscount: { type: Number, default: 0, min: 0 },
+    appliedPromotions: [
+      {
+        promoId: { type: Schema.Types.ObjectId, ref: "Promotion" },
+        name: { type: String },
+        code: { type: String },
+        discountAmount: { type: Number, default: 0 },
+      },
+    ],
     status: {
       type: String,
       enum: ["COMPLETED", "CANCELLED", "REFUNDED"],

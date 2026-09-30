@@ -19,6 +19,18 @@ export const createSaleSchema = z.object({
   registerId: z.string().optional().or(z.literal("")),
   registerName: z.string().optional().or(z.literal("")),
   shiftId: z.string().optional().or(z.literal("")),
+  pointsRedeemed: z.number().min(0).default(0),
+  loyaltyDiscount: z.number().min(0).default(0),
+  appliedPromotions: z
+    .array(
+      z.object({
+        promoId: z.string().optional().or(z.literal("")),
+        name: z.string(),
+        code: z.string().optional().or(z.literal("")),
+        discountAmount: z.number().min(0),
+      })
+    )
+    .optional(),
 });
 
 export type CreateSaleInput = z.infer<typeof createSaleSchema>;
