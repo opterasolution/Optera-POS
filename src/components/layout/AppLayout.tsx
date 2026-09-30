@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   Clock,
   Truck,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -64,6 +65,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, minRole: "MANAGER" },
     { label: "Products", href: "/products", icon: Package, minRole: "MANAGER" },
     { label: "Inventory", href: "/inventory", icon: Boxes, minRole: "MANAGER" },
+    { label: "Purchases & Vendors", href: "/purchases", icon: FileText, minRole: "MANAGER" },
     { label: "Transfers & Branches", href: "/transfers", icon: Truck, minRole: "MANAGER" },
     { label: "Sales History", href: "/sales", icon: Receipt },
     { label: "Shifts & Drawers", href: "/shifts", icon: Clock },

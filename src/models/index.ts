@@ -13,3 +13,6 @@ export { CreditTransaction, type ICreditTransaction, type CreditTransactionType,
 export { Branch, type IBranch, type BranchType } from "./Branch";
 export { BranchStock, type IBranchStock } from "./BranchStock";
 export { StockTransfer, type IStockTransfer, type StockTransferStatus, type IStockTransferItem } from "./StockTransfer";
+export { Supplier, type ISupplier } from "./Supplier";
+export { PurchaseOrder, type IPurchaseOrder, type PurchaseOrderStatus, type IPurchaseOrderItem } from "./PurchaseOrder";
+export { SupplierPayment, type ISupplierPayment, type SupplierPaymentMethod } from "./SupplierPayment";
