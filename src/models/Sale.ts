@@ -1,7 +1,8 @@
 import mongoose, { Schema, Document, Model, Types } from "mongoose";
 
-export type PaymentMethod = "CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CREDIT" | "OTHER";
+export type PaymentMethod = "CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CREDIT" | "CREDIT_NOTE" | "OTHER";
 export type SaleStatus = "COMPLETED" | "CANCELLED" | "REFUNDED";
+export type SaleReturnStatus = "NONE" | "PARTIAL" | "FULLY_RETURNED";
 
 export interface ISaleItem {
   productId: Types.ObjectId;
@@ -10,6 +11,7 @@ export interface ISaleItem {
   unitPrice: number;
   costPrice: number; // Snapshot of cost at sale time for accurate profit reports
   quantity: number;
+  returnedQuantity?: number;
   subtotal: number;
   discount: number;
   total: number;
@@ -48,6 +50,13 @@ export interface ISale extends Document {
     code?: string;
     discountAmount: number;
   }>;
+  returnedTotal?: number;
+  returnStatus?: SaleReturnStatus;
+  creditNoteRedeemed?: {
+    creditNoteId?: Types.ObjectId;
+    creditNoteNumber: string;
+    amount: number;
+  };
   status: SaleStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -61,6 +70,7 @@ const SaleItemSchema = new Schema<ISaleItem>(
     unitPrice: { type: Number, required: true, min: 0 },
     costPrice: { type: Number, required: true, min: 0, default: 0 },
     quantity: { type: Number, required: true, min: 1 },
+    returnedQuantity: { type: Number, default: 0, min: 0 },
     subtotal: { type: Number, required: true, min: 0 },
     discount: { type: Number, default: 0, min: 0 },
     total: { type: Number, required: true, min: 0 },
@@ -93,7 +103,7 @@ const SaleSchema = new Schema<ISale>(
     netTotal: { type: Number, required: true, min: 0 },
     paymentMethod: {
       type: String,
-      enum: ["CASH", "CARD", "QR", "BANK_TRANSFER", "CREDIT", "OTHER"],
+      enum: ["CASH", "CARD", "QR", "BANK_TRANSFER", "CREDIT", "CREDIT_NOTE", "OTHER"],
       required: true,
     },
     cashReceived: { type: Number, min: 0 },
@@ -117,6 +127,17 @@ const SaleSchema = new Schema<ISale>(
         discountAmount: { type: Number, default: 0 },
       },
     ],
+    returnedTotal: { type: Number, default: 0, min: 0 },
+    returnStatus: {
+      type: String,
+      enum: ["NONE", "PARTIAL", "FULLY_RETURNED"],
+      default: "NONE",
+    },
+    creditNoteRedeemed: {
+      creditNoteId: { type: Schema.Types.ObjectId, ref: "CreditNote" },
+      creditNoteNumber: { type: String, trim: true },
+      amount: { type: Number, min: 0 },
+    },
     status: {
       type: String,
       enum: ["COMPLETED", "CANCELLED", "REFUNDED"],

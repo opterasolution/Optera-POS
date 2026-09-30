@@ -45,6 +45,7 @@ import {
   Award,
   Gift,
   Coins,
+  Ticket,
 } from "lucide-react";
 import ShiftZReportReceipt, { ShiftZReportData } from "@/components/receipts/ShiftZReportReceipt";
 import CreditSettlementReceipt, { CreditSettlementData } from "@/components/receipts/CreditSettlementReceipt";
@@ -177,9 +178,13 @@ export default function POSPage() {
 
   // Checkout Modal State
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CREDIT">("CASH");
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CREDIT" | "CREDIT_NOTE">("CASH");
   const [cashReceived, setCashReceived] = useState<string>("");
   const [paymentReference, setPaymentReference] = useState("");
+  const [creditNoteCodeInput, setCreditNoteCodeInput] = useState("");
+  const [validatedCreditNote, setValidatedCreditNote] = useState<any | null>(null);
+  const [validatingCreditNote, setValidatingCreditNote] = useState(false);
+  const [creditNoteError, setCreditNoteError] = useState<string | null>(null);
   const [submittingSale, setSubmittingSale] = useState(false);
 
   // Customer Credit & Quick Debt Settlement State
@@ -818,7 +823,38 @@ export default function POSPage() {
     }
 
     setCashReceived(Math.ceil(netTotal).toString());
+    setValidatedCreditNote(null);
+    setCreditNoteCodeInput("");
+    setCreditNoteError(null);
     setIsCheckoutOpen(true);
+  };
+
+  // Validate Credit Note voucher code
+  const validateCreditNoteCode = async () => {
+    if (!creditNoteCodeInput.trim()) return;
+    setValidatingCreditNote(true);
+    setCreditNoteError(null);
+    setValidatedCreditNote(null);
+    try {
+      const res = await fetch(
+        `/api/credit-notes?code=${encodeURIComponent(creditNoteCodeInput.trim().toUpperCase())}`
+      );
+      const data = await res.json();
+      if (data.success && data.valid && data.creditNote) {
+        if (data.creditNote.remainingBalance < netTotal) {
+          setCreditNoteError(
+            `Voucher has Rs. ${data.creditNote.remainingBalance.toFixed(2)}, which is less than bill total of Rs. ${netTotal.toFixed(2)}.`
+          );
+        }
+        setValidatedCreditNote(data.creditNote);
+      } else {
+        setCreditNoteError(data.error || "Invalid or expired credit note voucher.");
+      }
+    } catch (err: any) {
+      setCreditNoteError("Failed to validate credit note.");
+    } finally {
+      setValidatingCreditNote(false);
+    }
   };
 
   // Complete Sale Submission (with offline fallback and automatic queueing)
@@ -826,6 +862,19 @@ export default function POSPage() {
     if (paymentMethod === "CASH" && cashGivenNum < netTotal) {
       alert(`Cash received (Rs. ${cashGivenNum}) is less than total bill (Rs. ${netTotal.toFixed(2)}).`);
       return;
+    }
+
+    if (paymentMethod === "CREDIT_NOTE") {
+      if (!validatedCreditNote) {
+        alert("Please enter and validate an active Credit Note voucher first.");
+        return;
+      }
+      if (validatedCreditNote.remainingBalance < netTotal) {
+        alert(
+          `Credit Note balance (Rs. ${validatedCreditNote.remainingBalance.toFixed(2)}) is insufficient for this sale total of Rs. ${netTotal.toFixed(2)}.`
+        );
+        return;
+      }
     }
 
     if (paymentMethod === "CREDIT") {
@@ -872,6 +921,10 @@ export default function POSPage() {
       cashReceived: paymentMethod === "CASH" ? cashGivenNum : undefined,
       changeGiven: paymentMethod === "CASH" ? changeDue : undefined,
       paymentReference: paymentReference.trim() || undefined,
+      creditNoteNumber:
+        paymentMethod === "CREDIT_NOTE" && validatedCreditNote
+          ? validatedCreditNote.creditNoteNumber
+          : undefined,
       subtotal,
       taxTotal: taxAmount,
       netTotal,
@@ -1735,14 +1788,27 @@ export default function POSPage() {
                 <button
                   type="button"
                   onClick={() => setPaymentMethod("CREDIT")}
-                  className={`p-3 rounded-xl border flex items-center gap-2.5 text-xs font-semibold transition-all col-span-2 ${
+                  className={`p-3 rounded-xl border flex items-center gap-2.5 text-xs font-semibold transition-all ${
                     paymentMethod === "CREDIT"
                       ? "bg-amber-600 text-white border-amber-600 shadow-sm"
                       : "border-amber-300 bg-amber-50/40 text-amber-900 hover:bg-amber-100/50"
                   }`}
                 >
                   <BookOpen className="w-4 h-4" />
-                  <span>Store Credit (Naya Potha / ණය පොත)</span>
+                  <span>Store Credit (Naya Potha)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod("CREDIT_NOTE")}
+                  className={`p-3 rounded-xl border flex items-center gap-2.5 text-xs font-semibold transition-all ${
+                    paymentMethod === "CREDIT_NOTE"
+                      ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                      : "border-indigo-300 bg-indigo-50/40 text-indigo-900 hover:bg-indigo-100/50"
+                  }`}
+                >
+                  <Ticket className="w-4 h-4" />
+                  <span>Credit Voucher (CN-...)</span>
                 </button>
               </div>
 
@@ -1889,8 +1955,91 @@ export default function POSPage() {
                 </div>
               )}
 
+              {/* Store Credit Note Redemption UX */}
+              {paymentMethod === "CREDIT_NOTE" && (
+                <div className="p-4 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-indigo-200/60">
+                    <div className="flex items-center gap-1.5">
+                      <Ticket className="w-4 h-4 text-indigo-700" />
+                      <span className="text-xs font-bold text-indigo-950">
+                        Redeem Store Credit Note Voucher
+                      </span>
+                    </div>
+                    {validatedCreditNote ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                        Valid Voucher
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-200 text-indigo-900">
+                        Verification Required
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={creditNoteCodeInput}
+                      onChange={(e) => {
+                        setCreditNoteCodeInput(e.target.value.toUpperCase());
+                        setValidatedCreditNote(null);
+                        setCreditNoteError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          validateCreditNoteCode();
+                        }
+                      }}
+                      placeholder="Enter Voucher Code (e.g. CN-20260930-0001)"
+                      className="flex-1 px-3 py-2 text-xs font-mono font-bold uppercase border border-indigo-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white text-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={validateCreditNoteCode}
+                      disabled={validatingCreditNote || !creditNoteCodeInput.trim()}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition"
+                    >
+                      {validatingCreditNote ? "Checking..." : "Verify Code"}
+                    </button>
+                  </div>
+
+                  {creditNoteError && (
+                    <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-xs font-medium text-rose-700 flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{creditNoteError}</span>
+                    </div>
+                  )}
+
+                  {validatedCreditNote && (
+                    <div className="p-3 bg-white border border-indigo-200 rounded-xl space-y-2 text-xs">
+                      <div className="flex justify-between font-bold text-slate-900">
+                        <span>Voucher: {validatedCreditNote.creditNoteNumber}</span>
+                        <span className="text-emerald-600 font-extrabold text-sm">
+                          Available: {formatCurrency(validatedCreditNote.remainingBalance)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-slate-500 text-[11px]">
+                        <span>Customer: {validatedCreditNote.customerName}</span>
+                        <span>Valid Until: {new Date(validatedCreditNote.expiryDate).toLocaleDateString()}</span>
+                      </div>
+                      <div className="pt-2 border-t border-dashed border-slate-200 flex justify-between font-semibold">
+                        <span className="text-slate-600">Bill Total:</span>
+                        <span>{formatCurrency(netTotal)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-emerald-700">
+                        <span>Remaining on Voucher after purchase:</span>
+                        <span>
+                          {formatCurrency(Math.max(0, validatedCreditNote.remainingBalance - netTotal))}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Reference note for Card / QR */}
-              {paymentMethod !== "CASH" && paymentMethod !== "CREDIT" && (
+              {paymentMethod !== "CASH" && paymentMethod !== "CREDIT" && paymentMethod !== "CREDIT_NOTE" && (
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
                     Approval / Reference Code (Optional)
@@ -2047,6 +2196,13 @@ export default function POSPage() {
                       <div className="pt-3 border-b border-dotted border-slate-400"></div>
                       <div className="text-[9px] text-slate-500 print:text-black">
                         Customer Signature / ණය ගිවිසුම
+                      </div>
+                    </div>
+                  )}
+                  {completedSale.paymentMethod === "CREDIT_NOTE" && (
+                    <div className="pt-2 text-center text-[10px] space-y-1">
+                      <div className="p-1 border border-dashed border-indigo-600 bg-indigo-50/50 font-bold text-indigo-900 print:text-black">
+                        * PAID VIA STORE CREDIT VOUCHER ({completedSale.creditNoteRedeemed?.creditNoteNumber || "VOUCHER"}) *
                       </div>
                     </div>
                   )}

@@ -10,6 +10,7 @@ import { AuditLog } from "@/models/AuditLog";
 import { Shift } from "@/models/Shift";
 import { CreditTransaction } from "@/models/CreditTransaction";
 import { Promotion } from "@/models/Promotion";
+import { CreditNote } from "@/models/CreditNote";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 import { createSaleSchema } from "@/lib/validations/sale";
 
@@ -35,6 +36,7 @@ export async function POST(req: Request) {
       paymentMethod,
       cashReceived,
       paymentReference,
+      creditNoteNumber,
       registerId,
       registerName,
       shiftId,
@@ -281,6 +283,62 @@ export async function POST(req: Request) {
         }
       }
 
+      // If payment is CREDIT_NOTE, verify voucher validity and available balance
+      let creditNoteDoc: any = null;
+      if (paymentMethod === "CREDIT_NOTE") {
+        if (!creditNoteNumber || !creditNoteNumber.trim()) {
+          return NextResponse.json(
+            { success: false, error: "A valid Credit Note voucher code is required." },
+            { status: 400 }
+          );
+        }
+
+        creditNoteDoc = await CreditNote.findOne({
+          businessId,
+          creditNoteNumber: creditNoteNumber.trim().toUpperCase(),
+        });
+
+        if (!creditNoteDoc) {
+          return NextResponse.json(
+            { success: false, error: `Credit Note voucher "${creditNoteNumber}" not found.` },
+            { status: 400 }
+          );
+        }
+
+        if (creditNoteDoc.status === "EXPIRED" || new Date(creditNoteDoc.expiryDate) < new Date()) {
+          creditNoteDoc.status = "EXPIRED";
+          await creditNoteDoc.save();
+          return NextResponse.json(
+            { success: false, error: `Credit Note "${creditNoteNumber}" has expired.` },
+            { status: 400 }
+          );
+        }
+
+        if (creditNoteDoc.status === "CANCELLED") {
+          return NextResponse.json(
+            { success: false, error: `Credit Note "${creditNoteNumber}" has been cancelled.` },
+            { status: 400 }
+          );
+        }
+
+        if (creditNoteDoc.status === "FULLY_REDEEMED" || (creditNoteDoc.remainingBalance || 0) <= 0) {
+          return NextResponse.json(
+            { success: false, error: `Credit Note "${creditNoteNumber}" has already been fully redeemed.` },
+            { status: 400 }
+          );
+        }
+
+        if ((creditNoteDoc.remainingBalance || 0) < netTotal) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `Credit Note balance (Rs. ${creditNoteDoc.remainingBalance.toFixed(2)}) is insufficient for this sale total of Rs. ${netTotal.toFixed(2)}.`,
+            },
+            { status: 400 }
+          );
+        }
+      }
+
       // 8. Determine active shift if not explicitly provided
       let resolvedShiftId = shiftId && shiftId.trim() ? new Types.ObjectId(shiftId) : undefined;
       if (!resolvedShiftId && registerId && registerId.trim()) {
@@ -325,8 +383,32 @@ export async function POST(req: Request) {
           code: ap.code,
           discountAmount: ap.discountAmount,
         })),
+        creditNoteRedeemed:
+          paymentMethod === "CREDIT_NOTE" && creditNoteDoc
+            ? {
+                creditNoteId: creditNoteDoc._id,
+                creditNoteNumber: creditNoteDoc.creditNoteNumber,
+                amount: netTotal,
+              }
+            : undefined,
         status: "COMPLETED",
       });
+
+      // If redeemed via CREDIT_NOTE, update voucher remaining balance and redemption log
+      if (paymentMethod === "CREDIT_NOTE" && creditNoteDoc) {
+        const newBalance = Math.max(0, Math.round((creditNoteDoc.remainingBalance - netTotal) * 100) / 100);
+        creditNoteDoc.remainingBalance = newBalance;
+        if (newBalance <= 0) {
+          creditNoteDoc.status = "FULLY_REDEEMED";
+        }
+        creditNoteDoc.redemptions.push({
+          saleId: sale._id,
+          invoiceNumber,
+          amount: netTotal,
+          redeemedAt: new Date(),
+        });
+        await creditNoteDoc.save();
+      }
 
       // If credit sale, record in CreditTransaction passbook
       if (paymentMethod === "CREDIT" && customerDoc) {
@@ -390,6 +472,7 @@ export async function POST(req: Request) {
           invoiceNumber,
           netTotal,
           paymentMethod,
+          creditNoteNumber: creditNoteDoc?.creditNoteNumber,
           itemsCount: items.length,
           pointsEarned,
           pointsRedeemed: pointsRedeemed || 0,

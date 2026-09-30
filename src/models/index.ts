@@ -17,3 +17,5 @@ export { Supplier, type ISupplier } from "./Supplier";
 export { PurchaseOrder, type IPurchaseOrder, type PurchaseOrderStatus, type IPurchaseOrderItem } from "./PurchaseOrder";
 export { SupplierPayment, type ISupplierPayment, type SupplierPaymentMethod } from "./SupplierPayment";
 export { Promotion, type IPromotion, type PromotionType, type PromoDiscountType } from "./Promotion";
+export { SaleReturn, type ISaleReturn, type ISaleReturnItem, type ReturnCondition, type RefundMethod } from "./SaleReturn";
+export { CreditNote, type ICreditNote, type ICreditNoteRedemption, type CreditNoteStatus } from "./CreditNote";

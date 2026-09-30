@@ -23,6 +23,7 @@ import {
   Truck,
   FileText,
   Tag,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -69,6 +70,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { label: "Purchases & Vendors", href: "/purchases", icon: FileText, minRole: "MANAGER" },
     { label: "Transfers & Branches", href: "/transfers", icon: Truck, minRole: "MANAGER" },
     { label: "Sales History", href: "/sales", icon: Receipt },
+    { label: "Returns & Credit Notes", href: "/returns", icon: RotateCcw },
     { label: "Shifts & Drawers", href: "/shifts", icon: Clock },
     { label: "Customers", href: "/customers", icon: Users },
     { label: "Promotions & Loyalty", href: "/promotions", icon: Tag, minRole: "MANAGER" },
