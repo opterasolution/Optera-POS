@@ -47,6 +47,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const isSuperAdmin = role === "SUPER_ADMIN";
   const isOwner = role === "OWNER" || isSuperAdmin;
   const isManager = role === "MANAGER" || isOwner;
+  const isSupervisor = role === "SUPERVISOR" || isManager;
+  const isInventoryClerk = role === "INVENTORY_CLERK" || isManager;
+  const isAccountant = role === "ACCOUNTANT" || isManager;
 
   React.useEffect(() => {
     if (role !== "SUPER_ADMIN") {
@@ -66,26 +69,24 @@ export default function AppLayout({ children }: AppLayoutProps) {
       ? [{ label: "Super Admin Portal", href: "/admin", icon: Shield, highlight: true }]
       : []),
     { label: "POS Counter", href: "/pos", icon: ShoppingCart, highlight: true },
-    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, minRole: "MANAGER" },
-    { label: "Products", href: "/products", icon: Package, minRole: "MANAGER" },
-    { label: "Inventory", href: "/inventory", icon: Boxes, minRole: "MANAGER" },
-    { label: "Barcode & Labels", href: "/labels", icon: Barcode, minRole: "MANAGER" },
-    { label: "Purchases & Vendors", href: "/purchases", icon: FileText, minRole: "MANAGER" },
-    { label: "Transfers & Branches", href: "/transfers", icon: Truck, minRole: "MANAGER" },
+    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, allowed: isManager || isSupervisor },
+    { label: "Products", href: "/products", icon: Package, allowed: isManager || isInventoryClerk },
+    { label: "Inventory", href: "/inventory", icon: Boxes, allowed: isManager || isInventoryClerk },
+    { label: "Barcode & Labels", href: "/labels", icon: Barcode, allowed: isManager || isInventoryClerk },
+    { label: "Purchases & Vendors", href: "/purchases", icon: FileText, allowed: isManager || isInventoryClerk },
+    { label: "Transfers & Branches", href: "/transfers", icon: Truck, allowed: isManager || isInventoryClerk },
     { label: "Sales History", href: "/sales", icon: Receipt },
     { label: "Returns & Credit Notes", href: "/returns", icon: RotateCcw },
     { label: "Shifts & Drawers", href: "/shifts", icon: Clock },
-    { label: "Expenses & Petty Cash", href: "/expenses", icon: Wallet },
+    { label: "Expenses & Petty Cash", href: "/expenses", icon: Wallet, allowed: isManager || isSupervisor || isAccountant },
     { label: "Customers", href: "/customers", icon: Users },
-    { label: "Promotions & Loyalty", href: "/promotions", icon: Tag, minRole: "MANAGER" },
-    { label: "Reports", href: "/reports", icon: BarChart3, minRole: "OWNER" },
-    { label: "Store Settings", href: "/settings", icon: Settings, minRole: "OWNER" },
+    { label: "Promotions & Loyalty", href: "/promotions", icon: Tag, allowed: isManager || isSupervisor },
+    { label: "Reports & P&L", href: "/reports", icon: BarChart3, allowed: isOwner || isManager || isAccountant },
+    { label: "Store Settings", href: "/settings", icon: Settings, allowed: isOwner },
   ];
 
   const visibleNav = navItems.filter((item) => {
-    if (!item.minRole) return true;
-    if (item.minRole === "OWNER") return isOwner;
-    if (item.minRole === "MANAGER") return isManager;
+    if (item.allowed !== undefined) return item.allowed;
     return true;
   });
 

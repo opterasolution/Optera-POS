@@ -12,11 +12,23 @@ export async function GET() {
 
     if (Boolean(process.env.MONGODB_URI)) {
       await connectToDatabase();
-      const staff = await User.find({
+      const staffDocs = await User.find({
         businessId: context.businessId,
       })
         .select("-password")
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .lean();
+
+      const staff = staffDocs.map((u) => ({
+        _id: u._id,
+        name: u.name,
+        username: u.username,
+        role: u.role,
+        phone: u.phone,
+        hasSupervisorPin: !!u.supervisorPin,
+        isActive: u.isActive,
+        createdAt: u.createdAt,
+      }));
 
       return NextResponse.json({ success: true, staff });
     }
@@ -31,15 +43,27 @@ export async function GET() {
           username: "admin",
           role: "OWNER",
           phone: "0771234567",
+          hasSupervisorPin: true,
           isActive: true,
           createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
         },
         {
           _id: "demo_user_2",
+          name: "Sunil Jayawardena",
+          username: "supervisor",
+          role: "SUPERVISOR",
+          phone: "0778889999",
+          hasSupervisorPin: true,
+          isActive: true,
+          createdAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString(),
+        },
+        {
+          _id: "demo_user_3",
           name: "Nimal Perera",
           username: "cashier",
           role: "CASHIER",
           phone: "0714445555",
+          hasSupervisorPin: false,
           isActive: true,
           createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
         },
@@ -54,7 +78,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const context = await requireRole(["OWNER"]);
+    const context = await requireRole(["OWNER", "MANAGER"]);
     const body = await req.json();
 
     const parsed = createStaffSchema.safeParse(body);
@@ -65,7 +89,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { name, username, password, role, phone } = parsed.data;
+    const { name, username, password, role, phone, supervisorPin } = parsed.data;
 
     if (Boolean(process.env.MONGODB_URI)) {
       await connectToDatabase();
@@ -84,6 +108,10 @@ export async function POST(req: Request) {
       }
 
       const hashedPassword = await bcrypt.hash(password, 10);
+      let hashedPin: string | undefined = undefined;
+      if (supervisorPin && supervisorPin.trim().length >= 4) {
+        hashedPin = await bcrypt.hash(supervisorPin.trim(), 10);
+      }
 
       const user = await User.create({
         businessId: context.businessId,
@@ -92,6 +120,7 @@ export async function POST(req: Request) {
         password: hashedPassword,
         role,
         phone: phone || undefined,
+        supervisorPin: hashedPin,
         isActive: true,
       });
 
@@ -102,7 +131,7 @@ export async function POST(req: Request) {
         action: "EMPLOYEE_ADDED",
         entityType: "User",
         entityId: user._id.toString(),
-        details: { name, username, role },
+        details: { name, username, role, hasSupervisorPin: !!hashedPin },
       });
 
       return NextResponse.json({
@@ -114,6 +143,7 @@ export async function POST(req: Request) {
           username: user.username,
           role: user.role,
           phone: user.phone,
+          hasSupervisorPin: !!user.supervisorPin,
           isActive: user.isActive,
         },
       }, { status: 201 });
@@ -129,6 +159,7 @@ export async function POST(req: Request) {
         username,
         role,
         phone,
+        hasSupervisorPin: !!supervisorPin,
         isActive: true,
         createdAt: new Date().toISOString(),
       },

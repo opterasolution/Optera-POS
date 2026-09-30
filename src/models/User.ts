@@ -1,6 +1,13 @@
 import mongoose, { Schema, Document, Model, Types } from "mongoose";
 
-export type UserRole = "SUPER_ADMIN" | "OWNER" | "MANAGER" | "CASHIER";
+export type UserRole =
+  | "SUPER_ADMIN"
+  | "OWNER"
+  | "MANAGER"
+  | "SUPERVISOR"
+  | "INVENTORY_CLERK"
+  | "ACCOUNTANT"
+  | "CASHIER";
 
 export interface IUser extends Document {
   businessId?: Types.ObjectId; // Optional for SUPER_ADMIN
@@ -9,6 +16,7 @@ export interface IUser extends Document {
   password: string; // Hashed with bcrypt
   role: UserRole;
   phone?: string;
+  supervisorPin?: string; // 4-6 digit numeric PIN (hashed with bcrypt)
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -33,11 +41,20 @@ const UserSchema = new Schema<IUser>(
     password: { type: String, required: true },
     role: {
       type: String,
-      enum: ["SUPER_ADMIN", "OWNER", "MANAGER", "CASHIER"],
+      enum: [
+        "SUPER_ADMIN",
+        "OWNER",
+        "MANAGER",
+        "SUPERVISOR",
+        "INVENTORY_CLERK",
+        "ACCOUNTANT",
+        "CASHIER",
+      ],
       default: "CASHIER",
       required: true,
     },
     phone: { type: String, trim: true },
+    supervisorPin: { type: String },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

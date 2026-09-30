@@ -36,6 +36,15 @@ const defaultBusinessData = {
     showLogo: false,
     defaultWidth: "58mm" as const,
   },
+  securityPolicy: {
+    requireSupervisorForVoid: true,
+    requireSupervisorForDiscount: true,
+    maxCashierDiscountPercent: 5,
+    maxCashierDiscountAmount: 500,
+    requireSupervisorForPriceOverride: true,
+    requireSupervisorForNoSale: true,
+    requireSupervisorForExpenseDelete: true,
+  },
 };
 
 export async function GET() {

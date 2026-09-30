@@ -41,6 +41,15 @@ export interface IBusiness extends Document {
     redemptionRate: number;
     minPointsToRedeem: number;
   };
+  securityPolicy?: {
+    requireSupervisorForVoid: boolean;
+    requireSupervisorForDiscount: boolean;
+    maxCashierDiscountPercent: number;
+    maxCashierDiscountAmount: number;
+    requireSupervisorForPriceOverride: boolean;
+    requireSupervisorForNoSale: boolean;
+    requireSupervisorForExpenseDelete: boolean;
+  };
   subscription: {
     plan: SubscriptionPlan;
     status: SubscriptionStatus;
@@ -96,6 +105,15 @@ const BusinessSchema = new Schema<IBusiness>(
       pointsPerSpend: { type: Number, default: 100, min: 1 },
       redemptionRate: { type: Number, default: 1, min: 0.01 },
       minPointsToRedeem: { type: Number, default: 50, min: 0 },
+    },
+    securityPolicy: {
+      requireSupervisorForVoid: { type: Boolean, default: true },
+      requireSupervisorForDiscount: { type: Boolean, default: true },
+      maxCashierDiscountPercent: { type: Number, default: 5 },
+      maxCashierDiscountAmount: { type: Number, default: 500 },
+      requireSupervisorForPriceOverride: { type: Boolean, default: true },
+      requireSupervisorForNoSale: { type: Boolean, default: true },
+      requireSupervisorForExpenseDelete: { type: Boolean, default: true },
     },
     subscription: {
       plan: {

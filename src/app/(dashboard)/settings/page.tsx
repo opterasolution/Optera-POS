@@ -27,6 +27,13 @@ import {
   Plus,
   Building,
   MessageSquare,
+  KeyRound,
+  Search,
+  Download,
+  Eye,
+  Lock,
+  Unlock,
+  Sliders,
 } from "lucide-react";
 import { formatCurrency, isValidSLPhone } from "@/lib/formatters";
 import SubscriptionInvoiceReceipt, {
@@ -51,8 +58,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Tab State: profile | staff | registers | subscription
-  const [activeTab, setActiveTab] = useState<"profile" | "staff" | "registers" | "subscription">("profile");
+  // Tab State: profile | staff | registers | subscription | security | audit
+  const [activeTab, setActiveTab] = useState<"profile" | "staff" | "registers" | "subscription" | "security" | "audit">("profile");
 
   // Store Subscription Invoices State
   const [storeInvoices, setStoreInvoices] = useState<SubscriptionInvoiceData[]>([]);
@@ -79,8 +86,9 @@ export default function SettingsPage() {
     _id: string;
     name: string;
     username: string;
-    role: "OWNER" | "MANAGER" | "CASHIER";
+    role: "OWNER" | "MANAGER" | "SUPERVISOR" | "INVENTORY_CLERK" | "ACCOUNTANT" | "CASHIER";
     phone?: string;
+    hasSupervisorPin: boolean;
     isActive: boolean;
     createdAt: string;
   }>>([]);
@@ -90,11 +98,33 @@ export default function SettingsPage() {
     name: "",
     username: "",
     password: "",
-    role: "CASHIER" as "MANAGER" | "CASHIER",
+    role: "CASHIER" as "OWNER" | "MANAGER" | "SUPERVISOR" | "INVENTORY_CLERK" | "ACCOUNTANT" | "CASHIER",
     phone: "",
+    supervisorPin: "",
   });
   const [addStaffLoading, setAddStaffLoading] = useState(false);
   const [addStaffError, setAddStaffError] = useState("");
+
+  // Store Security Policy State
+  const [securityPolicy, setSecurityPolicy] = useState({
+    requireSupervisorForVoid: true,
+    requireSupervisorForDiscount: true,
+    maxCashierDiscountPercent: 5,
+    maxCashierDiscountAmount: 500,
+    requireSupervisorForPriceOverride: true,
+    requireSupervisorForNoSale: true,
+    requireSupervisorForExpenseDelete: true,
+  });
+  const [savingSecurity, setSavingSecurity] = useState(false);
+
+  // Audit Trail Explorer State
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditActionFilter, setAuditActionFilter] = useState("ALL");
+  const [auditSearch, setAuditSearch] = useState("");
+  const [auditRange, setAuditRange] = useState("all");
+  const [selectedAuditLog, setSelectedAuditLog] = useState<any | null>(null);
+  const [auditActionsList, setAuditActionsList] = useState<string[]>([]);
 
   // Subscription State
   const [subscriptionData, setSubscriptionData] = useState<{
@@ -184,6 +214,9 @@ export default function SettingsPage() {
               defaultReminderTemplate: data.business.notificationSettings?.defaultReminderTemplate || "",
             },
           });
+          if (data.business.securityPolicy) {
+            setSecurityPolicy(data.business.securityPolicy);
+          }
         }
       } catch {
         setStatusMessage({ type: "error", text: "Failed to load store settings." });
@@ -243,6 +276,76 @@ export default function SettingsPage() {
     loadInvoices();
     loadRegisters();
   }, []);
+
+  const loadAuditLogs = async (action = auditActionFilter, search = auditSearch, range = auditRange) => {
+    setAuditLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (action && action !== "ALL") params.append("action", action);
+      if (search.trim()) params.append("search", search.trim());
+      if (range && range !== "all") params.append("range", range);
+
+      const res = await fetch(`/api/audit?${params.toString()}`);
+      const data = await res.json();
+      if (data.success && data.logs) {
+        setAuditLogs(data.logs);
+        if (data.actionsList) setAuditActionsList(data.actionsList);
+      }
+    } catch (err) {
+      console.error("Failed to load audit logs:", err);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  const handleSaveSecurity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingSecurity(true);
+    setStatusMessage(null);
+    try {
+      const res = await fetch("/api/business", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...formData,
+          securityPolicy,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({ type: "success", text: "Security policy & action gates updated successfully." });
+      } else {
+        setStatusMessage({ type: "error", text: data.error || "Failed to update security policy." });
+      }
+    } catch (err) {
+      setStatusMessage({ type: "error", text: "Network error saving security policy." });
+    } finally {
+      setSavingSecurity(false);
+    }
+  };
+
+  const exportAuditToCsv = () => {
+    if (!auditLogs.length) return;
+    const rows = [
+      ["Timestamp", "Action", "Performed By", "Supervisor Authorizer", "Entity Type", "Reason / Details"],
+      ...auditLogs.map((l: any) => [
+        new Date(l.createdAt).toLocaleString("en-LK"),
+        l.action,
+        l.userName,
+        l.details?.supervisorName || "-",
+        l.entityType,
+        JSON.stringify(l.details || {}),
+      ]),
+    ];
+    const csvContent = "data:text/csv;charset=utf-8," + rows.map((e) => e.map(x => `"${(x + '').replace(/"/g, '""')}"`).join(",")).join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Audit_Trail_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const handleAddRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -336,6 +439,7 @@ export default function SettingsPage() {
         password: "",
         role: "CASHIER",
         phone: "",
+        supervisorPin: "",
       });
       // Refresh staff list
       const staffRes = await fetch("/api/staff");
@@ -460,6 +564,32 @@ export default function SettingsPage() {
               </button>
             )}
 
+            {activeTab === "security" && (
+              <button
+                onClick={handleSaveSecurity}
+                disabled={savingSecurity}
+                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold transition-all shadow-sm disabled:opacity-50"
+              >
+                {savingSecurity ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" /> Save Security Policy
+                  </>
+                )}
+              </button>
+            )}
+
+            {activeTab === "audit" && (
+              <button
+                onClick={exportAuditToCsv}
+                disabled={auditLogs.length === 0}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-semibold transition-all shadow-sm disabled:opacity-50"
+              >
+                <Download className="w-4 h-4" /> Export CSV
+              </button>
+            )}
+
             {activeTab === "subscription" && (
               <a
                 href="tel:0771234567"
@@ -472,11 +602,11 @@ export default function SettingsPage() {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex items-center gap-2 border-b border-slate-200 mb-6">
+        <div className="flex items-center gap-2 border-b border-slate-200 mb-6 overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab("profile")}
-            className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 ${
+            className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
               activeTab === "profile"
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-slate-500 hover:text-slate-900"
@@ -487,7 +617,7 @@ export default function SettingsPage() {
           <button
             type="button"
             onClick={() => setActiveTab("staff")}
-            className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 ${
+            className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
               activeTab === "staff"
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-slate-500 hover:text-slate-900"
@@ -497,8 +627,33 @@ export default function SettingsPage() {
           </button>
           <button
             type="button"
+            onClick={() => setActiveTab("security")}
+            className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
+              activeTab === "security"
+                ? "border-amber-600 text-amber-600"
+                : "border-transparent text-slate-500 hover:text-slate-900"
+            }`}
+          >
+            <ShieldAlert className="w-4 h-4" /> Security & Action Gates
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("audit");
+              loadAuditLogs();
+            }}
+            className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
+              activeTab === "audit"
+                ? "border-purple-600 text-purple-600"
+                : "border-transparent text-slate-500 hover:text-slate-900"
+            }`}
+          >
+            <Clock className="w-4 h-4" /> Audit Trail Explorer
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab("registers")}
-            className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 ${
+            className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
               activeTab === "registers"
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-slate-500 hover:text-slate-900"
@@ -509,7 +664,7 @@ export default function SettingsPage() {
           <button
             type="button"
             onClick={() => setActiveTab("subscription")}
-            className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 ${
+            className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
               activeTab === "subscription"
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-slate-500 hover:text-slate-900"
@@ -1167,6 +1322,7 @@ export default function SettingsPage() {
                         <th className="py-3 px-4">Staff Member</th>
                         <th className="py-3 px-4">Login Username</th>
                         <th className="py-3 px-4">Role & Access</th>
+                        <th className="py-3 px-4">Supervisor PIN</th>
                         <th className="py-3 px-4">Contact Phone</th>
                         <th className="py-3 px-4">Status</th>
                         <th className="py-3 px-4">Joined Date</th>
@@ -1188,12 +1344,35 @@ export default function SettingsPage() {
                                   ? "bg-purple-100 text-purple-800 border border-purple-200"
                                   : member.role === "MANAGER"
                                   ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                  : member.role === "SUPERVISOR"
+                                  ? "bg-blue-100 text-blue-800 border border-blue-200"
+                                  : member.role === "INVENTORY_CLERK"
+                                  ? "bg-cyan-100 text-cyan-800 border border-cyan-200"
+                                  : member.role === "ACCOUNTANT"
+                                  ? "bg-indigo-100 text-indigo-800 border border-indigo-200"
                                   : "bg-amber-100 text-amber-800 border border-amber-200"
                               }`}
                             >
                               <Shield className="w-2.5 h-2.5" />
-                              {member.role}
+                              {member.role.replace("_", " ")}
                             </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            {["OWNER", "MANAGER", "SUPERVISOR"].includes(member.role) ? (
+                              member.hasSupervisorPin ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                                  <KeyRound className="w-3 h-3 text-emerald-600" />
+                                  PIN Active
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                                  <AlertCircle className="w-3 h-3 text-amber-600" />
+                                  No PIN Set
+                                </span>
+                              )
+                            ) : (
+                              <span className="text-slate-400 text-[11px] font-mono">—</span>
+                            )}
                           </td>
                           <td className="py-3 px-4 font-mono text-slate-600">
                             {member.phone || "—"}
@@ -1637,6 +1816,474 @@ export default function SettingsPage() {
             </div>
           </div>
         )}
+
+        {/* 5. Security & Action Gates Tab */}
+        {activeTab === "security" && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6 pb-6 border-b border-slate-100">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shrink-0 mt-0.5">
+                    <ShieldAlert className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">
+                      Loss Prevention & Cashier Action Gates
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1 max-w-2xl leading-relaxed">
+                      Configure automated counter authorization gates. When triggered, cashiers cannot complete high-risk actions without approval from an on-duty Supervisor or Manager using a 4-6 digit numeric PIN.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveSecurity}
+                  disabled={savingSecurity}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-sm transition disabled:opacity-50 shrink-0"
+                >
+                  {savingSecurity ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  Save Policies
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveSecurity} className="space-y-6">
+                {/* 1. POS Counter Action Gates */}
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Sliders className="w-4 h-4 text-blue-600" />
+                    <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                      Counter Checkout Gates
+                    </h4>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Cart Void Gate */}
+                    <div className="p-4 rounded-xl border border-slate-200 hover:border-slate-300 transition-colors bg-slate-50/50">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                            <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                            Require Approval for Cart Void / Clear
+                          </span>
+                          <p className="text-[11px] text-slate-500 leading-relaxed">
+                            Cashiers must ask a supervisor before discarding scanned items or clearing an active checkout cart.
+                          </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                          <input
+                            type="checkbox"
+                            checked={securityPolicy.requireSupervisorForVoid}
+                            onChange={(e) =>
+                              setSecurityPolicy({
+                                ...securityPolicy,
+                                requireSupervisorForVoid: e.target.checked,
+                              })
+                            }
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Cashier Discount Ceilings Gate */}
+                    <div className="p-4 rounded-xl border border-slate-200 hover:border-slate-300 transition-colors bg-slate-50/50">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                            <Percent className="w-3.5 h-3.5 text-amber-500" />
+                            Enforce Cashier Discount Ceilings
+                          </span>
+                          <p className="text-[11px] text-slate-500 leading-relaxed">
+                            Intercept manual discounts that exceed store-defined percentage or fixed rupee thresholds.
+                          </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                          <input
+                            type="checkbox"
+                            checked={securityPolicy.requireSupervisorForDiscount}
+                            onChange={(e) =>
+                              setSecurityPolicy({
+                                ...securityPolicy,
+                                requireSupervisorForDiscount: e.target.checked,
+                              })
+                            }
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                      </div>
+
+                      {securityPolicy.requireSupervisorForDiscount && (
+                        <div className="mt-3 pt-3 border-t border-slate-200 grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-600 mb-1">
+                              Max Cashier Discount %
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={securityPolicy.maxCashierDiscountPercent}
+                                onChange={(e) =>
+                                  setSecurityPolicy({
+                                    ...securityPolicy,
+                                    maxCashierDiscountPercent: Math.max(0, Number(e.target.value)),
+                                  })
+                                }
+                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 pr-6"
+                              />
+                              <span className="absolute right-2 top-2 text-[10px] text-slate-400 font-bold">%</span>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-600 mb-1">
+                              Max Cashier Discount (LKR)
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                min={0}
+                                value={securityPolicy.maxCashierDiscountAmount}
+                                onChange={(e) =>
+                                  setSecurityPolicy({
+                                    ...securityPolicy,
+                                    maxCashierDiscountAmount: Math.max(0, Number(e.target.value)),
+                                  })
+                                }
+                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 pr-8"
+                              />
+                              <span className="absolute right-2 top-2 text-[10px] text-slate-400 font-bold">Rs.</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Manual Drawer Kick Gate */}
+                    <div className="p-4 rounded-xl border border-slate-200 hover:border-slate-300 transition-colors bg-slate-50/50">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                            <Lock className="w-3.5 h-3.5 text-blue-500" />
+                            Require Approval for "No Sale" Drawer Kick
+                          </span>
+                          <p className="text-[11px] text-slate-500 leading-relaxed">
+                            Opening the cash drawer without an active billing transaction requires a supervisor approval reason.
+                          </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                          <input
+                            type="checkbox"
+                            checked={securityPolicy.requireSupervisorForNoSale}
+                            onChange={(e) =>
+                              setSecurityPolicy({
+                                ...securityPolicy,
+                                requireSupervisorForNoSale: e.target.checked,
+                              })
+                            }
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Price Override Gate */}
+                    <div className="p-4 rounded-xl border border-slate-200 hover:border-slate-300 transition-colors bg-slate-50/50">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                            <Coins className="w-3.5 h-3.5 text-emerald-500" />
+                            Require Approval for Price Overrides
+                          </span>
+                          <p className="text-[11px] text-slate-500 leading-relaxed">
+                            Direct counter price modifications require supervisor authentication to prevent unrecorded discounts.
+                          </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                          <input
+                            type="checkbox"
+                            checked={securityPolicy.requireSupervisorForPriceOverride}
+                            onChange={(e) =>
+                              setSecurityPolicy({
+                                ...securityPolicy,
+                                requireSupervisorForPriceOverride: e.target.checked,
+                              })
+                            }
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Back-Office Anti-Tampering Gates */}
+                <div className="pt-4 border-t border-slate-100">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Shield className="w-4 h-4 text-emerald-600" />
+                    <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                      Ledger & Inventory Protection
+                    </h4>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Petty Cash Delete Gate */}
+                    <div className="p-4 rounded-xl border border-slate-200 hover:border-slate-300 transition-colors bg-slate-50/50">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                            <Receipt className="w-3.5 h-3.5 text-purple-500" />
+                            Supervisor Gate on Expense Deletions
+                          </span>
+                          <p className="text-[11px] text-slate-500 leading-relaxed">
+                            Restricts deleting or voiding petty cash expense entries to authorized supervisors only.
+                          </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                          <input
+                            type="checkbox"
+                            checked={securityPolicy.requireSupervisorForExpenseDelete}
+                            onChange={(e) =>
+                              setSecurityPolicy({
+                                ...securityPolicy,
+                                requireSupervisorForExpenseDelete: e.target.checked,
+                              })
+                            }
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* 6. Audit Trail Explorer Tab */}
+        {activeTab === "audit" && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+              {/* Header & Filter Controls */}
+              <div className="p-6 border-b border-slate-100">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-purple-600" />
+                      Live Store Security Audit Trail
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Immutable forensic log of counter events, supervisor approvals, voids, and staff updates.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => loadAuditLogs(auditActionFilter, auditSearch, auditRange)}
+                      disabled={auditLoading}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${auditLoading ? "animate-spin text-blue-600" : ""}`} />
+                      Refresh Log
+                    </button>
+                    <button
+                      type="button"
+                      onClick={exportAuditToCsv}
+                      disabled={auditLogs.length === 0}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-semibold transition"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Export CSV
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter Controls Bar */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Search cashier, supervisor, action..."
+                      value={auditSearch}
+                      onChange={(e) => setAuditSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          loadAuditLogs(auditActionFilter, auditSearch, auditRange);
+                        }
+                      }}
+                      className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <select
+                      value={auditActionFilter}
+                      onChange={(e) => {
+                        setAuditActionFilter(e.target.value);
+                        loadAuditLogs(e.target.value, auditSearch, auditRange);
+                      }}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="ALL">All Event Types</option>
+                      <option value="SUPERVISOR_OVERRIDE">Supervisor Overrides (Approved)</option>
+                      <option value="OVERRIDE_FAILED_INVALID_PIN">Supervisor Overrides (Failed PIN)</option>
+                      <option value="CART_VOIDED">Cart Voided</option>
+                      <option value="NO_SALE_DRAWER_KICK">No-Sale Drawer Kicks</option>
+                      <option value="USER_CREATE">Staff Member Created</option>
+                      <option value="USER_UPDATE">Staff Member Updated</option>
+                      <option value="BUSINESS_UPDATE">Store Settings Modified</option>
+                      {auditActionsList
+                        .filter(
+                          (a) =>
+                            ![
+                              "SUPERVISOR_OVERRIDE",
+                              "OVERRIDE_FAILED_INVALID_PIN",
+                              "CART_VOIDED",
+                              "NO_SALE_DRAWER_KICK",
+                              "USER_CREATE",
+                              "USER_UPDATE",
+                              "BUSINESS_UPDATE",
+                            ].includes(a)
+                        )
+                        .map((act) => (
+                          <option key={act} value={act}>
+                            {act}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <select
+                      value={auditRange}
+                      onChange={(e) => {
+                        setAuditRange(e.target.value);
+                        loadAuditLogs(auditActionFilter, auditSearch, e.target.value);
+                      }}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="all">All Time</option>
+                      <option value="today">Today Only</option>
+                      <option value="7d">Last 7 Days</option>
+                      <option value="30d">Last 30 Days</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Audit Table */}
+              {auditLoading ? (
+                <div className="p-12 text-center text-slate-400 text-xs">
+                  <RefreshCw className="w-5 h-5 animate-spin mx-auto text-blue-500 mb-2" />
+                  Loading audit logs...
+                </div>
+              ) : auditLogs.length === 0 ? (
+                <div className="p-12 text-center text-slate-400 text-xs">
+                  No audit trail events matched your filter criteria.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+                        <th className="py-3 px-4">Timestamp</th>
+                        <th className="py-3 px-4">Event / Action</th>
+                        <th className="py-3 px-4">Cashier / Staff</th>
+                        <th className="py-3 px-4">Supervisor Authorizer</th>
+                        <th className="py-3 px-4">Context / Reason</th>
+                        <th className="py-3 px-4 text-right">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {auditLogs.map((log: any) => {
+                        const isApproval = log.action === "SUPERVISOR_OVERRIDE";
+                        const isFailedPin = log.action === "OVERRIDE_FAILED_INVALID_PIN";
+                        const isVoid = log.action === "CART_VOIDED";
+                        const isDrawer = log.action === "NO_SALE_DRAWER_KICK";
+
+                        return (
+                          <tr key={log._id} className="hover:bg-slate-50/60 transition">
+                            <td className="py-3 px-4 text-slate-600 font-mono text-[11px] whitespace-nowrap">
+                              {new Date(log.createdAt).toLocaleString("en-LK", {
+                                month: "short",
+                                day: "2-digit",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                second: "2-digit",
+                              })}
+                            </td>
+                            <td className="py-3 px-4">
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  isApproval
+                                    ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                    : isFailedPin
+                                    ? "bg-rose-100 text-rose-800 border border-rose-200"
+                                    : isVoid
+                                    ? "bg-amber-100 text-amber-800 border border-amber-200"
+                                    : isDrawer
+                                    ? "bg-blue-100 text-blue-800 border border-blue-200"
+                                    : "bg-slate-100 text-slate-800 border border-slate-200"
+                                }`}
+                              >
+                                {isApproval ? (
+                                  <Check className="w-2.5 h-2.5" />
+                                ) : isFailedPin ? (
+                                  <AlertCircle className="w-2.5 h-2.5" />
+                                ) : (
+                                  <Shield className="w-2.5 h-2.5" />
+                                )}
+                                {log.action.replace(/_/g, " ")}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="font-semibold text-slate-900">{log.userName || "System"}</div>
+                              <div className="text-[10px] text-slate-400 font-mono">{log.userRole || "STAFF"}</div>
+                            </td>
+                            <td className="py-3 px-4">
+                              {log.details?.supervisorName ? (
+                                <div className="inline-flex items-center gap-1 text-[11px] font-medium text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-100">
+                                  <KeyRound className="w-3 h-3 text-purple-600 shrink-0" />
+                                  <span>{log.details.supervisorName}</span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 text-[11px]">—</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 max-w-xs truncate text-slate-600 text-[11px]">
+                              {log.details?.reason || log.details?.actionType || log.entityType || "—"}
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedAuditLog(log)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition"
+                              >
+                                <Eye className="w-3 h-3" />
+                                <span>Inspect</span>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </>
     )}
 
@@ -1843,7 +2490,10 @@ export default function SettingsPage() {
                   className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="CASHIER">CASHIER (POS Only)</option>
-                  <option value="MANAGER">MANAGER (Stock & Reports)</option>
+                  <option value="SUPERVISOR">SUPERVISOR (Overrides & Approvals)</option>
+                  <option value="MANAGER">MANAGER (Stock, Prices & Reports)</option>
+                  <option value="INVENTORY_CLERK">INVENTORY CLERK (Products & Stock)</option>
+                  <option value="ACCOUNTANT">ACCOUNTANT (Financials & Expenses)</option>
                 </select>
               </div>
 
@@ -1858,6 +2508,29 @@ export default function SettingsPage() {
                 />
               </div>
             </div>
+
+            {["OWNER", "MANAGER", "SUPERVISOR"].includes(newStaff.role) && (
+              <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-1.5">
+                <label className="block text-xs font-semibold text-blue-900 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-blue-600" />
+                    Supervisor Override PIN (4-6 Digits)
+                  </span>
+                  <span className="text-[10px] text-blue-600 font-normal">Optional</span>
+                </label>
+                <input
+                  type="password"
+                  maxLength={6}
+                  placeholder="e.g. 1234 (Numeric PIN)"
+                  value={newStaff.supervisorPin}
+                  onChange={(e) => setNewStaff({ ...newStaff, supervisorPin: e.target.value.replace(/\D/g, "") })}
+                  className="w-full px-3 py-2 bg-white border border-blue-200 rounded-xl text-xs text-slate-900 font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-[10px] text-blue-700 leading-normal">
+                  Used by supervisors to authorize cashier cart voids, excess discounts, and drawer kicks directly at the counter.
+                </p>
+              </div>
+            )}
 
             <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
               <button
@@ -1896,6 +2569,69 @@ export default function SettingsPage() {
         invoice={selectedReceipt}
         onClose={() => setSelectedReceipt(null)}
       />
+    )}
+
+    {/* Audit Log Inspect Modal */}
+    {selectedAuditLog && (
+      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
+          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center">
+                <Shield className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Audit Event Details</h3>
+                <p className="text-[11px] text-slate-500 font-mono">ID: {selectedAuditLog._id}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setSelectedAuditLog(null)}
+              className="text-slate-400 hover:text-slate-600 p-1"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="p-6 space-y-4">
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Action</span>
+                <span className="font-bold text-slate-900">{selectedAuditLog.action}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Timestamp</span>
+                <span className="font-mono text-slate-700">{new Date(selectedAuditLog.createdAt).toLocaleString("en-LK")}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Staff / Cashier</span>
+                <span className="font-semibold text-slate-800">{selectedAuditLog.userName} ({selectedAuditLog.userRole})</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Supervisor</span>
+                <span className="font-semibold text-purple-700">{selectedAuditLog.details?.supervisorName || "N/A"}</span>
+              </div>
+            </div>
+
+            <div>
+              <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block mb-1">Payload / Details</span>
+              <pre className="p-3 bg-slate-900 text-emerald-400 rounded-xl text-[11px] font-mono overflow-x-auto max-h-60">
+                {JSON.stringify(selectedAuditLog.details || {}, null, 2)}
+              </pre>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedAuditLog(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     )}
       </div>
     </AppLayout>

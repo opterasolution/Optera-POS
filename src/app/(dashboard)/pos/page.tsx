@@ -46,7 +46,10 @@ import {
   Gift,
   Coins,
   Ticket,
+  ShieldAlert,
+  KeyRound,
 } from "lucide-react";
+import SupervisorOverrideModal from "@/components/pos/SupervisorOverrideModal";
 import ShiftZReportReceipt, { ShiftZReportData } from "@/components/receipts/ShiftZReportReceipt";
 import CreditSettlementReceipt, { CreditSettlementData } from "@/components/receipts/CreditSettlementReceipt";
 import { formatCurrency } from "@/lib/formatters";
@@ -203,6 +206,21 @@ export default function POSPage() {
   const [copiedPublicReceipt, setCopiedPublicReceipt] = useState(false);
   const [showWhatsAppSection, setShowWhatsAppSection] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // Supervisor Override Action Gate State
+  const [overrideModal, setOverrideModal] = useState<{
+    isOpen: boolean;
+    action: "VOID_CART" | "ITEM_VOID" | "HIGH_DISCOUNT" | "PRICE_OVERRIDE" | "NO_SALE_DRAWER" | "EXPENSE_DELETE";
+    actionDescription: string;
+    details?: Record<string, unknown>;
+    onApproved: (supervisor: { name: string; role: string }) => void;
+  }>({
+    isOpen: false,
+    action: "VOID_CART",
+    actionDescription: "",
+    onApproved: () => {},
+  });
+  const [isDiscountAuthorized, setIsDiscountAuthorized] = useState(false);
 
   // Shift & Cash Drawer Reconciliation State
   const [currentShift, setCurrentShift] = useState<ShiftZReportData | null>(null);
@@ -686,13 +704,63 @@ export default function POSPage() {
     setCart((prev) => prev.filter((item) => item.productId !== productId));
   };
 
-  // Clear Cart
+  // Clear Cart with Supervisor Action Gate for Cashiers
   const clearCart = () => {
-    if (cart.length > 0 && confirm("Are you sure you want to clear the active cart?")) {
-      setCart([]);
-      setOrderDiscount(0);
-      setStatusMessage(null);
+    if (cart.length === 0) return;
+
+    const userRole = session?.user?.role;
+    if (userRole === "OWNER" || userRole === "MANAGER" || userRole === "SUPERVISOR") {
+      if (confirm(`Are you sure you want to clear the active cart (${cart.length} item(s))?`)) {
+        setCart([]);
+        setOrderDiscount(0);
+        setIsDiscountAuthorized(false);
+        setStatusMessage({ type: "success", text: "Cart cleared." });
+      }
+      return;
     }
+
+    // Cashier requires supervisor approval
+    setOverrideModal({
+      isOpen: true,
+      action: "VOID_CART",
+      actionDescription: `Void entire cart: ${cart.length} item(s) totaling ${formatCurrency(subtotal)}`,
+      details: { cartItemCount: cart.length, cartSubtotal: subtotal },
+      onApproved: (supervisor) => {
+        setCart([]);
+        setOrderDiscount(0);
+        setIsDiscountAuthorized(false);
+        setStatusMessage({
+          type: "success",
+          text: `Cart void approved by ${supervisor.name} (${supervisor.role}).`,
+        });
+      },
+    });
+  };
+
+  // No-Sale Cash Drawer Kick
+  const handleNoSaleDrawerKick = () => {
+    const userRole = session?.user?.role;
+    const executeKick = (supervisorName?: string) => {
+      setStatusMessage({
+        type: "success",
+        text: `Cash drawer opened (No Sale)${supervisorName ? ` authorized by ${supervisorName}` : ""}.`,
+      });
+    };
+
+    if (userRole === "OWNER" || userRole === "MANAGER" || userRole === "SUPERVISOR") {
+      executeKick();
+      return;
+    }
+
+    setOverrideModal({
+      isOpen: true,
+      action: "NO_SALE_DRAWER",
+      actionDescription: "Open cash drawer without a sale transaction (No Sale kick)",
+      details: { registerName: selectedRegister?.name || "Counter 01" },
+      onApproved: (supervisor) => {
+        executeKick(`${supervisor.name} (${supervisor.role})`);
+      },
+    });
   };
 
   // Handle Barcode Scan (Enter key from USB scanner)
@@ -820,6 +888,31 @@ export default function POSPage() {
         setIsOpenShiftModalOpen(true);
         return;
       }
+    }
+
+    // High cashier discount supervisor action gate check
+    const isHighDiscount = orderDiscount > 0 && subtotal > 0 && (((orderDiscount / subtotal) * 100 > 5) || orderDiscount > 500);
+    const userRole = session?.user?.role;
+    if (isHighDiscount && !isDiscountAuthorized && userRole === "CASHIER") {
+      setOverrideModal({
+        isOpen: true,
+        action: "HIGH_DISCOUNT",
+        actionDescription: `Cashier discount of ${formatCurrency(orderDiscount)} (${Math.round((orderDiscount / subtotal) * 100)}%) exceeds standard cashier limit (5% or Rs. 500)`,
+        details: { orderDiscount, subtotal, discountPercent: Math.round((orderDiscount / subtotal) * 100) },
+        onApproved: (supervisor) => {
+          setIsDiscountAuthorized(true);
+          setStatusMessage({
+            type: "success",
+            text: `Discount of ${formatCurrency(orderDiscount)} authorized by ${supervisor.name} (${supervisor.role}).`,
+          });
+          setCashReceived(Math.ceil(netTotal).toString());
+          setValidatedCreditNote(null);
+          setCreditNoteCodeInput("");
+          setCreditNoteError(null);
+          setIsCheckoutOpen(true);
+        },
+      });
+      return;
     }
 
     setCashReceived(Math.ceil(netTotal).toString());
@@ -2671,6 +2764,22 @@ export default function POSPage() {
                     ))}
                   </div>
                 )}
+
+                {/* Manual Drawer Kick (No Sale) */}
+                <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">Manual Drawer Kick (No Sale)</span>
+                    <span className="text-[10px] text-slate-400">Open drawer to make customer change (Supervisor PIN logged)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleNoSaleDrawerKick}
+                    className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold text-xs rounded-xl flex items-center gap-1.5 transition active:scale-95"
+                  >
+                    <Unlock className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Open Drawer</span>
+                  </button>
+                </div>
               </div>
 
               {/* Action Buttons */}
@@ -3054,6 +3163,16 @@ export default function POSPage() {
             onClose={() => setActiveSettlementSlip(null)}
           />
         )}
+
+        {/* ================= SUPERVISOR OVERRIDE ACTION GATE MODAL ================= */}
+        <SupervisorOverrideModal
+          isOpen={overrideModal.isOpen}
+          onClose={() => setOverrideModal((prev) => ({ ...prev, isOpen: false }))}
+          onApproved={overrideModal.onApproved}
+          action={overrideModal.action}
+          actionDescription={overrideModal.actionDescription}
+          details={overrideModal.details}
+        />
       </div>
     </AppLayout>
   );

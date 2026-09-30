@@ -46,6 +46,17 @@ export const businessSettingsSchema = z.object({
       minPointsToRedeem: z.number().min(0).default(50),
     })
     .optional(),
+  securityPolicy: z
+    .object({
+      requireSupervisorForVoid: z.boolean().default(true),
+      requireSupervisorForDiscount: z.boolean().default(true),
+      maxCashierDiscountPercent: z.number().min(0).max(100).default(5),
+      maxCashierDiscountAmount: z.number().min(0).default(500),
+      requireSupervisorForPriceOverride: z.boolean().default(true),
+      requireSupervisorForNoSale: z.boolean().default(true),
+      requireSupervisorForExpenseDelete: z.boolean().default(true),
+    })
+    .optional(),
 });
 
 export type BusinessSettingsInput = z.infer<typeof businessSettingsSchema>;
