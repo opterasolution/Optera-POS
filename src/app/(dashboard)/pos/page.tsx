@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import Link from "next/link";
 import { useSession } from "next-auth/react";
 import AppLayout from "@/components/layout/AppLayout";
 import {
@@ -86,6 +87,8 @@ interface Product {
   sku?: string;
   costPrice: number;
   sellingPrice: number;
+  wholesalePrice?: number;
+  wholesaleMinQty?: number;
   stockQuantity: number;
   unit: string;
   categoryId?: { _id: string; name: string; color?: string } | string;
@@ -103,6 +106,9 @@ interface CartItem {
   barcode?: string;
   unitPrice: number;
   costPrice: number;
+  sellingPrice: number;
+  wholesalePrice?: number;
+  wholesaleMinQty?: number;
   quantity: number;
   stockQuantity: number;
   unit: string;
@@ -189,6 +195,13 @@ export default function POSPage() {
   const [validatingCreditNote, setValidatingCreditNote] = useState(false);
   const [creditNoteError, setCreditNoteError] = useState<string | null>(null);
   const [submittingSale, setSubmittingSale] = useState(false);
+
+  // Wholesale & B2B Invoicing State
+  const [billingMode, setBillingMode] = useState<"RETAIL" | "WHOLESALE">("RETAIL");
+  const [isTaxInvoice, setIsTaxInvoice] = useState(false);
+  const [buyerCompanyName, setBuyerCompanyName] = useState("");
+  const [buyerTin, setBuyerTin] = useState("");
+  const [buyerVatNumber, setBuyerVatNumber] = useState("");
 
   // Customer Credit & Quick Debt Settlement State
   const [matchedCustomer, setMatchedCustomer] = useState<any | null>(null);
@@ -633,6 +646,44 @@ export default function POSPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  // Determine unit price based on billingMode and wholesale threshold
+  const getItemUnitPrice = (
+    item: { sellingPrice: number; wholesalePrice?: number; wholesaleMinQty?: number },
+    qty: number,
+    mode: "RETAIL" | "WHOLESALE"
+  ) => {
+    if (mode === "WHOLESALE" && item.wholesalePrice && item.wholesalePrice > 0) {
+      return item.wholesalePrice;
+    }
+    if (
+      item.wholesalePrice &&
+      item.wholesalePrice > 0 &&
+      item.wholesaleMinQty &&
+      qty >= item.wholesaleMinQty
+    ) {
+      return item.wholesalePrice;
+    }
+    return item.sellingPrice;
+  };
+
+  const handleToggleBillingMode = (mode: "RETAIL" | "WHOLESALE") => {
+    setBillingMode(mode);
+    setCart((prevCart) =>
+      prevCart.map((item) => ({
+        ...item,
+        unitPrice: getItemUnitPrice(
+          {
+            sellingPrice: item.sellingPrice ?? item.unitPrice,
+            wholesalePrice: item.wholesalePrice,
+            wholesaleMinQty: item.wholesaleMinQty,
+          },
+          item.quantity,
+          mode
+        ),
+      }))
+    );
+  };
+
   // Add product to cart
   const addToCart = (product: Product) => {
     if (product.stockQuantity <= 0) {
@@ -653,10 +704,35 @@ export default function POSPage() {
           return prevCart;
         }
 
+        const newQty = item.quantity + 1;
+        const newUnitPrice = getItemUnitPrice(
+          {
+            sellingPrice: item.sellingPrice ?? product.sellingPrice,
+            wholesalePrice: item.wholesalePrice ?? product.wholesalePrice,
+            wholesaleMinQty: item.wholesaleMinQty ?? product.wholesaleMinQty,
+          },
+          newQty,
+          billingMode
+        );
+
         const updated = [...prevCart];
-        updated[existingIndex] = { ...item, quantity: item.quantity + 1 };
+        updated[existingIndex] = {
+          ...item,
+          quantity: newQty,
+          unitPrice: newUnitPrice,
+        };
         return updated;
       }
+
+      const unitPrice = getItemUnitPrice(
+        {
+          sellingPrice: product.sellingPrice,
+          wholesalePrice: product.wholesalePrice,
+          wholesaleMinQty: product.wholesaleMinQty,
+        },
+        1,
+        billingMode
+      );
 
       return [
         ...prevCart,
@@ -664,7 +740,10 @@ export default function POSPage() {
           productId: product._id,
           name: product.name,
           barcode: product.barcode,
-          unitPrice: product.sellingPrice,
+          sellingPrice: product.sellingPrice,
+          wholesalePrice: product.wholesalePrice,
+          wholesaleMinQty: product.wholesaleMinQty,
+          unitPrice,
           costPrice: product.costPrice,
           quantity: 1,
           stockQuantity: product.stockQuantity,
@@ -691,7 +770,16 @@ export default function POSPage() {
               });
               return item;
             }
-            return { ...item, quantity: newQty };
+            const unitPrice = getItemUnitPrice(
+              {
+                sellingPrice: item.sellingPrice ?? item.unitPrice,
+                wholesalePrice: item.wholesalePrice,
+                wholesaleMinQty: item.wholesaleMinQty,
+              },
+              newQty,
+              billingMode
+            );
+            return { ...item, quantity: newQty, unitPrice };
           }
           return item;
         })
@@ -999,6 +1087,21 @@ export default function POSPage() {
       registerId: selectedRegister?._id,
       registerName: regNameFormatted,
       customerId: matchedCustomer?._id,
+      billingType: billingMode,
+      isTaxInvoice,
+      buyerDetails:
+        isTaxInvoice || matchedCustomer
+          ? {
+              companyName:
+                buyerCompanyName.trim() ||
+                (matchedCustomer as any)?.companyName ||
+                customerName.trim() ||
+                undefined,
+              tin: buyerTin.trim() || (matchedCustomer as any)?.tin || undefined,
+              vatNumber: buyerVatNumber.trim() || (matchedCustomer as any)?.vatNumber || undefined,
+              phone: customerPhone.trim() || undefined,
+            }
+          : undefined,
       items: cart.map((item) => ({
         productId: item.productId,
         name: item.name,
@@ -1232,6 +1335,35 @@ export default function POSPage() {
                   placeholder="Search item..."
                   className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+              </div>
+
+              {/* Wholesale / Retail Counter Mode Toggle */}
+              <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleToggleBillingMode("RETAIL")}
+                  className={`px-2 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    billingMode === "RETAIL"
+                      ? "bg-white text-slate-800 shadow-2xs font-bold"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                  title="Standard retail pricing counter"
+                >
+                  Retail
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleBillingMode("WHOLESALE")}
+                  className={`px-2 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 ${
+                    billingMode === "WHOLESALE"
+                      ? "bg-amber-500 text-white shadow-2xs font-bold"
+                      : "text-amber-700 hover:text-amber-800"
+                  }`}
+                  title="Wholesale B2B counter mode: applies wholesale unit prices"
+                >
+                  <Building2 className="w-3 h-3" />
+                  Wholesale
+                </button>
               </div>
 
               {/* Register / Terminal Selector */}
@@ -2147,6 +2279,75 @@ export default function POSPage() {
                 </div>
               )}
 
+              {/* Sri Lanka IRD Tax Invoicing (B2B) Option */}
+              <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={isTaxInvoice}
+                      onChange={(e) => setIsTaxInvoice(e.target.checked)}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-blue-950 flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-blue-700" />
+                        Issue as Sri Lanka IRD Tax Invoice
+                      </span>
+                      <p className="text-[10px] text-blue-700">Itemize SSCL (2.5%) & VAT (18%) for B2B input tax credit</p>
+                    </div>
+                  </label>
+                  {isTaxInvoice && (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">
+                      B2B TAX INVOICE
+                    </span>
+                  )}
+                </div>
+
+                {isTaxInvoice && (
+                  <div className="pt-2 border-t border-blue-200/80 space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-blue-900 mb-0.5">
+                          Buyer Company / Trade Name
+                        </label>
+                        <input
+                          type="text"
+                          value={buyerCompanyName}
+                          onChange={(e) => setBuyerCompanyName(e.target.value)}
+                          placeholder={(matchedCustomer as any)?.companyName || (matchedCustomer as any)?.name || "Company Name"}
+                          className="w-full px-2.5 py-1.5 bg-white border border-blue-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-blue-900 mb-0.5">
+                          Buyer TIN (Tax Identification No.)
+                        </label>
+                        <input
+                          type="text"
+                          value={buyerTin}
+                          onChange={(e) => setBuyerTin(e.target.value)}
+                          placeholder="e.g. 100234567"
+                          className="w-full px-2.5 py-1.5 bg-white border border-blue-200 rounded-lg font-mono text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="block text-[10px] font-semibold text-blue-900 mb-0.5">
+                          Buyer VAT Registration No. (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={buyerVatNumber}
+                          onChange={(e) => setBuyerVatNumber(e.target.value)}
+                          placeholder="e.g. 100234567-7000"
+                          className="w-full px-2.5 py-1.5 bg-white border border-blue-200 rounded-lg font-mono text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Complete Actions */}
               <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
                 <button
@@ -2410,6 +2611,17 @@ export default function POSPage() {
                   <Printer className="w-4 h-4" />
                   <span>Print Receipt</span>
                 </button>
+
+                {(completedSale.isTaxInvoice || completedSale.billingType === "WHOLESALE") && (
+                  <Link
+                    href="/invoices"
+                    className="w-full sm:w-auto px-3.5 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-xl text-xs font-bold border border-blue-200 flex items-center justify-center gap-1.5 transition"
+                    title="Open Invoices & Quotations Hub for official A4 IRD Tax Invoice"
+                  >
+                    <FileText className="w-4 h-4 text-blue-600" />
+                    <span>A4 Tax Invoice</span>
+                  </Link>
+                )}
 
                 {!showWhatsAppSection && (
                   <button

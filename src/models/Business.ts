@@ -17,6 +17,11 @@ export interface IBusiness extends Document {
     name: string;
     rate: number;
     type: "INCLUSIVE" | "EXCLUSIVE";
+    tin?: string;
+    vatNumber?: string;
+    ssclEnabled?: boolean;
+    ssclRate?: number;
+    invoiceNotes?: string;
   };
   receiptSettings: {
     headerMessage: string;
@@ -82,6 +87,11 @@ const BusinessSchema = new Schema<IBusiness>(
       name: { type: String, default: "VAT" },
       rate: { type: Number, default: 0, min: 0 },
       type: { type: String, enum: ["INCLUSIVE", "EXCLUSIVE"], default: "INCLUSIVE" },
+      tin: { type: String, trim: true },
+      vatNumber: { type: String, trim: true },
+      ssclEnabled: { type: Boolean, default: false },
+      ssclRate: { type: Number, default: 2.5, min: 0 },
+      invoiceNotes: { type: String, trim: true },
     },
     receiptSettings: {
       headerMessage: { type: String, default: "Thank you for shopping with us!" },

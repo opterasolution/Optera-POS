@@ -69,3 +69,75 @@ export function formatSLDateTime(dateInput: Date | string | number): string {
     hour12: true,
   }).format(date);
 }
+
+/**
+ * Convert numerical currency amount into official English words
+ * (Used on IRD Tax Invoices and Commercial Quotations)
+ * e.g. 52450.75 -> "Rupees Fifty Two Thousand Four Hundred Fifty and Cents Seventy Five Only"
+ */
+export function amountToWords(amount: number): string {
+  if (amount === undefined || amount === null || isNaN(amount) || amount === 0) {
+    return "Rupees Zero Only";
+  }
+
+  const ones = [
+    "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
+    "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen",
+    "Seventeen", "Eighteen", "Nineteen",
+  ];
+  const tens = [
+    "", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety",
+  ];
+
+  function convertGroup(n: number): string {
+    let str = "";
+    if (n >= 100) {
+      str += ones[Math.floor(n / 100)] + " Hundred ";
+      n %= 100;
+    }
+    if (n >= 20) {
+      str += tens[Math.floor(n / 10)] + " ";
+      n %= 10;
+    }
+    if (n > 0) {
+      str += ones[n] + " ";
+    }
+    return str.trim();
+  }
+
+  const integerPart = Math.floor(Math.abs(amount));
+  const centsPart = Math.round((Math.abs(amount) - integerPart) * 100);
+
+  if (integerPart === 0 && centsPart === 0) {
+    return "Rupees Zero Only";
+  }
+
+  const chunks = [
+    { value: 1_000_000_000, name: "Billion" },
+    { value: 1_000_000, name: "Million" },
+    { value: 1_000, name: "Thousand" },
+    { value: 1, name: "" },
+  ];
+
+  let words = "";
+  let rem = integerPart;
+
+  for (const chunk of chunks) {
+    if (rem >= chunk.value) {
+      const count = Math.floor(rem / chunk.value);
+      words += convertGroup(count) + (chunk.name ? " " + chunk.name + " " : " ");
+      rem %= chunk.value;
+    }
+  }
+
+  words = words.trim();
+  let result = words ? `Rupees ${words}` : "";
+
+  if (centsPart > 0) {
+    const centsWords = convertGroup(centsPart);
+    result += (result ? " and " : "") + `Cents ${centsWords}`;
+  }
+
+  return (result + " Only").replace(/\s+/g, " ");
+}
+

@@ -43,6 +43,11 @@ export async function POST(req: Request) {
       pointsRedeemed,
       loyaltyDiscount,
       appliedPromotions,
+      billingType,
+      isTaxInvoice,
+      buyerDetails,
+      quotationId,
+      dueDate,
     } = parsed.data;
 
     if (Boolean(process.env.MONGODB_URI)) {
@@ -73,7 +78,7 @@ export async function POST(req: Request) {
       // Map products for fast lookup
       const productMap = new Map(dbProducts.map((p) => [p._id.toString(), p]));
 
-      // 3. Verify stock and calculate verified financial snapshot
+      // 3. Verify stock and calculate verified financial snapshot with Wholesale support
       const verifiedItems: ISaleItem[] = [];
       let calculatedSubtotal = 0;
 
@@ -97,7 +102,16 @@ export async function POST(req: Request) {
           );
         }
 
-        const unitPrice = dbProduct.sellingPrice;
+        const isWholesaleItem =
+          billingType === "WHOLESALE" ||
+          item.priceTier === "WHOLESALE" ||
+          (dbProduct.wholesaleMinQty && item.quantity >= dbProduct.wholesaleMinQty && (dbProduct.wholesalePrice || 0) > 0);
+
+        const unitPrice =
+          isWholesaleItem && (dbProduct.wholesalePrice || 0) > 0
+            ? (dbProduct.wholesalePrice as number)
+            : dbProduct.sellingPrice;
+
         const costPrice = dbProduct.costPrice;
         const lineSubtotal = unitPrice * item.quantity;
         const lineDiscount = item.discount || 0;
@@ -115,20 +129,42 @@ export async function POST(req: Request) {
           subtotal: lineSubtotal,
           discount: lineDiscount,
           total: lineTotal,
+          priceTier: isWholesaleItem ? "WHOLESALE" : "RETAIL",
         });
       }
 
-      // 4. Calculate final tax and net totals
+      // 4. Calculate final tax, SSCL and net totals
+      let taxableAmount = Math.max(0, calculatedSubtotal - discountTotal);
+      let ssclRate = 0;
+      let ssclAmount = 0;
+      let vatRate = 0;
+      let vatAmount = 0;
       let taxTotal = 0;
-      let netTotal = Math.max(0, calculatedSubtotal - discountTotal);
+      let netTotal = taxableAmount;
 
-      if (isTaxEnabled && taxRate > 0) {
-        if (isTaxExclusive) {
-          taxTotal = (netTotal * taxRate) / 100;
-          netTotal += taxTotal;
-        } else {
-          // Tax inclusive: calculate portion of total that is tax
-          taxTotal = (netTotal * taxRate) / (100 + taxRate);
+      if (isTaxInvoice || isTaxEnabled || business?.taxSettings?.ssclEnabled) {
+        // If SSCL is enabled
+        if (business?.taxSettings?.ssclEnabled) {
+          ssclRate = business.taxSettings.ssclRate || 2.5;
+          ssclAmount = Math.round(((taxableAmount * ssclRate) / 100) * 100) / 100;
+        }
+
+        // If VAT is enabled
+        if (isTaxEnabled && taxRate > 0) {
+          vatRate = taxRate;
+          if (isTaxExclusive || isTaxInvoice) {
+            // Under IRD, VAT is applied on taxableAmount + SSCL
+            vatAmount = Math.round((((taxableAmount + ssclAmount) * vatRate) / 100) * 100) / 100;
+            taxTotal = ssclAmount + vatAmount;
+            netTotal = taxableAmount + taxTotal;
+          } else {
+            // Tax inclusive retail
+            taxTotal = (netTotal * taxRate) / (100 + taxRate);
+            vatAmount = taxTotal;
+          }
+        } else if (ssclAmount > 0) {
+          taxTotal = ssclAmount;
+          netTotal = taxableAmount + ssclAmount;
         }
       }
 
@@ -391,6 +427,21 @@ export async function POST(req: Request) {
                 amount: netTotal,
               }
             : undefined,
+        billingType: billingType || "RETAIL",
+        isTaxInvoice: !!isTaxInvoice,
+        taxBreakdown: {
+          taxableAmount,
+          ssclRate,
+          ssclAmount,
+          vatRate,
+          vatAmount,
+        },
+        buyerDetails: buyerDetails || undefined,
+        quotationId: quotationId && Types.ObjectId.isValid(quotationId) ? new Types.ObjectId(quotationId) : undefined,
+        dueDate: dueDate ? new Date(dueDate) : undefined,
+        paymentStatus: paymentMethod === "CREDIT" ? "UNPAID" : "PAID",
+        amountPaid: paymentMethod === "CREDIT" ? 0 : netTotal,
+        balanceDue: paymentMethod === "CREDIT" ? netTotal : 0,
         status: "COMPLETED",
       });
 

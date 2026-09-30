@@ -15,6 +15,7 @@ export interface ISaleItem {
   subtotal: number;
   discount: number;
   total: number;
+  priceTier?: "RETAIL" | "WHOLESALE";
 }
 
 export interface ISale extends Document {
@@ -57,6 +58,28 @@ export interface ISale extends Document {
     creditNoteNumber: string;
     amount: number;
   };
+  billingType?: "RETAIL" | "WHOLESALE";
+  isTaxInvoice?: boolean;
+  taxBreakdown?: {
+    taxableAmount?: number;
+    ssclRate?: number;
+    ssclAmount?: number;
+    vatRate?: number;
+    vatAmount?: number;
+  };
+  buyerDetails?: {
+    companyName?: string;
+    tin?: string;
+    vatNumber?: string;
+    address?: string;
+    phone?: string;
+  };
+  quotationId?: Types.ObjectId;
+  quotationNumber?: string;
+  dueDate?: Date;
+  paymentStatus?: "PAID" | "PARTIAL" | "UNPAID";
+  amountPaid?: number;
+  balanceDue?: number;
   status: SaleStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -74,6 +97,7 @@ const SaleItemSchema = new Schema<ISaleItem>(
     subtotal: { type: Number, required: true, min: 0 },
     discount: { type: Number, default: 0, min: 0 },
     total: { type: Number, required: true, min: 0 },
+    priceTier: { type: String, enum: ["RETAIL", "WHOLESALE"], default: "RETAIL" },
   },
   { _id: false }
 );
@@ -138,6 +162,32 @@ const SaleSchema = new Schema<ISale>(
       creditNoteNumber: { type: String, trim: true },
       amount: { type: Number, min: 0 },
     },
+    billingType: { type: String, enum: ["RETAIL", "WHOLESALE"], default: "RETAIL" },
+    isTaxInvoice: { type: Boolean, default: false },
+    taxBreakdown: {
+      taxableAmount: { type: Number, default: 0 },
+      ssclRate: { type: Number, default: 0 },
+      ssclAmount: { type: Number, default: 0 },
+      vatRate: { type: Number, default: 0 },
+      vatAmount: { type: Number, default: 0 },
+    },
+    buyerDetails: {
+      companyName: { type: String, trim: true },
+      tin: { type: String, trim: true },
+      vatNumber: { type: String, trim: true },
+      address: { type: String, trim: true },
+      phone: { type: String, trim: true },
+    },
+    quotationId: { type: Schema.Types.ObjectId, ref: "Quotation" },
+    quotationNumber: { type: String, trim: true },
+    dueDate: { type: Date },
+    paymentStatus: {
+      type: String,
+      enum: ["PAID", "PARTIAL", "UNPAID"],
+      default: "PAID",
+    },
+    amountPaid: { type: Number, default: 0 },
+    balanceDue: { type: Number, default: 0 },
     status: {
       type: String,
       enum: ["COMPLETED", "CANCELLED", "REFUNDED"],

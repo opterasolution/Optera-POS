@@ -8,6 +8,8 @@ export interface IProduct extends Document {
   barcode?: string;
   costPrice: number;
   sellingPrice: number;
+  wholesalePrice?: number;
+  wholesaleMinQty?: number;
   stockQuantity: number;
   lowStockThreshold: number;
   unit: string;
@@ -34,6 +36,8 @@ const ProductSchema = new Schema<IProduct>(
     barcode: { type: String, trim: true },
     costPrice: { type: Number, required: true, min: 0, default: 0 },
     sellingPrice: { type: Number, required: true, min: 0 },
+    wholesalePrice: { type: Number, min: 0 },
+    wholesaleMinQty: { type: Number, min: 1, default: 1 },
     stockQuantity: { type: Number, required: true, default: 0 },
     lowStockThreshold: { type: Number, default: 5, min: 0 },
     unit: { type: String, default: "pcs", trim: true },

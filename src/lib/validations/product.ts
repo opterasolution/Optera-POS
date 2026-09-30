@@ -13,6 +13,8 @@ export const productSchema = z.object({
   barcode: z.string().optional().or(z.literal("")),
   costPrice: z.number().min(0, "Cost price cannot be negative").default(0),
   sellingPrice: z.number().min(0, "Selling price cannot be negative"),
+  wholesalePrice: z.number().min(0, "Wholesale price cannot be negative").optional(),
+  wholesaleMinQty: z.number().int().min(1, "Minimum wholesale quantity must be at least 1").default(1).optional(),
   stockQuantity: z.number().int("Stock must be a whole number").default(0),
   lowStockThreshold: z.number().int().min(0).default(5),
   unit: z.string().default("pcs"),

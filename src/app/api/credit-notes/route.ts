@@ -3,6 +3,8 @@ import { connectToDatabase } from "@/lib/db";
 import { CreditNote } from "@/models/CreditNote";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: Request) {
   try {
     const context = await requireAuth();

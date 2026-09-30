@@ -16,6 +16,11 @@ export const businessSettingsSchema = z.object({
     name: z.string().min(1, "Tax name is required if enabled").default("VAT"),
     rate: z.number().min(0, "Tax rate cannot be negative").max(100, "Tax rate cannot exceed 100%").default(0),
     type: z.enum(["INCLUSIVE", "EXCLUSIVE"]).default("INCLUSIVE"),
+    tin: z.string().optional().or(z.literal("")),
+    vatNumber: z.string().optional().or(z.literal("")),
+    ssclEnabled: z.boolean().default(false),
+    ssclRate: z.number().min(0).max(100).default(2.5),
+    invoiceNotes: z.string().max(1000).optional().or(z.literal("")),
   }),
   receiptSettings: z.object({
     headerMessage: z.string().max(120, "Header message too long").default("Thank you for shopping with us!"),

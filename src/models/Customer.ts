@@ -6,6 +6,10 @@ export interface ICustomer extends Document {
   phone: string;
   email?: string;
   address?: string;
+  customerType?: "RETAIL" | "WHOLESALE" | "CORPORATE";
+  companyName?: string;
+  tin?: string;
+  vatNumber?: string;
   totalSpent: number;
   visitCount: number;
   lastVisit?: Date;
@@ -35,6 +39,10 @@ const CustomerSchema = new Schema<ICustomer>(
     phone: { type: String, required: true, trim: true },
     email: { type: String, trim: true, lowercase: true },
     address: { type: String, trim: true },
+    customerType: { type: String, enum: ["RETAIL", "WHOLESALE", "CORPORATE"], default: "RETAIL" },
+    companyName: { type: String, trim: true },
+    tin: { type: String, trim: true },
+    vatNumber: { type: String, trim: true },
     totalSpent: { type: Number, default: 0, min: 0 },
     visitCount: { type: Number, default: 0, min: 0 },
     lastVisit: { type: Date },

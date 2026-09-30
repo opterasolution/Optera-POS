@@ -2,8 +2,9 @@ import { z } from "zod";
 
 export const saleItemInputSchema = z.object({
   productId: z.string().min(1, "Product ID is required"),
-  quantity: z.number().int("Quantity must be a whole number").min(1, "Quantity must be at least 1"),
+  quantity: z.number().min(0.001, "Quantity must be greater than 0"),
   discount: z.number().min(0).default(0),
+  priceTier: z.enum(["RETAIL", "WHOLESALE"]).default("RETAIL").optional(),
 });
 
 export const createSaleSchema = z.object({
@@ -32,6 +33,19 @@ export const createSaleSchema = z.object({
       })
     )
     .optional(),
+  billingType: z.enum(["RETAIL", "WHOLESALE"]).default("RETAIL").optional(),
+  isTaxInvoice: z.boolean().default(false).optional(),
+  buyerDetails: z
+    .object({
+      companyName: z.string().optional().or(z.literal("")),
+      tin: z.string().optional().or(z.literal("")),
+      vatNumber: z.string().optional().or(z.literal("")),
+      address: z.string().optional().or(z.literal("")),
+      phone: z.string().optional().or(z.literal("")),
+    })
+    .optional(),
+  quotationId: z.string().optional().or(z.literal("")),
+  dueDate: z.string().optional(),
 });
 
 export type CreateSaleInput = z.infer<typeof createSaleSchema>;

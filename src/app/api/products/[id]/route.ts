@@ -42,7 +42,7 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    const context = await requireRole(["OWNER", "MANAGER"]);
+    const context = await requireRole(["OWNER", "MANAGER", "INVENTORY_CLERK"]);
     const body = await req.json();
 
     const parsed = productSchema.partial().safeParse(body);

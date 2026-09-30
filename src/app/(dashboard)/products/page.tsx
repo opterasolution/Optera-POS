@@ -34,6 +34,8 @@ interface Product {
   barcode?: string;
   costPrice: number;
   sellingPrice: number;
+  wholesalePrice?: number;
+  wholesaleMinQty?: number;
   stockQuantity: number;
   lowStockThreshold: number;
   unit: string;
@@ -64,6 +66,8 @@ export default function ProductsPage() {
     barcode: "",
     costPrice: 0,
     sellingPrice: 0,
+    wholesalePrice: 0,
+    wholesaleMinQty: 10,
     stockQuantity: 0,
     lowStockThreshold: 5,
     unit: "packet",
@@ -110,6 +114,8 @@ export default function ProductsPage() {
       barcode: p.barcode || "",
       costPrice: p.costPrice,
       sellingPrice: p.sellingPrice,
+      wholesalePrice: p.wholesalePrice || 0,
+      wholesaleMinQty: p.wholesaleMinQty || 10,
       stockQuantity: p.stockQuantity,
       lowStockThreshold: p.lowStockThreshold,
       unit: p.unit || "pcs",
@@ -127,6 +133,8 @@ export default function ProductsPage() {
       barcode: "",
       costPrice: 0,
       sellingPrice: 0,
+      wholesalePrice: 0,
+      wholesaleMinQty: 10,
       stockQuantity: 10,
       lowStockThreshold: 5,
       unit: "packet",
@@ -390,8 +398,16 @@ export default function ProductsPage() {
                         <td className="py-3 px-4 text-right text-slate-500 font-mono">
                           {formatCurrency(p.costPrice)}
                         </td>
-                        <td className="py-3 px-4 text-right font-bold text-slate-900 font-mono">
-                          {formatCurrency(p.sellingPrice)}
+                        <td className="py-3 px-4 text-right">
+                          <div className="font-bold text-slate-900 font-mono">
+                            {formatCurrency(p.sellingPrice)}
+                          </div>
+                          {p.wholesalePrice && p.wholesalePrice > 0 ? (
+                            <div className="text-[10px] text-amber-700 font-mono bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/60 inline-flex items-center gap-1 mt-0.5">
+                              <span className="font-semibold">WS:</span> {formatCurrency(p.wholesalePrice)}
+                              <span className="text-amber-500 font-sans">({p.wholesaleMinQty || 10}+)</span>
+                            </div>
+                          ) : null}
                         </td>
                         <td className="py-3 px-4 text-center">
                           <span
@@ -594,6 +610,50 @@ export default function ProductsPage() {
                     >
                       {formatCurrency(marginRs)} ({marginPercent}%)
                     </span>
+                  </div>
+
+                  {/* Wholesale Pricing Tier */}
+                  <div className="pt-2.5 mt-1 border-t border-slate-200/80">
+                    <div className="text-[11px] font-bold text-amber-900 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                      Wholesale B2B Tier (Optional)
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Wholesale Price (Rs.)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min="0"
+                          value={productForm.wholesalePrice || ""}
+                          onChange={(e) =>
+                            setProductForm({ ...productForm, wholesalePrice: parseFloat(e.target.value) || 0 })
+                          }
+                          placeholder="0.00"
+                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl font-mono focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Min Wholesale Qty
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          min="1"
+                          value={productForm.wholesaleMinQty || 10}
+                          onChange={(e) =>
+                            setProductForm({ ...productForm, wholesaleMinQty: parseInt(e.target.value) || 10 })
+                          }
+                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl font-mono focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Automatically applied in POS when wholesale mode is activated or item qty meets threshold.
+                    </p>
                   </div>
                 </div>
 
