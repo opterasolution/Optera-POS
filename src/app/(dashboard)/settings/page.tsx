@@ -34,11 +34,20 @@ import {
   Lock,
   Unlock,
   Sliders,
+  Globe,
+  ArrowRightLeft,
+  TrendingDown,
+  Info,
 } from "lucide-react";
 import { formatCurrency, isValidSLPhone } from "@/lib/formatters";
 import SubscriptionInvoiceReceipt, {
   SubscriptionInvoiceData,
 } from "@/components/receipts/SubscriptionInvoiceReceipt";
+import {
+  SUPPORTED_CURRENCY_PRESETS,
+  formatForeignCurrency,
+  applyMerchantBuffer,
+} from "@/lib/currency";
 
 interface RegisterItem {
   _id: string;
@@ -58,8 +67,34 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Tab State: profile | staff | registers | subscription | security | audit
-  const [activeTab, setActiveTab] = useState<"profile" | "staff" | "registers" | "subscription" | "security" | "audit">("profile");
+  // Tab State: profile | staff | registers | subscription | security | audit | currency
+  const [activeTab, setActiveTab] = useState<"profile" | "staff" | "registers" | "subscription" | "security" | "audit" | "currency">("profile");
+
+  // Multi-Currency & Central Bank of Sri Lanka (CBSL) Exchange Engine State
+  const [currencySettings, setCurrencySettings] = useState<{
+    enabled: boolean;
+    baseCurrency: string;
+    exchangeBufferPercent: number;
+    currencies: Array<{
+      code: string;
+      symbol: string;
+      name: string;
+      exchangeRate: number;
+      isEnabled: boolean;
+      isAutoUpdated?: boolean;
+      marginPercent?: number;
+      updatedAt?: string | Date;
+    }>;
+  }>({
+    enabled: true,
+    baseCurrency: "LKR",
+    exchangeBufferPercent: 2,
+    currencies: [],
+  });
+  const [loadingCurrencies, setLoadingCurrencies] = useState(false);
+  const [savingCurrencies, setSavingCurrencies] = useState(false);
+  const [syncingRates, setSyncingRates] = useState(false);
+  const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
 
   // Store Subscription Invoices State
   const [storeInvoices, setStoreInvoices] = useState<SubscriptionInvoiceData[]>([]);
@@ -281,11 +316,131 @@ export default function SettingsPage() {
       }
     }
 
+    async function loadCurrencies() {
+      setLoadingCurrencies(true);
+      try {
+        const res = await fetch("/api/currencies");
+        const data = await res.json();
+        if (data.success && data.currencySettings) {
+          setCurrencySettings(data.currencySettings);
+          if (data.indicativeRates?.timestamp) {
+            setLastSyncedTime(new Date(data.indicativeRates.timestamp).toLocaleTimeString());
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load currency settings", err);
+      } finally {
+        setLoadingCurrencies(false);
+      }
+    }
+
     loadSettings();
     loadStaff();
     loadInvoices();
     loadRegisters();
+    loadCurrencies();
   }, []);
+
+  const handleSyncRates = async () => {
+    setSyncingRates(true);
+    setStatusMessage(null);
+    try {
+      const res = await fetch("/api/currencies/rates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bufferPercent: currencySettings.exchangeBufferPercent ?? 2,
+          applyToSettings: true,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCurrencySettings(data.currencySettings);
+        setLastSyncedTime(new Date().toLocaleTimeString());
+        setStatusMessage({
+          type: "success",
+          text: `Successfully synced exchange rates with ${data.source || "CBSL indicative benchmarks"}. Effective rates updated with ${currencySettings.exchangeBufferPercent}% buffer margin.`,
+        });
+      } else {
+        setStatusMessage({ type: "error", text: data.error || "Failed to sync exchange rates." });
+      }
+    } catch {
+      setStatusMessage({ type: "error", text: "Network error communicating with currency rates service." });
+    } finally {
+      setSyncingRates(false);
+    }
+  };
+
+  const handleSaveCurrencies = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setSavingCurrencies(true);
+    setStatusMessage(null);
+    try {
+      const res = await fetch("/api/currencies", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(currencySettings),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCurrencySettings(data.currencySettings);
+        setStatusMessage({
+          type: "success",
+          text: "Multi-currency settings and counter exchange rates updated successfully.",
+        });
+      } else {
+        setStatusMessage({ type: "error", text: data.error || "Failed to save currency settings." });
+      }
+    } catch {
+      setStatusMessage({ type: "error", text: "Network error saving currency settings." });
+    } finally {
+      setSavingCurrencies(false);
+    }
+  };
+
+  const handleToggleCurrency = (code: string) => {
+    setCurrencySettings((prev) => {
+      const existing = prev.currencies.find((c) => c.code === code);
+      let updatedCurrencies;
+      if (existing) {
+        updatedCurrencies = prev.currencies.map((c) =>
+          c.code === code ? { ...c, isEnabled: !c.isEnabled } : c
+        );
+      } else {
+        const preset = SUPPORTED_CURRENCY_PRESETS.find((p) => p.code === code);
+        if (!preset) return prev;
+        const rate = applyMerchantBuffer(preset.defaultRate, prev.exchangeBufferPercent);
+        updatedCurrencies = [
+          ...prev.currencies,
+          {
+            code: preset.code,
+            symbol: preset.symbol,
+            name: preset.name,
+            exchangeRate: rate,
+            isEnabled: true,
+            isAutoUpdated: true,
+          },
+        ];
+      }
+      return { ...prev, currencies: updatedCurrencies };
+    });
+  };
+
+  const handleRateChange = (code: string, newRate: number) => {
+    setCurrencySettings((prev) => ({
+      ...prev,
+      currencies: prev.currencies.map((c) =>
+        c.code === code ? { ...c, exchangeRate: newRate, isAutoUpdated: false } : c
+      ),
+    }));
+  };
+
+  const handleBufferChange = (bufferPercent: number) => {
+    setCurrencySettings((prev) => ({
+      ...prev,
+      exchangeBufferPercent: bufferPercent,
+    }));
+  };
 
   const loadAuditLogs = async (action = auditActionFilter, search = auditSearch, range = auditRange) => {
     setAuditLoading(true);
@@ -600,6 +755,34 @@ export default function SettingsPage() {
               </button>
             )}
 
+            {activeTab === "currency" && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSyncRates}
+                  disabled={syncingRates}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-semibold transition-all shadow-sm disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${syncingRates ? "animate-spin" : ""}`} />
+                  <span>{syncingRates ? "Syncing CBSL..." : "Sync CBSL Rates"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveCurrencies}
+                  disabled={savingCurrencies}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold transition-all shadow-sm disabled:opacity-50"
+                >
+                  {savingCurrencies ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" /> Save FX Rates
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+
             {activeTab === "subscription" && (
               <a
                 href="tel:0771234567"
@@ -623,6 +806,17 @@ export default function SettingsPage() {
             }`}
           >
             <Store className="w-4 h-4" /> Store & Tax Profile
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("currency")}
+            className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
+              activeTab === "currency"
+                ? "border-emerald-600 text-emerald-600 font-bold"
+                : "border-transparent text-slate-500 hover:text-slate-900"
+            }`}
+          >
+            <Globe className="w-4 h-4" /> Multi-Currency & FX Rates
           </button>
           <button
             type="button"
@@ -2416,6 +2610,208 @@ export default function SettingsPage() {
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ================= MULTI-CURRENCY & FX EXCHANGE RATES TAB ================= */}
+        {activeTab === "currency" && (
+          <div className="space-y-6">
+            {/* Top Overview & Master Controls Card */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                    <Globe className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-base">Dual-Currency & Exchange Engine</h3>
+                    <p className="text-xs text-slate-500">
+                      Central Bank of Sri Lanka (CBSL) benchmark rates with custom counter buffer margins
+                    </p>
+                  </div>
+                </div>
+
+                {/* Master Switch */}
+                <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
+                  <span className="text-xs font-semibold text-slate-700">Multi-Currency Billing:</span>
+                  <button
+                    type="button"
+                    onClick={() => setCurrencySettings((prev) => ({ ...prev, enabled: !prev.enabled }))}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                      currencySettings.enabled ? "bg-emerald-600" : "bg-slate-300"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        currencySettings.enabled ? "translate-x-6" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                  <span className="text-xs font-bold font-mono text-slate-800">
+                    {currencySettings.enabled ? "ACTIVE" : "DISABLED"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Statutory Disclosure & Settings Row */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Base Currency Box */}
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                    Statutory Base Currency
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🇱🇰</span>
+                    <span className="font-bold text-sm text-slate-900">Sri Lankan Rupee (LKR)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-normal">
+                    All legal taxes (VAT/SSCL), general ledger entries, and shift reports are denominated in LKR.
+                  </p>
+                </div>
+
+                {/* Merchant Counter Buffer Margin Slider */}
+                <div className="p-4 bg-emerald-50/60 rounded-xl border border-emerald-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-900 block">
+                      Counter Buffer Margin
+                    </span>
+                    <span className="font-mono font-bold text-xs bg-emerald-200 text-emerald-950 px-2 py-0.5 rounded-full">
+                      {currencySettings.exchangeBufferPercent}% Margin
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="0"
+                      max="10"
+                      step="0.5"
+                      value={currencySettings.exchangeBufferPercent}
+                      onChange={(e) => handleBufferChange(parseFloat(e.target.value) || 0)}
+                      className="w-full accent-emerald-600"
+                    />
+                  </div>
+                  <p className="text-[10px] text-emerald-800 leading-normal">
+                    Applied below benchmark rate (e.g. -2%) to protect against foreign exchange volatility and cash handling.
+                  </p>
+                </div>
+
+                {/* CBSL Sync & Benchmark Status */}
+                <div className="p-4 bg-blue-50/60 rounded-xl border border-blue-200 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-900 block">
+                      Exchange Rate Source
+                    </span>
+                    <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded">
+                      CBSL / Market
+                    </span>
+                  </div>
+                  <div className="text-xs font-semibold text-slate-800">
+                    Last Synced: <span className="font-mono text-blue-900">{lastSyncedTime || "Ready to sync"}</span>
+                  </div>
+                  <p className="text-[10px] text-blue-800 leading-normal">
+                    Fetches Central Bank of Sri Lanka indicative counter rates with auto-fallbacks.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Currencies Grid & Exchange Rates Configuration */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-bold text-slate-900 text-sm">Supported Foreign Currencies</h4>
+                  <p className="text-xs text-slate-500">
+                    Enable the foreign banknotes your store accepts at the counter and configure exchange rates.
+                  </p>
+                </div>
+                <span className="text-xs font-semibold text-slate-600">
+                  {currencySettings.currencies.filter((c) => c.isEnabled).length} of {SUPPORTED_CURRENCY_PRESETS.length} Active
+                </span>
+              </div>
+
+              {loadingCurrencies ? (
+                <div className="py-12 text-center text-slate-400 text-xs">Loading currency rates...</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {SUPPORTED_CURRENCY_PRESETS.map((preset) => {
+                    const current = currencySettings.currencies.find((c) => c.code === preset.code);
+                    const isEnabled = current ? current.isEnabled : ["USD", "EUR", "GBP"].includes(preset.code);
+                    const currentRate = current?.exchangeRate || applyMerchantBuffer(preset.defaultRate, currencySettings.exchangeBufferPercent);
+
+                    return (
+                      <div
+                        key={preset.code}
+                        className={`p-4 rounded-xl border transition-all ${
+                          isEnabled
+                            ? "bg-white border-slate-300 shadow-xs"
+                            : "bg-slate-50/70 border-slate-200 opacity-60"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-2xl">{preset.flag}</span>
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-extrabold text-slate-900 text-sm">{preset.code}</span>
+                                <span className="text-xs text-slate-500 font-medium">({preset.symbol})</span>
+                              </div>
+                              <span className="text-[11px] text-slate-500 block">{preset.name}</span>
+                            </div>
+                          </div>
+
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isEnabled}
+                              onChange={() => handleToggleCurrency(preset.code)}
+                              className="sr-only peer"
+                            />
+                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                          </label>
+                        </div>
+
+                        {/* Rate Editing & Conversion Simulation */}
+                        <div className="pt-3 space-y-2">
+                          <div className="flex items-center justify-between gap-3 text-xs">
+                            <span className="text-slate-600 font-medium">1 {preset.code} =</span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-slate-500 font-mono">Rs.</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0.01"
+                                disabled={!isEnabled}
+                                value={currentRate}
+                                onChange={(e) => handleRateChange(preset.code, parseFloat(e.target.value) || 0)}
+                                className="w-24 px-2 py-1 text-right font-mono font-bold text-xs border border-slate-300 rounded-lg bg-white focus:ring-1 focus:ring-emerald-500 disabled:bg-slate-100"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="p-2 bg-slate-50 rounded-lg border border-slate-200/80 flex items-center justify-between text-[11px] text-slate-600 font-mono">
+                            <span>Counter Example:</span>
+                            <span className="font-semibold text-slate-900">
+                              {preset.symbol}100.00 = {formatCurrency(100 * currentRate)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Shift & Cash Drawer Segregation Guidance */}
+            <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-2xl flex items-start gap-3 text-xs text-amber-900">
+              <Info className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <span className="font-bold block">Cash Drawer & Shift Auditing Note</span>
+                <p className="text-[11px] text-amber-800 leading-normal">
+                  When cashiers accept foreign notes (e.g. $50 USD or €20 EUR), the foreign banknotes are physically retained in the cash drawer and change is given in Sri Lankan Rupees (LKR). At the end of each shift, the X/Z-Report will itemize foreign banknotes separately from LKR cash float.
+                </p>
+              </div>
             </div>
           </div>
         )}

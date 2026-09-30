@@ -80,6 +80,12 @@ export interface ISale extends Document {
   paymentStatus?: "PAID" | "PARTIAL" | "UNPAID";
   amountPaid?: number;
   balanceDue?: number;
+  tenderCurrency?: string;
+  exchangeRate?: number;
+  foreignAmount?: number;
+  foreignCashReceived?: number;
+  foreignChangeGiven?: number;
+  foreignCurrencySymbol?: string;
   status: SaleStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -188,6 +194,12 @@ const SaleSchema = new Schema<ISale>(
     },
     amountPaid: { type: Number, default: 0 },
     balanceDue: { type: Number, default: 0 },
+    tenderCurrency: { type: String, default: "LKR" },
+    exchangeRate: { type: Number, default: 1 },
+    foreignAmount: { type: Number },
+    foreignCashReceived: { type: Number },
+    foreignChangeGiven: { type: Number },
+    foreignCurrencySymbol: { type: String, default: "Rs." },
     status: {
       type: String,
       enum: ["COMPLETED", "CANCELLED", "REFUNDED"],

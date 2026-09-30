@@ -30,6 +30,12 @@ interface OfflineSalePayload {
   registerId?: string;
   registerName?: string;
   shiftId?: string;
+  tenderCurrency?: string;
+  exchangeRate?: number;
+  foreignAmount?: number;
+  foreignCashReceived?: number;
+  foreignChangeGiven?: number;
+  foreignCurrencySymbol?: string;
   createdAt?: string;
 }
 
@@ -73,6 +79,12 @@ export async function POST(req: Request) {
           registerId,
           registerName,
           shiftId,
+          tenderCurrency = "LKR",
+          exchangeRate,
+          foreignAmount,
+          foreignCashReceived,
+          foreignChangeGiven,
+          foreignCurrencySymbol,
           createdAt,
         } = saleItem;
 
@@ -227,12 +239,43 @@ export async function POST(req: Request) {
           cashReceived: paymentMethod === "CASH" ? cashReceived : undefined,
           changeGiven: calculatedChange,
           paymentReference,
+          tenderCurrency: tenderCurrency || "LKR",
+          exchangeRate: tenderCurrency !== "LKR" ? exchangeRate : undefined,
+          foreignAmount: tenderCurrency !== "LKR" ? foreignAmount : undefined,
+          foreignCashReceived: tenderCurrency !== "LKR" ? foreignCashReceived : undefined,
+          foreignChangeGiven: tenderCurrency !== "LKR" ? foreignChangeGiven : undefined,
+          foreignCurrencySymbol: tenderCurrency !== "LKR" ? foreignCurrencySymbol : undefined,
           registerId: registerId && registerId.trim() ? new Types.ObjectId(registerId) : undefined,
           registerName: registerName?.trim() || "Counter 01 (Main)",
           shiftId: resolvedShiftId,
           status: "COMPLETED",
           createdAt: createdAt ? new Date(createdAt) : new Date(),
         });
+
+        // If foreign currency cash was collected, update active Shift drawer aggregates
+        if (resolvedShiftId && paymentMethod === "CASH" && tenderCurrency !== "LKR" && foreignCashReceived) {
+          const shiftToUpdate = await Shift.findById(resolvedShiftId);
+          if (shiftToUpdate) {
+            const list = shiftToUpdate.foreignCurrencySales || [];
+            const idx = list.findIndex((f) => f.currency === tenderCurrency);
+            const lkrEq = Math.round(foreignCashReceived * (exchangeRate || 1) * 100) / 100;
+            if (idx >= 0) {
+              list[idx].salesCount = (list[idx].salesCount || 0) + 1;
+              list[idx].totalForeignReceived = Math.round(((list[idx].totalForeignReceived || 0) + foreignCashReceived) * 100) / 100;
+              list[idx].totalLkrEquivalent = Math.round(((list[idx].totalLkrEquivalent || 0) + lkrEq) * 100) / 100;
+            } else {
+              list.push({
+                currency: tenderCurrency,
+                symbol: foreignCurrencySymbol || "$",
+                salesCount: 1,
+                totalForeignReceived: foreignCashReceived,
+                totalLkrEquivalent: lkrEq,
+              });
+            }
+            shiftToUpdate.foreignCurrencySales = list;
+            await shiftToUpdate.save();
+          }
+        }
 
         // Audit Log
         await AuditLog.create({

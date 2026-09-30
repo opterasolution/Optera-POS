@@ -3,6 +3,24 @@ import mongoose, { Schema, Document, Model } from "mongoose";
 export type SubscriptionPlan = "TRIAL" | "BASIC" | "PROFESSIONAL" | "ENTERPRISE";
 export type SubscriptionStatus = "TRIAL" | "ACTIVE" | "EXPIRED" | "SUSPENDED" | "CANCELLED";
 
+export interface ISupportedCurrency {
+  code: string;
+  symbol: string;
+  name: string;
+  exchangeRate: number;
+  isEnabled: boolean;
+  isAutoUpdated?: boolean;
+  marginPercent?: number;
+  updatedAt?: Date;
+}
+
+export interface ICurrencySettings {
+  enabled: boolean;
+  baseCurrency: string;
+  exchangeBufferPercent?: number;
+  currencies: ISupportedCurrency[];
+}
+
 export interface IBusiness extends Document {
   name: string;
   businessType: string;
@@ -12,6 +30,7 @@ export interface IBusiness extends Document {
   address?: string;
   logo?: string;
   currency: string;
+  currencySettings?: ICurrencySettings;
   taxSettings: {
     enabled: boolean;
     name: string;
@@ -82,6 +101,23 @@ const BusinessSchema = new Schema<IBusiness>(
     address: { type: String, trim: true },
     logo: { type: String },
     currency: { type: String, default: "LKR" },
+    currencySettings: {
+      enabled: { type: Boolean, default: false },
+      baseCurrency: { type: String, default: "LKR" },
+      exchangeBufferPercent: { type: Number, default: 2 },
+      currencies: [
+        {
+          code: { type: String, required: true },
+          symbol: { type: String, required: true },
+          name: { type: String, required: true },
+          exchangeRate: { type: Number, required: true, min: 0 },
+          isEnabled: { type: Boolean, default: true },
+          isAutoUpdated: { type: Boolean, default: true },
+          marginPercent: { type: Number, default: 0 },
+          updatedAt: { type: Date, default: Date.now },
+        },
+      ],
+    },
     taxSettings: {
       enabled: { type: Boolean, default: false },
       name: { type: String, default: "VAT" },

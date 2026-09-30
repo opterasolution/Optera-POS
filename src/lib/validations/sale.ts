@@ -46,6 +46,12 @@ export const createSaleSchema = z.object({
     .optional(),
   quotationId: z.string().optional().or(z.literal("")),
   dueDate: z.string().optional(),
+  tenderCurrency: z.string().default("LKR").optional(),
+  exchangeRate: z.number().positive().default(1).optional(),
+  foreignAmount: z.number().min(0).optional(),
+  foreignCashReceived: z.number().min(0).optional(),
+  foreignChangeGiven: z.number().min(0).optional(),
+  foreignCurrencySymbol: z.string().optional(),
 });
 
 export type CreateSaleInput = z.infer<typeof createSaleSchema>;

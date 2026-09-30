@@ -49,11 +49,19 @@ import {
   Ticket,
   ShieldAlert,
   KeyRound,
+  Globe,
 } from "lucide-react";
 import SupervisorOverrideModal from "@/components/pos/SupervisorOverrideModal";
 import ShiftZReportReceipt, { ShiftZReportData } from "@/components/receipts/ShiftZReportReceipt";
 import CreditSettlementReceipt, { CreditSettlementData } from "@/components/receipts/CreditSettlementReceipt";
 import { formatCurrency } from "@/lib/formatters";
+import {
+  SUPPORTED_CURRENCY_PRESETS,
+  formatForeignCurrency,
+  convertLkrToForeign,
+  convertForeignToLkr,
+  calculateForeignTenderChange,
+} from "@/lib/currency";
 import { formatWhatsAppReceipt, buildWhatsAppUrl, toWhatsAppPhone } from "@/lib/notifications";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import {
@@ -195,6 +203,30 @@ export default function POSPage() {
   const [validatingCreditNote, setValidatingCreditNote] = useState(false);
   const [creditNoteError, setCreditNoteError] = useState<string | null>(null);
   const [submittingSale, setSubmittingSale] = useState(false);
+
+  // Multi-Currency & Dual-Currency Counter State (CBSL Engine)
+  const [currencySettings, setCurrencySettings] = useState<{
+    enabled: boolean;
+    baseCurrency: string;
+    exchangeBufferPercent?: number;
+    currencies: Array<{
+      code: string;
+      symbol: string;
+      name: string;
+      exchangeRate: number;
+      isEnabled: boolean;
+      isAutoUpdated?: boolean;
+      marginPercent?: number;
+    }>;
+  }>({
+    enabled: false,
+    baseCurrency: "LKR",
+    exchangeBufferPercent: 2,
+    currencies: [],
+  });
+  const [displayCurrency, setDisplayCurrency] = useState<string>("LKR");
+  const [tenderCurrency, setTenderCurrency] = useState<string>("LKR");
+  const [foreignCashReceived, setForeignCashReceived] = useState<string>("");
 
   // Wholesale & B2B Invoicing State
   const [billingMode, setBillingMode] = useState<"RETAIL" | "WHOLESALE">("RETAIL");
@@ -526,20 +558,22 @@ export default function POSPage() {
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const [prodRes, catRes, bizRes, regRes, promoRes] = await Promise.all([
+      const [prodRes, catRes, bizRes, regRes, promoRes, currRes] = await Promise.all([
         fetch("/api/products"),
         fetch("/api/categories"),
         fetch("/api/business"),
         fetch("/api/registers"),
         fetch("/api/promotions"),
+        fetch("/api/currencies"),
       ]);
 
-      const [prodData, catData, bizData, regData, promoData] = await Promise.all([
+      const [prodData, catData, bizData, regData, promoData, currData] = await Promise.all([
         prodRes.json(),
         catRes.json(),
         bizRes.json(),
         regRes.json(),
         promoRes.json(),
+        currRes.json(),
       ]);
 
       const fetchedProducts = prodData.success ? prodData.products || [] : [];
@@ -553,6 +587,9 @@ export default function POSPage() {
       if (promoData.success) {
         setPromotions(promoData.promotions || []);
         if (promoData.loyaltySettings) setLoyaltySettings(promoData.loyaltySettings);
+      }
+      if (currData?.success && currData.currencySettings) {
+        setCurrencySettings(currData.currencySettings);
       }
 
       if (regData.success && fetchedRegisters.length > 0) {
@@ -951,6 +988,47 @@ export default function POSPage() {
     5000,
   ].filter((val, idx, self) => val >= netTotal && self.indexOf(val) === idx);
 
+  // Foreign & Multi-Currency Dual-Tender Calculations
+  const activeForeignCurrencies = currencySettings.enabled
+    ? currencySettings.currencies.filter((c) => c.isEnabled && c.code !== "LKR")
+    : [];
+
+  const selectedCurrencyConfig =
+    tenderCurrency === "LKR"
+      ? null
+      : currencySettings.currencies.find((c) => c.code === tenderCurrency);
+
+  const currentExchangeRate = selectedCurrencyConfig?.exchangeRate || 1;
+  const foreignAmountDue =
+    tenderCurrency !== "LKR" && currentExchangeRate > 0
+      ? convertLkrToForeign(netTotal, currentExchangeRate)
+      : 0;
+
+  const foreignCashReceivedNum = parseFloat(foreignCashReceived) || 0;
+  const foreignTenderCalc = calculateForeignTenderChange(
+    foreignCashReceivedNum,
+    foreignAmountDue,
+    currentExchangeRate
+  );
+  const foreignChangeLkr = foreignTenderCalc.changeLkr;
+
+  // Quick foreign banknote options
+  const quickForeignOptions = selectedCurrencyConfig
+    ? [
+        Math.ceil(foreignAmountDue),
+        Math.ceil(foreignAmountDue / 5) * 5 || 5,
+        Math.ceil(foreignAmountDue / 10) * 10 || 10,
+        20,
+        50,
+        100,
+      ].filter(
+        (val, idx, self) =>
+          val >= foreignAmountDue &&
+          self.indexOf(val) === idx &&
+          val <= (foreignAmountDue > 100 ? foreignAmountDue * 2 : 200)
+      )
+    : [];
+
   // Open Checkout Modal
   const openCheckout = () => {
     if (cart.length === 0) {
@@ -994,6 +1072,8 @@ export default function POSPage() {
             text: `Discount of ${formatCurrency(orderDiscount)} authorized by ${supervisor.name} (${supervisor.role}).`,
           });
           setCashReceived(Math.ceil(netTotal).toString());
+          setTenderCurrency("LKR");
+          setForeignCashReceived("");
           setValidatedCreditNote(null);
           setCreditNoteCodeInput("");
           setCreditNoteError(null);
@@ -1004,6 +1084,8 @@ export default function POSPage() {
     }
 
     setCashReceived(Math.ceil(netTotal).toString());
+    setTenderCurrency("LKR");
+    setForeignCashReceived("");
     setValidatedCreditNote(null);
     setCreditNoteCodeInput("");
     setCreditNoteError(null);
@@ -1040,9 +1122,17 @@ export default function POSPage() {
 
   // Complete Sale Submission (with offline fallback and automatic queueing)
   const handleCompleteSale = async () => {
-    if (paymentMethod === "CASH" && cashGivenNum < netTotal) {
-      alert(`Cash received (Rs. ${cashGivenNum}) is less than total bill (Rs. ${netTotal.toFixed(2)}).`);
-      return;
+    if (paymentMethod === "CASH") {
+      if (tenderCurrency === "LKR" && cashGivenNum < netTotal) {
+        alert(`Cash received (Rs. ${cashGivenNum}) is less than total bill (Rs. ${netTotal.toFixed(2)}).`);
+        return;
+      }
+      if (tenderCurrency !== "LKR" && foreignCashReceivedNum < foreignAmountDue) {
+        alert(
+          `Foreign cash received (${selectedCurrencyConfig?.symbol || ""}${foreignCashReceivedNum}) is less than total foreign bill (${selectedCurrencyConfig?.symbol || ""}${foreignAmountDue.toFixed(2)} ${tenderCurrency}).`
+        );
+        return;
+      }
     }
 
     if (paymentMethod === "CREDIT_NOTE") {
@@ -1114,8 +1204,14 @@ export default function POSPage() {
       customerPhone: customerPhone.trim() || undefined,
       discountTotal: totalDiscount,
       paymentMethod,
-      cashReceived: paymentMethod === "CASH" ? cashGivenNum : undefined,
-      changeGiven: paymentMethod === "CASH" ? changeDue : undefined,
+      tenderCurrency: paymentMethod === "CASH" ? tenderCurrency : "LKR",
+      exchangeRate: paymentMethod === "CASH" && tenderCurrency !== "LKR" ? currentExchangeRate : undefined,
+      foreignAmount: paymentMethod === "CASH" && tenderCurrency !== "LKR" ? foreignAmountDue : undefined,
+      foreignCashReceived: paymentMethod === "CASH" && tenderCurrency !== "LKR" ? foreignCashReceivedNum : undefined,
+      foreignChangeGiven: paymentMethod === "CASH" && tenderCurrency !== "LKR" ? foreignChangeLkr : undefined,
+      foreignCurrencySymbol: paymentMethod === "CASH" && tenderCurrency !== "LKR" ? (selectedCurrencyConfig?.symbol || tenderCurrency) : undefined,
+      cashReceived: paymentMethod === "CASH" ? (tenderCurrency !== "LKR" ? foreignCashReceivedNum * currentExchangeRate : cashGivenNum) : undefined,
+      changeGiven: paymentMethod === "CASH" ? (tenderCurrency !== "LKR" ? foreignChangeLkr : changeDue) : undefined,
       paymentReference: paymentReference.trim() || undefined,
       creditNoteNumber:
         paymentMethod === "CREDIT_NOTE" && validatedCreditNote
@@ -1148,6 +1244,12 @@ export default function POSPage() {
         paymentMethod: salePayload.paymentMethod as any,
         cashReceived: salePayload.cashReceived,
         changeGiven: salePayload.changeGiven,
+        tenderCurrency: salePayload.tenderCurrency,
+        exchangeRate: salePayload.exchangeRate,
+        foreignAmount: salePayload.foreignAmount,
+        foreignCashReceived: salePayload.foreignCashReceived,
+        foreignChangeGiven: salePayload.foreignChangeGiven,
+        foreignCurrencySymbol: salePayload.foreignCurrencySymbol,
         paymentReference: salePayload.paymentReference,
         subtotal: salePayload.subtotal,
         taxTotal: salePayload.taxTotal,
@@ -1194,8 +1296,14 @@ export default function POSPage() {
         taxTotal: taxAmount,
         netTotal,
         paymentMethod,
-        cashReceived: paymentMethod === "CASH" ? cashGivenNum : undefined,
-        changeGiven: paymentMethod === "CASH" ? changeDue : undefined,
+        tenderCurrency: salePayload.tenderCurrency,
+        exchangeRate: salePayload.exchangeRate,
+        foreignAmount: salePayload.foreignAmount,
+        foreignCashReceived: salePayload.foreignCashReceived,
+        foreignChangeGiven: salePayload.foreignChangeGiven,
+        foreignCurrencySymbol: salePayload.foreignCurrencySymbol,
+        cashReceived: salePayload.cashReceived,
+        changeGiven: salePayload.changeGiven,
         pointsEarned: pointsEarnedOnSale,
         pointsRedeemed: redeemLoyaltyPoints ? pointsToRedeem : 0,
         loyaltyDiscount: redeemLoyaltyPoints ? loyaltyResult.discountAmount : 0,
@@ -1852,6 +1960,44 @@ export default function POSPage() {
                 <span>GRAND TOTAL:</span>
                 <span className="text-blue-700 font-mono text-lg">{formatCurrency(netTotal)}</span>
               </div>
+
+              {/* Dual-Currency Indicative Equivalent Pill */}
+              {currencySettings.enabled && activeForeignCurrencies.length > 0 && netTotal > 0 && (
+                <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono pt-1">
+                  <div className="flex items-center gap-1">
+                    <Globe className="w-3 h-3 text-emerald-600" />
+                    <span>Indicative FX:</span>
+                    <select
+                      value={displayCurrency}
+                      onChange={(e) => setDisplayCurrency(e.target.value)}
+                      className="bg-transparent font-bold text-slate-700 underline cursor-pointer focus:outline-none"
+                    >
+                      <option value="LKR">LKR (Rs.)</option>
+                      {activeForeignCurrencies.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.code} ({c.symbol})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {displayCurrency !== "LKR" ? (
+                    (() => {
+                      const curr = activeForeignCurrencies.find((c) => c.code === displayCurrency);
+                      const rate = curr?.exchangeRate || 1;
+                      const val = convertLkrToForeign(netTotal, rate);
+                      return (
+                        <span className="font-bold text-emerald-700">
+                          {formatForeignCurrency(val, displayCurrency, curr?.symbol)}
+                        </span>
+                      );
+                    })()
+                  ) : (
+                    <span className="text-slate-500">
+                      ~${convertLkrToForeign(netTotal, currencySettings.currencies.find((c) => c.code === "USD")?.exchangeRate || 300).toFixed(2)} USD
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* High Visibility Checkout Action */}
@@ -2037,52 +2183,193 @@ export default function POSPage() {
                 </button>
               </div>
 
-              {/* Cash Change UX Calculator */}
+              {/* Cash Change UX Calculator (Dual-Currency Tender Support) */}
               {paymentMethod === "CASH" && (
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Cash Received from Customer (Rs.)
-                    </label>
-                    <input
-                      type="number"
-                      step="1"
-                      required
-                      value={cashReceived}
-                      onChange={(e) => setCashReceived(e.target.value)}
-                      className="w-full px-3.5 py-2.5 text-base font-bold font-mono border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white text-slate-900"
-                    />
-                  </div>
+                  {/* Tender Currency Selector Pills */}
+                  {currencySettings.enabled && activeForeignCurrencies.length > 0 && (
+                    <div className="space-y-1.5 pb-2 border-b border-slate-200/80">
+                      <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700">
+                        <span className="flex items-center gap-1">
+                          <Globe className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Tender Currency</span>
+                        </span>
+                        {tenderCurrency !== "LKR" && selectedCurrencyConfig && (
+                          <span className="font-mono text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                            1 {tenderCurrency} = Rs. {currentExchangeRate.toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTenderCurrency("LKR");
+                            setCashReceived(Math.ceil(netTotal).toString());
+                          }}
+                          className={`px-3 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 border ${
+                            tenderCurrency === "LKR"
+                              ? "bg-slate-900 text-white border-slate-900 shadow-xs"
+                              : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                          }`}
+                        >
+                          <span>🇱🇰</span>
+                          <span>LKR (Rupees)</span>
+                        </button>
 
-                  {/* Quick Cash Buttons */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {quickCashOptions.map((opt) => (
-                      <button
-                        key={opt}
-                        type="button"
-                        onClick={() => setCashReceived(opt.toString())}
-                        className="px-2.5 py-1 bg-white hover:bg-emerald-50 border border-slate-200 rounded-lg text-xs font-mono font-semibold text-slate-700 transition-colors"
-                      >
-                        Rs. {opt}
-                      </button>
-                    ))}
-                  </div>
+                        {activeForeignCurrencies.map((c) => {
+                          const preset = SUPPORTED_CURRENCY_PRESETS.find((p) => p.code === c.code);
+                          const isSel = tenderCurrency === c.code;
+                          return (
+                            <button
+                              key={c.code}
+                              type="button"
+                              onClick={() => {
+                                setTenderCurrency(c.code);
+                                const due = convertLkrToForeign(netTotal, c.exchangeRate);
+                                setForeignCashReceived(Math.ceil(due).toString());
+                              }}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 border ${
+                                isSel
+                                  ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
+                                  : "bg-white text-slate-700 border-slate-200 hover:bg-emerald-50"
+                              }`}
+                            >
+                              <span>{preset?.flag || "🌐"}</span>
+                              <span>{c.code}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
-                  {/* Change Due Box */}
-                  <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-600">Balance / Change Due:</span>
-                    <span
-                      className={`text-lg font-black font-mono ${
-                        changeDue >= 0 && cashGivenNum >= netTotal
-                          ? "text-emerald-700"
-                          : "text-rose-600 text-xs font-semibold"
-                      }`}
-                    >
-                      {cashGivenNum >= netTotal
-                        ? formatCurrency(changeDue)
-                        : "Insufficient cash tendered"}
-                    </span>
-                  </div>
+                  {/* Standard LKR Cash Flow */}
+                  {tenderCurrency === "LKR" ? (
+                    <>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Cash Received from Customer (Rs.)
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          required
+                          value={cashReceived}
+                          onChange={(e) => setCashReceived(e.target.value)}
+                          className="w-full px-3.5 py-2.5 text-base font-bold font-mono border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white text-slate-900"
+                        />
+                      </div>
+
+                      {/* Quick Cash Buttons */}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {quickCashOptions.map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => setCashReceived(opt.toString())}
+                            className="px-2.5 py-1 bg-white hover:bg-emerald-50 border border-slate-200 rounded-lg text-xs font-mono font-semibold text-slate-700 transition-colors"
+                          >
+                            Rs. {opt}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Change Due Box */}
+                      <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-600">Balance / Change Due:</span>
+                        <span
+                          className={`text-lg font-black font-mono ${
+                            changeDue >= 0 && cashGivenNum >= netTotal
+                              ? "text-emerald-700"
+                              : "text-rose-600 text-xs font-semibold"
+                          }`}
+                        >
+                          {cashGivenNum >= netTotal
+                            ? formatCurrency(changeDue)
+                            : "Insufficient cash tendered"}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    /* Foreign Currency Banknote Cash Flow */
+                    <div className="space-y-3">
+                      {/* Foreign Bill Due Header */}
+                      <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-lg flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] font-bold text-emerald-900 uppercase block">
+                            Foreign Amount Due ({tenderCurrency})
+                          </span>
+                          <span className="text-base font-black font-mono text-emerald-800">
+                            {formatForeignCurrency(foreignAmountDue, tenderCurrency, selectedCurrencyConfig?.symbol)}
+                          </span>
+                        </div>
+                        <div className="text-right text-[11px] font-mono text-slate-600">
+                          <div>Bill: {formatCurrency(netTotal)}</div>
+                          <div className="text-[10px] text-slate-500">Rate: Rs. {currentExchangeRate.toFixed(2)}</div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Foreign Banknotes Tendered ({selectedCurrencyConfig?.symbol || tenderCurrency})
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          required
+                          value={foreignCashReceived}
+                          onChange={(e) => setForeignCashReceived(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full px-3.5 py-2.5 text-base font-bold font-mono border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white text-slate-900"
+                        />
+                      </div>
+
+                      {/* Quick Foreign Banknote Buttons */}
+                      {quickForeignOptions.length > 0 && (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {quickForeignOptions.map((opt) => (
+                            <button
+                              key={opt}
+                              type="button"
+                              onClick={() => setForeignCashReceived(opt.toString())}
+                              className="px-2.5 py-1 bg-white hover:bg-emerald-50 border border-slate-200 rounded-lg text-xs font-mono font-semibold text-slate-700 transition-colors"
+                            >
+                              {selectedCurrencyConfig?.symbol || "$"}{opt}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Foreign Cash Converted & LKR Change Calculation */}
+                      <div className="pt-2 border-t border-slate-200 space-y-1.5 font-mono text-xs">
+                        <div className="flex justify-between text-slate-600">
+                          <span>Converted LKR Equivalent:</span>
+                          <span className="font-bold text-slate-800">
+                            {formatCurrency(foreignCashReceivedNum * currentExchangeRate)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                          <span className="font-semibold text-slate-700">Change to Return in LKR:</span>
+                          <span
+                            className={`text-base font-black ${
+                              foreignCashReceivedNum >= foreignAmountDue
+                                ? "text-emerald-700"
+                                : "text-rose-600 text-xs font-semibold"
+                            }`}
+                          >
+                            {foreignCashReceivedNum >= foreignAmountDue
+                              ? formatCurrency(foreignChangeLkr)
+                              : `Short by ${selectedCurrencyConfig?.symbol || "$"}${(foreignAmountDue - foreignCashReceivedNum).toFixed(2)}`}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="p-2 bg-blue-50/60 rounded-lg border border-blue-100 text-[10px] text-blue-900 leading-tight">
+                        * <strong>Banknote Policy:</strong> Foreign banknotes are held in drawer. Change is returned to the customer in Sri Lankan Rupees (LKR).
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2362,7 +2649,11 @@ export default function POSPage() {
                   onClick={handleCompleteSale}
                   disabled={
                     submittingSale ||
-                    (paymentMethod === "CASH" && cashGivenNum < netTotal) ||
+                    (paymentMethod === "CASH" && (
+                      tenderCurrency === "LKR"
+                        ? cashGivenNum < netTotal
+                        : foreignCashReceivedNum < foreignAmountDue
+                    )) ||
                     (paymentMethod === "CREDIT" && (
                       !matchedCustomer ||
                       !matchedCustomer.creditAllowed ||
@@ -2472,14 +2763,45 @@ export default function POSPage() {
                   </div>
                   {completedSale.paymentMethod === "CASH" && (
                     <>
-                      <div className="flex justify-between text-[10px] text-slate-600">
-                        <span>Cash Tendered:</span>
-                        <span>{formatCurrency(completedSale.cashReceived)}</span>
-                      </div>
-                      <div className="flex justify-between text-[10px] font-bold text-emerald-700">
-                        <span>Change Returned:</span>
-                        <span>{formatCurrency(completedSale.changeGiven)}</span>
-                      </div>
+                      {completedSale.tenderCurrency && completedSale.tenderCurrency !== "LKR" ? (
+                        <>
+                          <div className="flex justify-between text-[10px] text-slate-600">
+                            <span>Foreign Tendered ({completedSale.tenderCurrency}):</span>
+                            <span className="font-bold">
+                              {completedSale.foreignCurrencySymbol || "$"}{completedSale.foreignCashReceived?.toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-[10px] text-slate-600">
+                            <span>Exchange Rate:</span>
+                            <span className="font-mono">
+                              1 {completedSale.tenderCurrency} = Rs. {completedSale.exchangeRate?.toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-[10px] text-slate-600">
+                            <span>LKR Converted Equivalent:</span>
+                            <span className="font-mono">
+                              {formatCurrency((completedSale.foreignCashReceived || 0) * (completedSale.exchangeRate || 1))}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-[10px] font-bold text-emerald-700">
+                            <span>LKR Change Returned:</span>
+                            <span className="font-mono">
+                              {formatCurrency(completedSale.foreignChangeGiven ?? completedSale.changeGiven ?? 0)}
+                            </span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex justify-between text-[10px] text-slate-600">
+                            <span>Cash Tendered:</span>
+                            <span>{formatCurrency(completedSale.cashReceived)}</span>
+                          </div>
+                          <div className="flex justify-between text-[10px] font-bold text-emerald-700">
+                            <span>Change Returned:</span>
+                            <span>{formatCurrency(completedSale.changeGiven)}</span>
+                          </div>
+                        </>
+                      )}
                     </>
                   )}
                   {completedSale.paymentMethod === "CREDIT" && (

@@ -63,6 +63,12 @@ export interface ReceiptMessageOptions {
     pointsEarned?: number;
     pointsRedeemed?: number;
     loyaltyDiscount?: number;
+    tenderCurrency?: string;
+    exchangeRate?: number;
+    foreignAmount?: number;
+    foreignCashReceived?: number;
+    foreignChangeGiven?: number;
+    foreignCurrencySymbol?: string;
     appliedPromotions?: Array<{
       name: string;
       code?: string;
@@ -107,8 +113,13 @@ export function formatWhatsAppReceipt({
       : "";
 
   let paymentDetails = `*Payment Method:* ${sale.paymentMethod}`;
-  if (sale.paymentMethod === "CASH" && (sale.cashReceived || 0) > 0) {
-    paymentDetails += `\n*Cash Received:* ${formatCurrency(sale.cashReceived)} | *Change:* ${formatCurrency(sale.changeGiven || 0)}`;
+  if (sale.paymentMethod === "CASH") {
+    if (sale.tenderCurrency && sale.tenderCurrency !== "LKR") {
+      paymentDetails += `\n*Tender:* ${sale.foreignCurrencySymbol || "$"}${sale.foreignCashReceived?.toFixed(2)} ${sale.tenderCurrency} (Rate: Rs. ${sale.exchangeRate?.toFixed(2)})`;
+      paymentDetails += `\n*LKR Change Returned:* ${formatCurrency(sale.foreignChangeGiven ?? sale.changeGiven ?? 0)}`;
+    } else if ((sale.cashReceived || 0) > 0) {
+      paymentDetails += `\n*Cash Received:* ${formatCurrency(sale.cashReceived)} | *Change:* ${formatCurrency(sale.changeGiven || 0)}`;
+    }
   } else if (sale.paymentMethod === "CREDIT") {
     paymentDetails += `\n*Account:* Billed to Credit Ledger (Naya Potha)`;
   }

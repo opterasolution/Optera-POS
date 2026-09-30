@@ -48,6 +48,12 @@ export async function POST(req: Request) {
       buyerDetails,
       quotationId,
       dueDate,
+      tenderCurrency,
+      exchangeRate,
+      foreignAmount,
+      foreignCashReceived,
+      foreignChangeGiven,
+      foreignCurrencySymbol,
     } = parsed.data;
 
     if (Boolean(process.env.MONGODB_URI)) {
@@ -172,20 +178,38 @@ export async function POST(req: Request) {
       netTotal = Math.round(netTotal * 100) / 100;
       taxTotal = Math.round(taxTotal * 100) / 100;
 
-      // 5. Verify cash change calculation
+      // 5. Verify cash change calculation (supports both LKR and Foreign Currency tender)
       let calculatedChange = 0;
       if (paymentMethod === "CASH") {
-        const tendered = cashReceived || 0;
-        if (tendered < netTotal) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: `Cash received (Rs. ${tendered.toFixed(2)}) is less than total amount (Rs. ${netTotal.toFixed(2)}).`,
-            },
-            { status: 400 }
-          );
+        if (tenderCurrency && tenderCurrency !== "LKR") {
+          const rate = exchangeRate && exchangeRate > 0 ? exchangeRate : 1;
+          const foreignDue =
+            foreignAmount !== undefined ? foreignAmount : Math.round((netTotal / rate) * 100) / 100;
+          const foreignReceived = foreignCashReceived || 0;
+          if (foreignReceived < foreignDue) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: `Foreign cash received (${foreignCurrencySymbol || ""}${foreignReceived.toFixed(2)}) is less than total amount due (${foreignCurrencySymbol || ""}${foreignDue.toFixed(2)}).`,
+              },
+              { status: 400 }
+            );
+          }
+          // Change in LKR returned to customer
+          calculatedChange = Math.round((foreignReceived - foreignDue) * rate * 100) / 100;
+        } else {
+          const tendered = cashReceived || 0;
+          if (tendered < netTotal) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: `Cash received (Rs. ${tendered.toFixed(2)}) is less than total amount (Rs. ${netTotal.toFixed(2)}).`,
+              },
+              { status: 400 }
+            );
+          }
+          calculatedChange = Math.round((tendered - netTotal) * 100) / 100;
         }
-        calculatedChange = Math.round((tendered - netTotal) * 100) / 100;
       }
 
       // 6. Generate sequential invoice number: INV-YYYY-XXXXX
@@ -442,6 +466,26 @@ export async function POST(req: Request) {
         paymentStatus: paymentMethod === "CREDIT" ? "UNPAID" : "PAID",
         amountPaid: paymentMethod === "CREDIT" ? 0 : netTotal,
         balanceDue: paymentMethod === "CREDIT" ? netTotal : 0,
+        tenderCurrency: tenderCurrency || "LKR",
+        exchangeRate: exchangeRate || 1,
+        foreignAmount:
+          foreignAmount !== undefined
+            ? foreignAmount
+            : tenderCurrency && tenderCurrency !== "LKR"
+            ? Math.round((netTotal / (exchangeRate || 1)) * 100) / 100
+            : undefined,
+        foreignCashReceived: foreignCashReceived || undefined,
+        foreignChangeGiven:
+          foreignChangeGiven !== undefined ? foreignChangeGiven : calculatedChange,
+        foreignCurrencySymbol:
+          foreignCurrencySymbol ||
+          (tenderCurrency === "USD"
+            ? "$"
+            : tenderCurrency === "EUR"
+            ? "€"
+            : tenderCurrency === "GBP"
+            ? "£"
+            : tenderCurrency || "Rs."),
         status: "COMPLETED",
       });
 
@@ -509,6 +553,54 @@ export async function POST(req: Request) {
           referenceId: invoiceNumber,
           createdBy: context.userId,
         });
+      }
+
+      // 11. Update active Shift cash drawer & sales aggregates (including foreign cash)
+      if (resolvedShiftId) {
+        const shiftDoc = await Shift.findById(resolvedShiftId);
+        if (shiftDoc && shiftDoc.status === "OPEN") {
+          shiftDoc.salesCount += 1;
+          shiftDoc.totalSales += netTotal;
+          shiftDoc.totalDiscount += discountTotal;
+          shiftDoc.totalTax += taxTotal;
+
+          if (paymentMethod === "CASH") {
+            shiftDoc.cashSales += netTotal;
+            shiftDoc.expectedCash += netTotal;
+
+            // If foreign cash was tendered, record in foreignCashDrawer breakdown
+            if (tenderCurrency && tenderCurrency !== "LKR" && foreignCashReceived && foreignCashReceived > 0) {
+              if (!shiftDoc.foreignCurrencySales) {
+                shiftDoc.foreignCurrencySales = [];
+              }
+              const existingIdx = shiftDoc.foreignCurrencySales.findIndex(
+                (f) => f.currency === tenderCurrency
+              );
+              const lkrEquiv = Math.round(foreignCashReceived * (exchangeRate || 1) * 100) / 100;
+              if (existingIdx > -1) {
+                shiftDoc.foreignCurrencySales[existingIdx].salesCount += 1;
+                shiftDoc.foreignCurrencySales[existingIdx].totalForeignReceived += foreignCashReceived;
+                shiftDoc.foreignCurrencySales[existingIdx].totalLkrEquivalent += lkrEquiv;
+              } else {
+                shiftDoc.foreignCurrencySales.push({
+                  currency: tenderCurrency,
+                  symbol: foreignCurrencySymbol || tenderCurrency,
+                  salesCount: 1,
+                  totalForeignReceived: foreignCashReceived,
+                  totalLkrEquivalent: lkrEquiv,
+                });
+              }
+            }
+          } else if (paymentMethod === "CARD") {
+            shiftDoc.cardSales += netTotal;
+          } else if (paymentMethod === "QR") {
+            shiftDoc.qrSales += netTotal;
+          } else if (paymentMethod === "BANK_TRANSFER") {
+            shiftDoc.bankTransferSales += netTotal;
+          }
+
+          await shiftDoc.save();
+        }
       }
 
       // 10. Audit Log

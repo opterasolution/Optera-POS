@@ -62,6 +62,27 @@ export const businessSettingsSchema = z.object({
       requireSupervisorForExpenseDelete: z.boolean().default(true),
     })
     .optional(),
+  currencySettings: z
+    .object({
+      enabled: z.boolean().default(false),
+      baseCurrency: z.string().default("LKR"),
+      exchangeBufferPercent: z.number().min(-20).max(20).default(2),
+      currencies: z
+        .array(
+          z.object({
+            code: z.string().min(2).max(5),
+            symbol: z.string().min(1).max(5),
+            name: z.string().min(1),
+            exchangeRate: z.number().positive("Exchange rate must be positive"),
+            isEnabled: z.boolean().default(true),
+            isAutoUpdated: z.boolean().default(true),
+            marginPercent: z.number().default(0),
+            updatedAt: z.union([z.string(), z.date()]).optional(),
+          })
+        )
+        .default([]),
+    })
+    .optional(),
 });
 
 export type BusinessSettingsInput = z.infer<typeof businessSettingsSchema>;

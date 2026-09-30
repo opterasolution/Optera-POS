@@ -46,6 +46,12 @@ export interface OfflineSaleRecord {
   subtotal: number;
   taxTotal: number;
   netTotal: number;
+  tenderCurrency?: string;
+  exchangeRate?: number;
+  foreignAmount?: number;
+  foreignCashReceived?: number;
+  foreignChangeGiven?: number;
+  foreignCurrencySymbol?: string;
   createdAt: string; // ISO string
   tempInvoiceNumber: string;
 }

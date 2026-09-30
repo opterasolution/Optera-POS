@@ -33,6 +33,13 @@ export interface ShiftZReportData {
     performedBy: string;
     createdAt: string | Date;
   }>;
+  foreignCurrencySales?: Array<{
+    currency: string;
+    symbol: string;
+    salesCount: number;
+    totalForeignReceived: number;
+    totalLkrEquivalent: number;
+  }>;
 }
 
 export interface ShiftZReportReceiptProps {
@@ -243,6 +250,24 @@ export default function ShiftZReportReceipt({
               <span>EXPECTED CASH IN DRAWER:</span>
               <span>{formatCurrency(shift.expectedCash)}</span>
             </div>
+
+            {shift.foreignCurrencySales && shift.foreignCurrencySales.length > 0 && (
+              <div className="pt-1.5 mt-1 border-t border-dotted border-zinc-300 space-y-1">
+                <div className="text-[9px] font-bold uppercase text-zinc-600 tracking-wider">
+                  Foreign Banknotes In Drawer:
+                </div>
+                {shift.foreignCurrencySales.map((fc) => (
+                  <div key={fc.currency} className="flex justify-between text-[10px] text-zinc-800">
+                    <span>
+                      {fc.currency} ({fc.symbol}) • {fc.salesCount} sale(s):
+                    </span>
+                    <span className="font-mono font-bold">
+                      {fc.symbol} {fc.totalForeignReceived.toFixed(2)} ({formatCurrency(fc.totalLkrEquivalent)})
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {isZ ? (
               <>

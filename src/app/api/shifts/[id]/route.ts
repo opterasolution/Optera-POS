@@ -47,12 +47,30 @@ export async function GET(
         let liveTotal = 0;
         let liveDiscount = 0;
         let liveTax = 0;
+        const liveForeignMap = new Map<string, { currency: string; symbol: string; salesCount: number; totalForeignReceived: number; totalLkrEquivalent: number }>();
 
         for (const s of shiftSales) {
           liveTotal += s.netTotal;
           liveDiscount += s.discountTotal || 0;
           liveTax += s.taxTotal || 0;
-          if (s.paymentMethod === "CASH") liveCash += s.netTotal;
+          if (s.paymentMethod === "CASH") {
+            liveCash += s.netTotal;
+            if (s.tenderCurrency && s.tenderCurrency !== "LKR" && s.foreignCashReceived) {
+              const cur = s.tenderCurrency;
+              const sym = s.foreignCurrencySymbol || cur;
+              const existing = liveForeignMap.get(cur) || {
+                currency: cur,
+                symbol: sym,
+                salesCount: 0,
+                totalForeignReceived: 0,
+                totalLkrEquivalent: 0,
+              };
+              existing.salesCount += 1;
+              existing.totalForeignReceived += s.foreignCashReceived;
+              existing.totalLkrEquivalent += Math.round(s.foreignCashReceived * (s.exchangeRate || 1) * 100) / 100;
+              liveForeignMap.set(cur, existing);
+            }
+          }
           else if (s.paymentMethod === "CARD") liveCard += s.netTotal;
           else if (s.paymentMethod === "QR") liveQr += s.netTotal;
           else if (s.paymentMethod === "BANK_TRANSFER") liveBank += s.netTotal;
@@ -83,6 +101,7 @@ export async function GET(
             totalDiscount: liveDiscount,
             totalTax: liveTax,
             expectedCash,
+            foreignCurrencySales: Array.from(liveForeignMap.values()),
           },
         });
       }
@@ -258,12 +277,30 @@ export async function POST(
       let finalTotal = 0;
       let finalDiscount = 0;
       let finalTax = 0;
+      const finalForeignMap = new Map<string, { currency: string; symbol: string; salesCount: number; totalForeignReceived: number; totalLkrEquivalent: number }>();
 
       for (const s of shiftSales) {
         finalTotal += s.netTotal;
         finalDiscount += s.discountTotal || 0;
         finalTax += s.taxTotal || 0;
-        if (s.paymentMethod === "CASH") finalCash += s.netTotal;
+        if (s.paymentMethod === "CASH") {
+          finalCash += s.netTotal;
+          if (s.tenderCurrency && s.tenderCurrency !== "LKR" && s.foreignCashReceived) {
+            const cur = s.tenderCurrency;
+            const sym = s.foreignCurrencySymbol || cur;
+            const existing = finalForeignMap.get(cur) || {
+              currency: cur,
+              symbol: sym,
+              salesCount: 0,
+              totalForeignReceived: 0,
+              totalLkrEquivalent: 0,
+            };
+            existing.salesCount += 1;
+            existing.totalForeignReceived += s.foreignCashReceived;
+            existing.totalLkrEquivalent += Math.round(s.foreignCashReceived * (s.exchangeRate || 1) * 100) / 100;
+            finalForeignMap.set(cur, existing);
+          }
+        }
         else if (s.paymentMethod === "CARD") finalCard += s.netTotal;
         else if (s.paymentMethod === "QR") finalQr += s.netTotal;
         else if (s.paymentMethod === "BANK_TRANSFER") finalBank += s.netTotal;
@@ -295,6 +332,7 @@ export async function POST(
       shift.expectedCash = expectedCash;
       shift.actualCash = countedNum;
       shift.difference = difference;
+      shift.foreignCurrencySales = Array.from(finalForeignMap.values());
       if (closingNotes) shift.closingNotes = closingNotes.trim();
 
       await shift.save();

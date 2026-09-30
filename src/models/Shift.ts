@@ -12,6 +12,14 @@ export interface ICashMovement {
   createdAt: Date;
 }
 
+export interface IForeignCashSummary {
+  currency: string;
+  symbol: string;
+  salesCount: number;
+  totalForeignReceived: number;
+  totalLkrEquivalent: number;
+}
+
 export interface IShift extends Document {
   businessId: Types.ObjectId;
   shiftNumber: string;
@@ -37,6 +45,7 @@ export interface IShift extends Document {
   actualCash?: number;
   difference?: number;
   closingNotes?: string;
+  foreignCurrencySales?: IForeignCashSummary[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -106,6 +115,15 @@ const ShiftSchema = new Schema<IShift>(
     actualCash: { type: Number },
     difference: { type: Number },
     closingNotes: { type: String, trim: true },
+    foreignCurrencySales: [
+      {
+        currency: { type: String, required: true },
+        symbol: { type: String, required: true },
+        salesCount: { type: Number, default: 0 },
+        totalForeignReceived: { type: Number, default: 0 },
+        totalLkrEquivalent: { type: Number, default: 0 },
+      },
+    ],
   },
   { timestamps: true }
 );

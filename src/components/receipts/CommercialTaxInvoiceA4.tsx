@@ -13,8 +13,10 @@ import {
   Landmark,
   FileCheck,
   ShieldCheck,
+  Globe,
 } from "lucide-react";
 import { formatCurrency, formatSLDateTime, amountToWords } from "@/lib/formatters";
+import { formatForeignCurrency } from "@/lib/currency";
 
 export interface TaxInvoiceData {
   _id: string;
@@ -28,6 +30,12 @@ export interface TaxInvoiceData {
   paymentMethod: string;
   paymentReference?: string;
   paymentStatus?: "PAID" | "PARTIAL" | "UNPAID";
+  tenderCurrency?: string;
+  exchangeRate?: number;
+  foreignAmount?: number;
+  foreignCashReceived?: number;
+  foreignChangeGiven?: number;
+  foreignCurrencySymbol?: string;
   amountPaid?: number;
   balanceDue?: number;
   billingType?: "RETAIL" | "WHOLESALE";
@@ -438,8 +446,50 @@ export default function CommercialTaxInvoiceA4({
                       <span>{formatCurrency(invoice.balanceDue)}</span>
                     </div>
                   )}
+
+                  {/* Dual-Currency Settlement & Exchange Rate Summary */}
+                  {invoice.tenderCurrency && invoice.tenderCurrency !== "LKR" && (
+                    <div className="mt-2 p-2.5 bg-blue-50/70 border border-blue-200 rounded-lg text-slate-700 font-sans space-y-1">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-blue-950">
+                        <span className="flex items-center gap-1">
+                          <Globe className="w-3.5 h-3.5 text-blue-700" />
+                          <span>Dual-Currency Tender ({invoice.tenderCurrency})</span>
+                        </span>
+                        <span className="font-mono text-[10px] bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
+                          1 {invoice.tenderCurrency} = Rs. {invoice.exchangeRate?.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-[10px] font-mono">
+                        <span className="text-slate-500">Foreign Total Quoted:</span>
+                        <span className="font-bold text-slate-800">
+                          {formatForeignCurrency(invoice.foreignAmount || 0, invoice.tenderCurrency, invoice.foreignCurrencySymbol)}
+                        </span>
+                      </div>
+                      {invoice.foreignCashReceived !== undefined && invoice.foreignCashReceived > 0 && (
+                        <div className="flex justify-between text-[10px] font-mono">
+                          <span className="text-slate-500">Foreign Tendered:</span>
+                          <span className="font-bold text-slate-800">
+                            {formatForeignCurrency(invoice.foreignCashReceived, invoice.tenderCurrency, invoice.foreignCurrencySymbol)}
+                          </span>
+                        </div>
+                      )}
+                      {invoice.foreignChangeGiven !== undefined && invoice.foreignChangeGiven > 0 && (
+                        <div className="flex justify-between text-[10px] font-mono text-emerald-700">
+                          <span className="font-semibold">LKR Change Returned:</span>
+                          <span className="font-bold">{formatCurrency(invoice.foreignChangeGiven)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {/* Central Bank of Sri Lanka Regulatory Disclosure Notice */}
+              {invoice.tenderCurrency && invoice.tenderCurrency !== "LKR" && (
+                <div className="mt-3 p-2 bg-slate-50 border border-slate-200 rounded-lg text-[9px] text-slate-500 italic">
+                  * <strong>Central Bank of Sri Lanka (CBSL) Compliance Note:</strong> Statutory accounts, Value Added Tax (VAT), Social Security Contribution Levy (SSCL), and IRD records are maintained strictly in Sri Lankan Rupees (LKR). Foreign currency tender is converted at authorized merchant counter rates.
+                </div>
+              )}
 
               {/* 5. Policy Notes */}
               {business.taxSettings?.invoiceNotes && (
