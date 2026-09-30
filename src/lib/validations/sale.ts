@@ -8,10 +8,11 @@ export const saleItemInputSchema = z.object({
 
 export const createSaleSchema = z.object({
   items: z.array(saleItemInputSchema).min(1, "At least one product is required in the cart"),
+  customerId: z.string().optional().or(z.literal("")),
   customerName: z.string().default("Walk-in Customer"),
   customerPhone: z.string().optional().or(z.literal("")),
   discountTotal: z.number().min(0, "Discount cannot be negative").default(0),
-  paymentMethod: z.enum(["CASH", "CARD", "QR", "BANK_TRANSFER", "OTHER"]),
+  paymentMethod: z.enum(["CASH", "CARD", "QR", "BANK_TRANSFER", "CREDIT", "OTHER"]),
   cashReceived: z.number().min(0).optional(),
   changeGiven: z.number().min(0).optional(),
   paymentReference: z.string().optional().or(z.literal("")),

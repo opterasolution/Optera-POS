@@ -32,10 +32,11 @@ export interface OfflineSaleRecord {
     unitPrice: number;
     discount?: number;
   }>;
+  customerId?: string;
   customerName?: string;
   customerPhone?: string;
   discountTotal?: number;
-  paymentMethod: "CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "OTHER";
+  paymentMethod: "CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CREDIT" | "OTHER";
   cashReceived?: number;
   changeGiven?: number;
   paymentReference?: string;

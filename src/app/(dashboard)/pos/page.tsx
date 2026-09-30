@@ -33,8 +33,11 @@ import {
   ArrowUpRight,
   DollarSign,
   FileText,
+  BookOpen,
+  Wallet,
 } from "lucide-react";
 import ShiftZReportReceipt, { ShiftZReportData } from "@/components/receipts/ShiftZReportReceipt";
+import CreditSettlementReceipt, { CreditSettlementData } from "@/components/receipts/CreditSettlementReceipt";
 import { formatCurrency } from "@/lib/formatters";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import {
@@ -142,10 +145,20 @@ export default function POSPage() {
 
   // Checkout Modal State
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "QR" | "BANK_TRANSFER">("CASH");
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CREDIT">("CASH");
   const [cashReceived, setCashReceived] = useState<string>("");
   const [paymentReference, setPaymentReference] = useState("");
   const [submittingSale, setSubmittingSale] = useState(false);
+
+  // Customer Credit & Quick Debt Settlement State
+  const [matchedCustomer, setMatchedCustomer] = useState<any | null>(null);
+  const [isCreditSettlementOpen, setIsCreditSettlementOpen] = useState(false);
+  const [creditSettlementAmount, setCreditSettlementAmount] = useState("");
+  const [creditSettlementMethod, setCreditSettlementMethod] = useState<"CASH" | "CARD" | "QR" | "BANK_TRANSFER">("CASH");
+  const [creditSettlementRef, setCreditSettlementRef] = useState("");
+  const [creditSettlementNotes, setCreditSettlementNotes] = useState("");
+  const [submittingCreditSettlement, setSubmittingCreditSettlement] = useState(false);
+  const [activeSettlementSlip, setActiveSettlementSlip] = useState<CreditSettlementData | null>(null);
 
   // Post-Sale Modal & Receipt State
   const [completedSale, setCompletedSale] = useState<any | null>(null);
@@ -345,6 +358,96 @@ export default function POSPage() {
       alert(err.message || "Failed to close shift.");
     } finally {
       setSubmittingCloseShift(false);
+    }
+  };
+
+  // Reactive customer phone lookup to detect credit status & debt balance
+  useEffect(() => {
+    const phoneTrimmed = customerPhone.trim();
+    if (phoneTrimmed.length >= 9) {
+      fetch(`/api/customers?q=${encodeURIComponent(phoneTrimmed)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.customers && data.customers.length > 0) {
+            const exact = data.customers.find((c: any) => c.phone.endsWith(phoneTrimmed.slice(-9)));
+            if (exact) {
+              setMatchedCustomer(exact);
+              if (customerName === "Walk-in Customer" || !customerName) {
+                setCustomerName(exact.name);
+              }
+              return;
+            }
+          }
+          setMatchedCustomer(null);
+        })
+        .catch(() => setMatchedCustomer(null));
+    } else {
+      setMatchedCustomer(null);
+    }
+  }, [customerPhone]);
+
+  // Fast debt settlement from counter POS
+  const handlePOSCreditSettlement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!matchedCustomer) return;
+    const amt = parseFloat(creditSettlementAmount) || 0;
+    if (amt <= 0) {
+      alert("Payment amount must be greater than zero.");
+      return;
+    }
+
+    setSubmittingCreditSettlement(true);
+    try {
+      const res = await fetch(`/api/customers/${matchedCustomer._id}/credit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: amt,
+          paymentMethod: creditSettlementMethod,
+          paymentReference: creditSettlementRef.trim() || undefined,
+          registerId: selectedRegister?._id,
+          notes: creditSettlementNotes.trim() || "Counter credit settlement",
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setIsCreditSettlementOpen(false);
+        setStatusMessage({
+          type: "success",
+          text: `Recorded debt settlement of ${formatCurrency(amt)} for ${matchedCustomer.name}.`,
+        });
+
+        // Refresh shift so expected drawer cash reflects PAY_IN
+        if (selectedRegister?._id) fetchCurrentShift(selectedRegister._id);
+
+        const slip: CreditSettlementData = {
+          transactionNumber: data.transaction?.transactionNumber || `CR-PAY-${Date.now()}`,
+          customerName: matchedCustomer.name,
+          customerPhone: matchedCustomer.phone,
+          customerNic: matchedCustomer.nicNumber,
+          previousBalance: data.customer?.previousBalance ?? matchedCustomer.currentBalance ?? 0,
+          amountPaid: amt,
+          remainingBalance: data.customer?.currentBalance ?? Math.max(0, (matchedCustomer.currentBalance || 0) - amt),
+          paymentMethod: creditSettlementMethod,
+          paymentReference: creditSettlementRef.trim() || undefined,
+          notes: creditSettlementNotes.trim() || undefined,
+          cashierName: session?.user?.name || "Cashier",
+          registerName: selectedRegister ? `${selectedRegister.registerNumber}: ${selectedRegister.name}` : "Counter",
+          createdAt: new Date(),
+        };
+
+        setActiveSettlementSlip(slip);
+        setMatchedCustomer((prev: any) =>
+          prev ? { ...prev, currentBalance: Math.max(0, (prev.currentBalance || 0) - amt) } : null
+        );
+      } else {
+        alert(data.error || "Failed to record payment.");
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to record credit payment.");
+    } finally {
+      setSubmittingCreditSettlement(false);
     }
   };
 
@@ -639,6 +742,24 @@ export default function POSPage() {
       return;
     }
 
+    if (paymentMethod === "CREDIT") {
+      if (!matchedCustomer) {
+        alert("Store Credit (Naya Potha) requires a registered customer with credit permissions. Please search or enter a registered customer phone number.");
+        return;
+      }
+      if (!matchedCustomer.creditAllowed) {
+        alert(`${matchedCustomer.name} is not permitted for credit purchases. Please enable credit allowance in Customer settings.`);
+        return;
+      }
+      const projectedBalance = (matchedCustomer.currentBalance || 0) + netTotal;
+      if (projectedBalance > (matchedCustomer.creditLimit || 0)) {
+        alert(
+          `Credit limit exceeded!\nCustomer Limit: ${formatCurrency(matchedCustomer.creditLimit)}\nCurrent Balance: ${formatCurrency(matchedCustomer.currentBalance || 0)}\nBill Total: ${formatCurrency(netTotal)}\nExcess: ${formatCurrency(projectedBalance - matchedCustomer.creditLimit)}`
+        );
+        return;
+      }
+    }
+
     setSubmittingSale(true);
 
     const regNameFormatted = selectedRegister
@@ -649,6 +770,7 @@ export default function POSPage() {
       shiftId: currentShift?._id,
       registerId: selectedRegister?._id,
       registerName: regNameFormatted,
+      customerId: matchedCustomer?._id,
       items: cart.map((item) => ({
         productId: item.productId,
         name: item.name,
@@ -680,6 +802,7 @@ export default function POSPage() {
         shiftId: currentShift?._id,
         registerId: selectedRegister?._id,
         registerName: regNameFormatted,
+        customerId: matchedCustomer?._id,
         items: salePayload.items,
         customerName: salePayload.customerName,
         customerPhone: salePayload.customerPhone,
@@ -724,6 +847,7 @@ export default function POSPage() {
         cashierName: session?.user?.name || "Cashier",
         registerName: regNameFormatted,
         registerNumber: selectedRegister?.registerNumber,
+        customerId: matchedCustomer?._id,
         customerName: offlineRecord.customerName,
         customerPhone: offlineRecord.customerPhone,
         items: salePayload.items,
@@ -737,6 +861,12 @@ export default function POSPage() {
         createdAt: nowIso,
         isOffline: true,
       };
+
+      if (paymentMethod === "CREDIT" && matchedCustomer) {
+        setMatchedCustomer((prev: any) =>
+          prev ? { ...prev, currentBalance: (prev.currentBalance || 0) + netTotal } : null
+        );
+      }
 
       setCompletedSale(completedSaleObj);
       setIsCheckoutOpen(false);
@@ -769,6 +899,11 @@ export default function POSPage() {
 
       if (data.success) {
         setCompletedSale(data.sale);
+        if (paymentMethod === "CREDIT" && matchedCustomer) {
+          setMatchedCustomer((prev: any) =>
+            prev ? { ...prev, currentBalance: (prev.currentBalance || 0) + netTotal } : null
+          );
+        }
         setIsCheckoutOpen(false);
         setCart([]);
         setOrderDiscount(0);
@@ -1121,6 +1256,43 @@ export default function POSPage() {
             />
           </div>
 
+          {/* Matched Customer Credit & Debt Indicator */}
+          {matchedCustomer && (
+            <div className="px-3 py-1.5 border-b border-amber-200/70 bg-amber-50/70 flex items-center justify-between text-[11px]">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <BookOpen className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                <span className="font-semibold text-slate-900 truncate max-w-[100px]">
+                  {matchedCustomer.name}
+                </span>
+                {matchedCustomer.creditAllowed ? (
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                    (matchedCustomer.currentBalance || 0) > 0
+                      ? "bg-rose-100 text-rose-800"
+                      : "bg-emerald-100 text-emerald-800"
+                  }`}>
+                    Debt: {formatCurrency(matchedCustomer.currentBalance || 0)} / {formatCurrency(matchedCustomer.creditLimit || 0)}
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-200 text-slate-600 shrink-0">
+                    No Credit
+                  </span>
+                )}
+              </div>
+              {matchedCustomer.creditAllowed && (matchedCustomer.currentBalance || 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreditSettlementAmount(matchedCustomer.currentBalance.toString());
+                    setIsCreditSettlementOpen(true);
+                  }}
+                  className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] shrink-0 transition shadow-xs"
+                >
+                  Settle Debt
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Cart Line Items List */}
           <div className="flex-1 overflow-y-auto p-3 divide-y divide-slate-100">
             {cart.length > 0 ? (
@@ -1316,6 +1488,19 @@ export default function POSPage() {
                   <Building2 className="w-4 h-4" />
                   <span>Bank Transfer</span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod("CREDIT")}
+                  className={`p-3 rounded-xl border flex items-center gap-2.5 text-xs font-semibold transition-all col-span-2 ${
+                    paymentMethod === "CREDIT"
+                      ? "bg-amber-600 text-white border-amber-600 shadow-sm"
+                      : "border-amber-300 bg-amber-50/40 text-amber-900 hover:bg-amber-100/50"
+                  }`}
+                >
+                  <BookOpen className="w-4 h-4" />
+                  <span>Store Credit (Naya Potha / ණය පොත)</span>
+                </button>
               </div>
 
               {/* Cash Change UX Calculator */}
@@ -1367,8 +1552,102 @@ export default function POSPage() {
                 </div>
               )}
 
+              {/* Store Credit Authorization & Headroom UX */}
+              {paymentMethod === "CREDIT" && (
+                <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-amber-200/60">
+                    <div className="flex items-center gap-1.5">
+                      <BookOpen className="w-4 h-4 text-amber-700" />
+                      <span className="text-xs font-bold text-amber-950">Customer Credit Ledger (Naya Potha)</span>
+                    </div>
+                    {matchedCustomer ? (
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          matchedCustomer.creditAllowed ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                        }`}
+                      >
+                        {matchedCustomer.creditAllowed ? "Credit Approved" : "Credit Disallowed"}
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-200 text-amber-900">
+                        Customer Required
+                      </span>
+                    )}
+                  </div>
+
+                  {!matchedCustomer ? (
+                    <div className="text-xs text-amber-900 space-y-1">
+                      <p className="font-semibold">No registered customer matched.</p>
+                      <p className="text-[11px] text-amber-800">
+                        Please enter or verify the customer phone number in the cart sidebar to link this purchase to their credit passbook.
+                      </p>
+                    </div>
+                  ) : !matchedCustomer.creditAllowed ? (
+                    <div className="text-xs text-rose-700 space-y-1">
+                      <p className="font-bold">Customer is not approved for credit purchases.</p>
+                      <p className="text-[11px] text-rose-600">
+                        Enable "Credit Allowed" under Customers &gt; Naya Potha to permit purchases on account.
+                      </p>
+                    </div>
+                  ) : (
+                    (() => {
+                      const currentBal = matchedCustomer.currentBalance || 0;
+                      const limit = matchedCustomer.creditLimit || 0;
+                      const projected = currentBal + netTotal;
+                      const isOverLimit = projected > limit;
+
+                      return (
+                        <div className="space-y-2 text-xs">
+                          <div className="grid grid-cols-2 gap-2 text-[11px]">
+                            <div className="p-2 bg-white rounded-lg border border-amber-200">
+                              <span className="text-slate-500 block">Current Balance:</span>
+                              <span className="font-bold font-mono text-slate-800">{formatCurrency(currentBal)}</span>
+                            </div>
+                            <div className="p-2 bg-white rounded-lg border border-amber-200">
+                              <span className="text-slate-500 block">Credit Ceiling:</span>
+                              <span className="font-bold font-mono text-slate-800">{formatCurrency(limit)}</span>
+                            </div>
+                          </div>
+
+                          <div
+                            className={`p-2.5 rounded-lg border flex items-center justify-between ${
+                              isOverLimit
+                                ? "bg-rose-50 border-rose-200 text-rose-900"
+                                : "bg-emerald-50 border-emerald-200 text-emerald-900"
+                            }`}
+                          >
+                            <div>
+                              <span className="text-[10px] uppercase font-bold block">
+                                {isOverLimit ? "Credit Limit Exceeded" : "Projected Balance After Sale"}
+                              </span>
+                              <span className="font-mono font-bold text-sm">
+                                {formatCurrency(projected)}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] block">
+                                {isOverLimit ? "Excess Over Limit:" : "Remaining Headroom:"}
+                              </span>
+                              <span className="font-mono font-bold">
+                                {isOverLimit ? `+${formatCurrency(projected - limit)}` : formatCurrency(limit - projected)}
+                              </span>
+                            </div>
+                          </div>
+
+                          {isOverLimit && (
+                            <p className="text-[11px] text-rose-600 font-semibold">
+                              Cannot complete sale on credit. Customer must settle at least {formatCurrency(projected - limit)} first or pay via Cash/Card.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()
+                  )}
+                </div>
+              )}
+
               {/* Reference note for Card / QR */}
-              {paymentMethod !== "CASH" && (
+              {paymentMethod !== "CASH" && paymentMethod !== "CREDIT" && (
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
                     Approval / Reference Code (Optional)
@@ -1395,7 +1674,15 @@ export default function POSPage() {
                 <button
                   type="button"
                   onClick={handleCompleteSale}
-                  disabled={submittingSale || (paymentMethod === "CASH" && cashGivenNum < netTotal)}
+                  disabled={
+                    submittingSale ||
+                    (paymentMethod === "CASH" && cashGivenNum < netTotal) ||
+                    (paymentMethod === "CREDIT" && (
+                      !matchedCustomer ||
+                      !matchedCustomer.creditAllowed ||
+                      ((matchedCustomer.currentBalance || 0) + netTotal > (matchedCustomer.creditLimit || 0))
+                    ))
+                  }
                   className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/25 transition-all disabled:opacity-50"
                 >
                   {submittingSale
@@ -1508,6 +1795,17 @@ export default function POSPage() {
                         <span>{formatCurrency(completedSale.changeGiven)}</span>
                       </div>
                     </>
+                  )}
+                  {completedSale.paymentMethod === "CREDIT" && (
+                    <div className="pt-2 text-center text-[10px] space-y-1">
+                      <div className="p-1 border border-dashed border-amber-600 bg-amber-50/50 font-bold text-amber-900 print:text-black">
+                        * BILLED TO CREDIT ACCOUNT (NAYA POTHA) *
+                      </div>
+                      <div className="pt-3 border-b border-dotted border-slate-400"></div>
+                      <div className="text-[9px] text-slate-500 print:text-black">
+                        Customer Signature / ණය ගිවිසුම
+                      </div>
+                    </div>
                   )}
                 </div>
 
@@ -2085,6 +2383,181 @@ export default function POSPage() {
               setIsZReportModalOpen(false);
               setClosingShiftData(null);
             }}
+          />
+        )}
+
+        {/* ================= POS QUICK DEBT SETTLEMENT MODAL ================= */}
+        {isCreditSettlementOpen && matchedCustomer && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                    <Wallet className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-sm">Settle Debt (ණය බේරීම)</h3>
+                    <p className="text-[11px] text-slate-500">Record customer payment at counter</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsCreditSettlementOpen(false)}
+                  className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Customer Info Card */}
+              <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl space-y-1 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-700">Customer:</span>
+                  <span className="font-bold text-slate-900">{matchedCustomer.name}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Phone / NIC:</span>
+                  <span className="font-mono text-slate-700">
+                    {matchedCustomer.phone} {matchedCustomer.nicNumber ? `• ${matchedCustomer.nicNumber}` : ""}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-amber-200/60 font-bold">
+                  <span className="text-amber-900">Current Outstanding Debt:</span>
+                  <span className="font-mono text-rose-600 text-sm">
+                    {formatCurrency(matchedCustomer.currentBalance || 0)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Form */}
+              <form onSubmit={handlePOSCreditSettlement} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Payment Amount (Rs.) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="1"
+                    required
+                    value={creditSettlementAmount}
+                    onChange={(e) => setCreditSettlementAmount(e.target.value)}
+                    placeholder="Enter amount paid"
+                    className="w-full px-3.5 py-2.5 text-base font-bold font-mono border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                  {matchedCustomer.currentBalance > 0 && (
+                    <div className="flex items-center gap-1.5 mt-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setCreditSettlementAmount(matchedCustomer.currentBalance.toString())}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700"
+                      >
+                        Full Settle ({formatCurrency(matchedCustomer.currentBalance)})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCreditSettlementAmount(Math.round(matchedCustomer.currentBalance / 2).toString())}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700"
+                      >
+                        50% Settle
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Payment Method *
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(["CASH", "CARD", "QR", "BANK_TRANSFER"] as const).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setCreditSettlementMethod(m)}
+                        className={`p-2 rounded-lg border text-xs font-semibold transition ${
+                          creditSettlementMethod === m
+                            ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                            : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        {m === "CASH" ? "Cash (Drawer)" : m === "CARD" ? "Card Slip" : m === "QR" ? "LankaQR" : "Bank Transfer"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {creditSettlementMethod !== "CASH" && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Reference Code
+                    </label>
+                    <input
+                      type="text"
+                      value={creditSettlementRef}
+                      onChange={(e) => setCreditSettlementRef(e.target.value)}
+                      placeholder="e.g. Card Auth, QR Ref, Bank Txn"
+                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Notes / Remarks (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={creditSettlementNotes}
+                    onChange={(e) => setCreditSettlementNotes(e.target.value)}
+                    placeholder="e.g. Paid at counter by customer"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                {/* Auto Pay-in notice */}
+                {creditSettlementMethod === "CASH" && currentShift && (
+                  <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-[11px] text-blue-900 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span>
+                      Cash payment will be automatically recorded as a <strong>PAY-IN</strong> in counter shift #{currentShift.shiftNumber}.
+                    </span>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setIsCreditSettlementOpen(false)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingCreditSettlement || !creditSettlementAmount}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/25 transition disabled:opacity-50"
+                  >
+                    {submittingCreditSettlement ? "Processing..." : "Confirm & Print Settlement Slip"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ================= THERMAL DEBT SETTLEMENT SLIP MODAL ================= */}
+        {activeSettlementSlip && (
+          <CreditSettlementReceipt
+            business={
+              business || {
+                name: "Sri Lanka POS",
+                receiptSettings: { defaultWidth: "58mm" },
+              }
+            }
+            settlement={activeSettlementSlip}
+            onClose={() => setActiveSettlementSlip(null)}
           />
         )}
       </div>

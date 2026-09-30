@@ -80,7 +80,7 @@ export async function PUT(
       );
     }
 
-    const { name, phone, email, address, notes } = parsed.data;
+    const { name, phone, email, address, notes, creditAllowed, creditLimit, nicNumber } = parsed.data;
     const normalizedPhone = normalizeSLPhone(phone);
 
     if (Boolean(process.env.MONGODB_URI)) {
@@ -102,7 +102,18 @@ export async function PUT(
 
       const updated = await Customer.findOneAndUpdate(
         { _id: params.id, businessId: context.businessId },
-        { $set: { name, phone: normalizedPhone, email, address, notes } },
+        {
+          $set: {
+            name,
+            phone: normalizedPhone,
+            email,
+            address,
+            notes,
+            creditAllowed: Boolean(creditAllowed),
+            creditLimit: Number(creditLimit) || 0,
+            nicNumber: nicNumber?.trim() || undefined,
+          },
+        },
         { new: true }
       );
 
@@ -111,7 +122,17 @@ export async function PUT(
 
     return NextResponse.json({
       success: true,
-      customer: { _id: params.id, name, phone: normalizedPhone, email, address, notes },
+      customer: {
+        _id: params.id,
+        name,
+        phone: normalizedPhone,
+        email,
+        address,
+        notes,
+        creditAllowed: Boolean(creditAllowed),
+        creditLimit: Number(creditLimit) || 0,
+        nicNumber,
+      },
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to update customer";

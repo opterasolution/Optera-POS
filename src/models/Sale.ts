@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document, Model, Types } from "mongoose";
 
-export type PaymentMethod = "CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "OTHER";
+export type PaymentMethod = "CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CREDIT" | "OTHER";
 export type SaleStatus = "COMPLETED" | "CANCELLED" | "REFUNDED";
 
 export interface ISaleItem {
@@ -36,6 +36,8 @@ export interface ISale extends Document {
   registerName?: string;
   registerNumber?: string;
   shiftId?: Types.ObjectId;
+  isCreditSale?: boolean;
+  creditTransactionId?: Types.ObjectId;
   offlineId?: string; // Client-generated UUID for idempotent synchronization
   status: SaleStatus;
   createdAt: Date;
@@ -82,7 +84,7 @@ const SaleSchema = new Schema<ISale>(
     netTotal: { type: Number, required: true, min: 0 },
     paymentMethod: {
       type: String,
-      enum: ["CASH", "CARD", "QR", "BANK_TRANSFER", "OTHER"],
+      enum: ["CASH", "CARD", "QR", "BANK_TRANSFER", "CREDIT", "OTHER"],
       required: true,
     },
     cashReceived: { type: Number, min: 0 },
@@ -92,6 +94,8 @@ const SaleSchema = new Schema<ISale>(
     registerName: { type: String, trim: true },
     registerNumber: { type: String, trim: true },
     shiftId: { type: Schema.Types.ObjectId, ref: "Shift", index: true },
+    isCreditSale: { type: Boolean, default: false },
+    creditTransactionId: { type: Schema.Types.ObjectId, ref: "CreditTransaction" },
     offlineId: { type: String, trim: true, sparse: true, index: true },
     status: {
       type: String,

@@ -9,6 +9,9 @@ export const customerSchema = z.object({
   email: z.string().email("Invalid email address").optional().or(z.literal("")),
   address: z.string().max(200, "Address too long").optional().or(z.literal("")),
   notes: z.string().max(500, "Notes too long").optional().or(z.literal("")),
+  creditAllowed: z.boolean().optional(),
+  creditLimit: z.number().min(0, "Credit limit must be non-negative").optional(),
+  nicNumber: z.string().max(20, "NIC too long").optional().or(z.literal("")),
 });
 
 export type CustomerInput = z.infer<typeof customerSchema>;

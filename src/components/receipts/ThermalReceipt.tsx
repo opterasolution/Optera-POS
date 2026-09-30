@@ -183,6 +183,19 @@ export default function ThermalReceipt({
             </>
           )}
 
+          {sale.paymentMethod === "CREDIT" && (
+            <div className="pt-2 border-t border-dashed border-zinc-400 space-y-2 text-[10px]">
+              <div className="text-center font-bold uppercase tracking-wider text-[9px] bg-zinc-100 py-0.5 border border-zinc-300">
+                * BILLED TO CREDIT ACCOUNT (NAYA POTHA) *
+              </div>
+              <div className="pt-6 text-center">
+                <div className="border-t border-black pt-1 text-[9px]">
+                  Customer Acknowledgement Signature
+                </div>
+              </div>
+            </div>
+          )}
+
           {sale.paymentReference && (
             <div className="flex justify-between text-zinc-600 text-[9px]">
               <span>Ref / Auth:</span>

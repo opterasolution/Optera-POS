@@ -8,6 +8,7 @@ import { Customer } from "@/models/Customer";
 import { InventoryMovement } from "@/models/InventoryMovement";
 import { AuditLog } from "@/models/AuditLog";
 import { Shift } from "@/models/Shift";
+import { CreditTransaction } from "@/models/CreditTransaction";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 import { createSaleSchema } from "@/lib/validations/sale";
 
@@ -150,16 +151,18 @@ export async function POST(req: Request) {
       const totalSalesCount = await Sale.countDocuments({ businessId });
       const invoiceNumber = `INV-${year}-${(totalSalesCount + 1).toString().padStart(5, "0")}`;
 
-      // 7. Handle Customer assignment or creation
+      // 7. Handle Customer assignment or creation & Credit verification
       let customerId = undefined;
+      let customerDoc: any = null;
+
       if (customerPhone && customerPhone.trim() !== "") {
-        let customer = await Customer.findOne({
+        customerDoc = await Customer.findOne({
           businessId,
           phone: customerPhone.trim(),
         });
 
-        if (!customer) {
-          customer = await Customer.create({
+        if (!customerDoc) {
+          customerDoc = await Customer.create({
             businessId,
             name: customerName || "Customer",
             phone: customerPhone.trim(),
@@ -168,15 +171,54 @@ export async function POST(req: Request) {
             lastVisit: new Date(),
           });
         } else {
-          customer.totalSpent += netTotal;
-          customer.visitCount += 1;
-          customer.lastVisit = new Date();
+          customerDoc.totalSpent += netTotal;
+          customerDoc.visitCount += 1;
+          customerDoc.lastVisit = new Date();
           if (customerName && customerName !== "Walk-in Customer") {
-            customer.name = customerName;
+            customerDoc.name = customerName;
           }
-          await customer.save();
+          await customerDoc.save();
         }
-        customerId = customer._id;
+        customerId = customerDoc._id;
+      }
+
+      // If sale is on CREDIT (Naya Potha), enforce credit qualification and ceilings
+      if (paymentMethod === "CREDIT") {
+        if (!customerDoc) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: "A registered customer with a valid Sri Lankan phone number is required for store credit sales (Naya Potha).",
+            },
+            { status: 400 }
+          );
+        }
+
+        if (!customerDoc.creditAllowed) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `Store credit is not enabled for ${customerDoc.name}. Please activate credit in the Customer Profile.`,
+            },
+            { status: 400 }
+          );
+        }
+
+        const currentDebt = customerDoc.currentBalance || 0;
+        const limit = customerDoc.creditLimit || 0;
+        if (currentDebt + netTotal > limit) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `Credit limit exceeded for ${customerDoc.name}. Current Balance: Rs. ${currentDebt.toLocaleString()}, Limit: Rs. ${limit.toLocaleString()}. Adding Rs. ${netTotal.toLocaleString()} would exceed the allowed limit.`,
+            },
+            { status: 400 }
+          );
+        }
+
+        // Increment customer balance
+        customerDoc.currentBalance = currentDebt + netTotal;
+        await customerDoc.save();
       }
 
       // 8. Determine active shift if not explicitly provided
@@ -213,10 +255,38 @@ export async function POST(req: Request) {
         registerId: registerId && registerId.trim() ? new Types.ObjectId(registerId) : undefined,
         registerName: registerName?.trim() || "Counter 01 (Main)",
         shiftId: resolvedShiftId,
+        isCreditSale: paymentMethod === "CREDIT",
         status: "COMPLETED",
       });
 
-      // 9. Atomically deduct inventory stock and record movement history
+      // If credit sale, record in CreditTransaction passbook
+      if (paymentMethod === "CREDIT" && customerDoc) {
+        const count = await CreditTransaction.countDocuments({ businessId });
+        const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+        const transactionNumber = `CR-TXN-${todayStr}-${String(count + 1).padStart(4, "0")}`;
+
+        const creditTxn = await CreditTransaction.create({
+          businessId,
+          customerId: customerDoc._id,
+          transactionNumber,
+          type: "CREDIT_SALE",
+          amount: netTotal,
+          balanceBefore: customerDoc.currentBalance - netTotal,
+          balanceAfter: customerDoc.currentBalance,
+          saleId: sale._id,
+          invoiceNumber,
+          shiftId: resolvedShiftId,
+          registerId: registerId && registerId.trim() ? new Types.ObjectId(registerId) : undefined,
+          registerName: registerName?.trim() || "Counter 01 (Main)",
+          notes: `Credit Sale: ${invoiceNumber}`,
+          performedBy: context.username || "Cashier",
+        });
+
+        sale.creditTransactionId = creditTxn._id;
+        await sale.save();
+      }
+
+      // 10. Atomically deduct inventory stock and record movement history
       for (const item of verifiedItems) {
         const dbProduct = productMap.get(item.productId.toString());
         const prevStock = dbProduct ? dbProduct.stockQuantity : 0;

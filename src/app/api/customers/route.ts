@@ -63,10 +63,13 @@ export async function GET(req: Request) {
         ];
       }
 
-      const customers = await Customer.find(filter).sort({ totalSpent: -1 });
+      const customers = await Customer.find(filter).sort({ currentBalance: -1, totalSpent: -1 });
 
       const totalSpentAll = customers.reduce((sum, c) => sum + (c.totalSpent || 0), 0);
       const avgSpend = customers.length > 0 ? totalSpentAll / customers.length : 0;
+      const totalOutstandingCredit = customers.reduce((sum, c) => sum + (c.currentBalance || 0), 0);
+      const creditCustomersCount = customers.filter((c) => c.creditAllowed).length;
+      const debtorsCount = customers.filter((c) => (c.currentBalance || 0) > 0).length;
 
       return NextResponse.json({
         success: true,
@@ -74,6 +77,9 @@ export async function GET(req: Request) {
           totalCustomers: customers.length,
           totalRevenue: totalSpentAll,
           averageSpend: Math.round(avgSpend * 100) / 100,
+          totalOutstandingCredit,
+          creditCustomersCount,
+          debtorsCount,
         },
         customers,
       });
@@ -99,6 +105,9 @@ export async function GET(req: Request) {
         totalCustomers: demoList.length,
         totalRevenue: totalDemo,
         averageSpend: demoList.length ? Math.round(totalDemo / demoList.length) : 0,
+        totalOutstandingCredit: 0,
+        creditCustomersCount: 0,
+        debtorsCount: 0,
       },
       customers: demoList,
     });
@@ -122,7 +131,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { name, phone, email, address, notes } = parsed.data;
+    const { name, phone, email, address, notes, creditAllowed, creditLimit, nicNumber } = parsed.data;
     const normalizedPhone = normalizeSLPhone(phone);
 
     if (Boolean(process.env.MONGODB_URI)) {
@@ -153,6 +162,10 @@ export async function POST(req: Request) {
         notes: notes || undefined,
         totalSpent: 0,
         visitCount: 0,
+        creditAllowed: Boolean(creditAllowed),
+        creditLimit: Number(creditLimit) || 0,
+        currentBalance: 0,
+        nicNumber: nicNumber?.trim() || undefined,
       });
 
       await AuditLog.create({
@@ -162,7 +175,7 @@ export async function POST(req: Request) {
         action: "CUSTOMER_CREATED",
         entityType: "Customer",
         entityId: customer._id.toString(),
-        details: { name, phone: normalizedPhone },
+        details: { name, phone: normalizedPhone, creditAllowed, creditLimit },
       });
 
       return NextResponse.json({ success: true, customer }, { status: 201 });

@@ -9,3 +9,4 @@ export { AuditLog, type IAuditLog } from "./AuditLog";
 export { SubscriptionInvoice, type ISubscriptionInvoice } from "./SubscriptionInvoice";
 export { Register, type IRegister } from "./Register";
 export { Shift, type IShift, type ICashMovement, type ShiftStatus, type CashMovementType } from "./Shift";
+export { CreditTransaction, type ICreditTransaction, type CreditTransactionType, type CreditPaymentMethod } from "./CreditTransaction";
