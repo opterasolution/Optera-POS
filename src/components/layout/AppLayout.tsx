@@ -28,6 +28,7 @@ import {
   Wallet,
   FileSpreadsheet,
   Award,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -85,6 +86,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { label: "Expenses & Petty Cash", href: "/expenses", icon: Wallet, allowed: isManager || isSupervisor || isAccountant },
     { label: "Customers", href: "/customers", icon: Users },
     { label: "Promotions & Loyalty", href: "/promotions", icon: Tag, allowed: isManager || isSupervisor },
+    { label: "SMS & Notifications", href: "/sms", icon: MessageSquare, allowed: isOwner || isManager || isSupervisor },
     { label: "Staff & Commissions", href: "/staff", icon: Award, allowed: isOwner || isManager || isSupervisor },
     { label: "Reports & P&L", href: "/reports", icon: BarChart3, allowed: isOwner || isManager || isAccountant },
     { label: "Store Settings", href: "/settings", icon: Settings, allowed: isOwner },

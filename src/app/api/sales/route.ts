@@ -19,6 +19,7 @@ import { SalesTarget } from "@/models/SalesTarget";
 import { calculateSaleCommission } from "@/lib/commission";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 import { createSaleSchema } from "@/lib/validations/sale";
+import { dispatchSms } from "@/lib/sms";
 
 export async function POST(req: Request) {
   try {
@@ -758,6 +759,30 @@ export async function POST(req: Request) {
           performedBy: context.userId,
           performedByName: context.username || "Cashier",
         });
+
+        // Trigger SMS alert for loyalty points earned (async safe)
+        if (customerDoc.phone) {
+          try {
+            await dispatchSms({
+              businessId,
+              recipientPhone: customerDoc.phone,
+              recipientName: customerDoc.name,
+              customerId: customerDoc._id,
+              eventType: "LOYALTY_ACCRUAL",
+              templateKey: "loyaltyAccrual",
+              variables: {
+                customerName: customerDoc.name,
+                points: pointsEarned.toString(),
+                balance: (customerDoc.loyaltyPoints || 0).toString(),
+                tier: customerDoc.loyaltyTier || "REGULAR",
+                storeName: business?.name || "Our Store",
+              },
+              metadata: { invoiceNumber, saleId: sale._id.toString() },
+            });
+          } catch (smsErr) {
+            console.error("Loyalty SMS trigger failed:", smsErr);
+          }
+        }
       }
 
       // If credit sale, record in CreditTransaction passbook
@@ -785,6 +810,32 @@ export async function POST(req: Request) {
 
         sale.creditTransactionId = creditTxn._id;
         await sale.save();
+
+        // Trigger SMS alert for credit purchase / Naya Potha (async safe)
+        if (customerDoc.phone) {
+          try {
+            const formattedDue = dueDate ? new Date(dueDate).toLocaleDateString() : "Due on demand";
+            await dispatchSms({
+              businessId,
+              recipientPhone: customerDoc.phone,
+              recipientName: customerDoc.name,
+              customerId: customerDoc._id,
+              eventType: "CREDIT_PURCHASE",
+              templateKey: "creditSale",
+              variables: {
+                customerName: customerDoc.name,
+                amount: netTotal.toLocaleString(),
+                balance: customerDoc.currentBalance.toLocaleString(),
+                storeName: business?.name || "Our Store",
+                dueDate: formattedDue,
+                ref: invoiceNumber,
+              },
+              metadata: { invoiceNumber, transactionNumber, saleId: sale._id.toString() },
+            });
+          } catch (smsErr) {
+            console.error("Credit sale SMS trigger failed:", smsErr);
+          }
+        }
       }
 
       // 10. Atomically deduct inventory stock and record movement history

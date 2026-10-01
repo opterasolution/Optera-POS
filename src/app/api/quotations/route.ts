@@ -7,6 +7,7 @@ import { Business } from "@/models/Business";
 import { AuditLog } from "@/models/AuditLog";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 import { createQuotationSchema } from "@/lib/validations/quotation";
+import { dispatchSms } from "@/lib/sms";
 
 export const dynamic = "force-dynamic";
 
@@ -276,6 +277,30 @@ export async function POST(req: Request) {
         itemsCount: verifiedItems.length,
       },
     });
+
+    // Trigger SMS notification for quotation alert
+    if (customerPhone) {
+      try {
+        await dispatchSms({
+          businessId,
+          recipientPhone: customerPhone,
+          recipientName: customerName || "Valued Customer",
+          customerId: customerId && Types.ObjectId.isValid(customerId) ? new Types.ObjectId(customerId) : undefined,
+          eventType: "QUOTATION_ALERT",
+          templateKey: "quotationAlert",
+          variables: {
+            customerName: customerName || "Valued Customer",
+            amount: netTotal.toLocaleString(),
+            dueDate: validityDate.toLocaleDateString(),
+            ref: quotationNumber,
+            storeName: business?.name || "Our Store",
+          },
+          metadata: { quotationNumber, quotationId: quotation._id.toString() },
+        });
+      } catch (smsErr) {
+        console.error("Quotation SMS trigger failed:", smsErr);
+      }
+    }
 
     return NextResponse.json({ success: true, quotation }, { status: 201 });
   } catch (error: any) {

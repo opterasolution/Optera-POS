@@ -1,4 +1,5 @@
-export { Business, type IBusiness } from "./Business";
+export { Business, type IBusiness, type SmsGatewayProvider, type ISmsSettings } from "./Business";
+export { SmsLog, type ISmsLog, type SmsEventType, type SmsDeliveryStatus } from "./SmsLog";
 export { User, type IUser, type UserRole } from "./User";
 export { Category, type ICategory } from "./Category";
 export { Product, type IProduct } from "./Product";

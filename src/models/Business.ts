@@ -21,6 +21,30 @@ export interface ICurrencySettings {
   currencies: ISupportedCurrency[];
 }
 
+export type SmsGatewayProvider = "NOTIFY_LK" | "DIALOG" | "MOBITEL" | "SIMULATED";
+
+export interface ISmsSettings {
+  enabled: boolean;
+  provider: SmsGatewayProvider;
+  senderId: string; // e.g. "MYSTORE", "NOTIFYDEMO", or registered Sri Lankan SMS mask
+  userId?: string; // Notify.lk user_id or Dialog/Mobitel account
+  apiKey?: string; // Notify.lk api_key or Dialog token
+  apiSecret?: string;
+  sendOnCreditSale: boolean;
+  sendOnCreditSettlement: boolean;
+  sendOnLoyaltyPoints: boolean;
+  sendOnGiftVoucher: boolean;
+  sendOnQuotation: boolean;
+  templates?: {
+    creditSale?: string;
+    creditSettlement?: string;
+    overdueReminder?: string;
+    loyaltyAccrual?: string;
+    giftVoucher?: string;
+    quotation?: string;
+  };
+}
+
 export interface IBusiness extends Document {
   name: string;
   businessType: string;
@@ -59,6 +83,7 @@ export interface IBusiness extends Document {
     autoPromptWhatsappReceipt: boolean;
     defaultReminderTemplate?: string;
   };
+  smsSettings?: ISmsSettings;
   loyaltySettings?: {
     enabled: boolean;
     pointsPerSpend: number;
@@ -145,6 +170,31 @@ const BusinessSchema = new Schema<IBusiness>(
       whatsappEnabled: { type: Boolean, default: true },
       autoPromptWhatsappReceipt: { type: Boolean, default: true },
       defaultReminderTemplate: { type: String, trim: true },
+    },
+    smsSettings: {
+      enabled: { type: Boolean, default: false },
+      provider: {
+        type: String,
+        enum: ["NOTIFY_LK", "DIALOG", "MOBITEL", "SIMULATED"],
+        default: "NOTIFY_LK",
+      },
+      senderId: { type: String, default: "NOTIFYDEMO", trim: true },
+      userId: { type: String, trim: true },
+      apiKey: { type: String, trim: true },
+      apiSecret: { type: String, trim: true },
+      sendOnCreditSale: { type: Boolean, default: true },
+      sendOnCreditSettlement: { type: Boolean, default: true },
+      sendOnLoyaltyPoints: { type: Boolean, default: false },
+      sendOnGiftVoucher: { type: Boolean, default: true },
+      sendOnQuotation: { type: Boolean, default: false },
+      templates: {
+        creditSale: { type: String, trim: true },
+        creditSettlement: { type: String, trim: true },
+        overdueReminder: { type: String, trim: true },
+        loyaltyAccrual: { type: String, trim: true },
+        giftVoucher: { type: String, trim: true },
+        quotation: { type: String, trim: true },
+      },
     },
     loyaltySettings: {
       enabled: { type: Boolean, default: true },

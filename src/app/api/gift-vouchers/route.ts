@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/db";
 import { GiftVoucher } from "@/models/GiftVoucher";
 import { Customer } from "@/models/Customer";
+import { Business } from "@/models/Business";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
+import { dispatchSms } from "@/lib/sms";
 
 export const dynamic = "force-dynamic";
 
@@ -222,6 +224,32 @@ export async function POST(req: Request) {
       issuedByName: context.username || "Manager",
       redemptionHistory: [],
     });
+
+    // Trigger SMS delivery of digital gift voucher code
+    const targetPhone = voucher.recipientPhone || voucher.customerPhone;
+    if (targetPhone) {
+      try {
+        const businessDoc = await Business.findById(businessId).lean();
+        await dispatchSms({
+          businessId,
+          recipientPhone: targetPhone,
+          recipientName: voucher.recipientName || voucher.customerName || "Valued Customer",
+          customerId: voucher.customerId,
+          eventType: "GIFT_VOUCHER",
+          templateKey: "giftVoucher",
+          variables: {
+            customerName: voucher.recipientName || voucher.customerName || "Valued Customer",
+            code: voucher.code,
+            amount: voucher.initialAmount.toLocaleString(),
+            dueDate: voucher.expiryDate ? new Date(voucher.expiryDate).toLocaleDateString() : "No expiry",
+            storeName: (businessDoc as any)?.name || "Our Store",
+          },
+          metadata: { voucherCode: voucher.code, voucherId: voucher._id.toString() },
+        });
+      } catch (smsErr) {
+        console.error("Gift voucher SMS trigger failed:", smsErr);
+      }
+    }
 
     return NextResponse.json({
       success: true,

@@ -6,7 +6,9 @@ import { CreditTransaction } from "@/models/CreditTransaction";
 import { Shift } from "@/models/Shift";
 import { Register } from "@/models/Register";
 import { AuditLog } from "@/models/AuditLog";
+import { Business } from "@/models/Business";
 import { requireAuth } from "@/lib/tenant";
+import { dispatchSms } from "@/lib/sms";
 
 export async function GET(
   req: Request,
@@ -246,6 +248,31 @@ export async function POST(
           paymentMethod,
         },
       });
+
+      // Trigger SMS notification for credit debt settlement
+      if (type === "PAYMENT" && customer.phone) {
+        try {
+          const businessDoc = await Business.findById(context.businessId).lean();
+          await dispatchSms({
+            businessId: context.businessId,
+            recipientPhone: customer.phone,
+            recipientName: customer.name,
+            customerId: customer._id,
+            eventType: "CREDIT_SETTLEMENT",
+            templateKey: "creditSettlement",
+            variables: {
+              customerName: customer.name,
+              amount: payAmount.toLocaleString(),
+              balance: balanceAfter.toLocaleString(),
+              storeName: (businessDoc as any)?.name || "Our Store",
+              ref: transactionNumber,
+            },
+            metadata: { transactionNumber, creditTransactionId: creditTxn._id.toString() },
+          });
+        } catch (smsErr) {
+          console.error("Credit settlement SMS trigger failed:", smsErr);
+        }
+      }
 
       return NextResponse.json({
         success: true,
