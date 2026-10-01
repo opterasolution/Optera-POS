@@ -80,7 +80,7 @@ export async function PUT(
       );
     }
 
-    const { name, phone, email, address, notes, creditAllowed, creditLimit, nicNumber } = parsed.data;
+    const { name, phone, email, address, notes, creditAllowed, creditLimit, nicNumber, dateOfBirth, loyaltyTier } = parsed.data;
     const normalizedPhone = normalizeSLPhone(phone);
 
     if (Boolean(process.env.MONGODB_URI)) {
@@ -100,20 +100,27 @@ export async function PUT(
         );
       }
 
+      const updateFields: any = {
+        name,
+        phone: normalizedPhone,
+        email,
+        address,
+        notes,
+        creditAllowed: Boolean(creditAllowed),
+        creditLimit: Number(creditLimit) || 0,
+        nicNumber: nicNumber?.trim() || undefined,
+      };
+
+      if (dateOfBirth !== undefined) {
+        updateFields.dateOfBirth = dateOfBirth ? new Date(dateOfBirth) : null;
+      }
+      if (loyaltyTier) {
+        updateFields.loyaltyTier = loyaltyTier;
+      }
+
       const updated = await Customer.findOneAndUpdate(
         { _id: params.id, businessId: context.businessId },
-        {
-          $set: {
-            name,
-            phone: normalizedPhone,
-            email,
-            address,
-            notes,
-            creditAllowed: Boolean(creditAllowed),
-            creditLimit: Number(creditLimit) || 0,
-            nicNumber: nicNumber?.trim() || undefined,
-          },
-        },
+        { $set: updateFields },
         { new: true }
       );
 

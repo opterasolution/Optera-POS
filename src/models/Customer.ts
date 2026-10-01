@@ -23,6 +23,8 @@ export interface ICustomer extends Document {
   loyaltyPoints?: number;
   lifetimePointsEarned?: number;
   lifetimePointsRedeemed?: number;
+  loyaltyTier?: "REGULAR" | "SILVER" | "GOLD" | "PLATINUM";
+  dateOfBirth?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -56,12 +58,19 @@ const CustomerSchema = new Schema<ICustomer>(
     loyaltyPoints: { type: Number, default: 0, min: 0 },
     lifetimePointsEarned: { type: Number, default: 0, min: 0 },
     lifetimePointsRedeemed: { type: Number, default: 0, min: 0 },
+    loyaltyTier: {
+      type: String,
+      enum: ["REGULAR", "SILVER", "GOLD", "PLATINUM"],
+      default: "REGULAR",
+    },
+    dateOfBirth: { type: Date },
   },
   { timestamps: true }
 );
 
 CustomerSchema.index({ businessId: 1, phone: 1 });
 CustomerSchema.index({ businessId: 1, currentBalance: -1 });
+CustomerSchema.index({ businessId: 1, loyaltyTier: 1 });
 
 export const Customer: Model<ICustomer> =
   mongoose.models.Customer || mongoose.model<ICustomer>("Customer", CustomerSchema);

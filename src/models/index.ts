@@ -20,3 +20,5 @@ export { Promotion, type IPromotion, type PromotionType, type PromoDiscountType 
 export { SaleReturn, type ISaleReturn, type ISaleReturnItem, type ReturnCondition, type RefundMethod } from "./SaleReturn";
 export { CreditNote, type ICreditNote, type ICreditNoteRedemption, type CreditNoteStatus } from "./CreditNote";
 export { Expense, type IExpense, type ExpenseCategory, type ExpensePaymentMethod, type ExpensePaidFrom } from "./Expense";
+export { LoyaltyTransaction, type ILoyaltyTransaction, type LoyaltyTransactionType } from "./LoyaltyTransaction";
+export { GiftVoucher, type IGiftVoucher, type IVoucherRedemption, type VoucherStatus } from "./GiftVoucher";

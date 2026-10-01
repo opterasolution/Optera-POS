@@ -39,6 +39,12 @@ export interface ThermalReceiptProps {
     pointsEarned?: number;
     pointsRedeemed?: number;
     loyaltyDiscount?: number;
+    customerTier?: string;
+    giftVoucherRedeemed?: {
+      code: string;
+      amount: number;
+      remainingBalance: number;
+    };
     appliedPromotions?: Array<{
       name: string;
       code?: string;
@@ -230,12 +236,41 @@ export default function ThermalReceipt({
           )}
         </div>
 
+        {/* Gift Voucher Redemption Block */}
+        {sale.giftVoucherRedeemed && (
+          <div className="border-t border-dashed border-zinc-400 mt-2 pt-1 text-[10px] space-y-0.5">
+            <div className="font-bold uppercase tracking-wider text-[9px] text-zinc-800 text-center">
+              * GIFT VOUCHER TENDER *
+            </div>
+            <div className="flex justify-between text-zinc-700">
+              <span>Voucher Code:</span>
+              <span className="font-mono font-bold">{sale.giftVoucherRedeemed.code}</span>
+            </div>
+            <div className="flex justify-between text-zinc-700 font-semibold">
+              <span>Amount Deducted:</span>
+              <span>-{formatCurrency(sale.giftVoucherRedeemed.amount)}</span>
+            </div>
+            <div className="flex justify-between text-zinc-900 font-bold">
+              <span>Remaining Balance:</span>
+              <span>{formatCurrency(sale.giftVoucherRedeemed.remainingBalance)}</span>
+            </div>
+          </div>
+        )}
+
         {/* Loyalty Points Earned / Redeemed Block */}
-        {(Boolean(sale.pointsEarned && sale.pointsEarned > 0) || Boolean(sale.pointsRedeemed && sale.pointsRedeemed > 0)) && (
+        {(Boolean(sale.pointsEarned && sale.pointsEarned > 0) ||
+          Boolean(sale.pointsRedeemed && sale.pointsRedeemed > 0) ||
+          Boolean(sale.customerTier)) && (
           <div className="border-t border-dashed border-zinc-400 mt-2 pt-1 text-[10px] space-y-0.5 text-center">
             <div className="font-bold uppercase tracking-wider text-[9px] text-zinc-800">
               * LOYALTY REWARDS SUMMARY *
             </div>
+            {sale.customerTier && (
+              <div className="flex justify-between text-zinc-700 font-semibold">
+                <span>Customer VIP Tier:</span>
+                <span className="font-bold text-amber-700 uppercase">{sale.customerTier}</span>
+              </div>
+            )}
             {sale.pointsEarned && sale.pointsEarned > 0 ? (
               <div className="flex justify-between text-zinc-700 font-semibold">
                 <span>Points Earned Today:</span>

@@ -31,9 +31,17 @@ import {
   Send,
   Check,
   Copy,
+  Award,
+  Gift,
+  Crown,
+  Sparkles,
+  Star,
+  Cake,
+  Tag,
 } from "lucide-react";
 import { formatCurrency, formatSLDateTime, isValidSLPhone } from "@/lib/formatters";
 import CreditSettlementReceipt, { CreditSettlementData } from "@/components/receipts/CreditSettlementReceipt";
+import GiftVoucherReceipt from "@/components/receipts/GiftVoucherReceipt";
 import { buildWhatsAppUrl } from "@/lib/notifications";
 
 interface CustomerRecord {
@@ -52,6 +60,11 @@ interface CustomerRecord {
   nicNumber?: string;
   lastReminderSentAt?: string;
   reminderCount?: number;
+  loyaltyTier?: "REGULAR" | "SILVER" | "GOLD" | "PLATINUM";
+  loyaltyPoints?: number;
+  lifetimePointsEarned?: number;
+  lifetimePointsRedeemed?: number;
+  dateOfBirth?: string;
 }
 
 interface SummaryData {
@@ -75,7 +88,7 @@ export default function CustomersPage() {
   });
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<"DIRECTORY" | "NAYA_POTHA">("DIRECTORY");
+  const [activeTab, setActiveTab] = useState<"DIRECTORY" | "NAYA_POTHA" | "LOYALTY" | "GIFT_VOUCHERS">("DIRECTORY");
   const [creditFilter, setCreditFilter] = useState<"ALL" | "DEBTORS_ONLY" | "NEAR_LIMIT">("ALL");
 
   // Modals State
@@ -90,7 +103,47 @@ export default function CustomersPage() {
     creditAllowed: false,
     creditLimit: "10000",
     nicNumber: "",
+    dateOfBirth: "",
+    loyaltyTier: "REGULAR" as "REGULAR" | "SILVER" | "GOLD" | "PLATINUM",
   });
+
+  // Loyalty Management State
+  const [isAdjustPointsModalOpen, setIsAdjustPointsModalOpen] = useState(false);
+  const [adjustCustomer, setAdjustCustomer] = useState<CustomerRecord | null>(null);
+  const [adjustPoints, setAdjustPoints] = useState("");
+  const [adjustReason, setAdjustReason] = useState("");
+  const [submittingPoints, setSubmittingPoints] = useState(false);
+
+  const [isPointsLedgerModalOpen, setIsPointsLedgerModalOpen] = useState(false);
+  const [pointsLedgerCustomer, setPointsLedgerCustomer] = useState<CustomerRecord | null>(null);
+  const [pointsTransactions, setPointsTransactions] = useState<any[]>([]);
+  const [loadingPointsLedger, setLoadingPointsLedger] = useState(false);
+
+  // Gift Vouchers State
+  const [vouchers, setVouchers] = useState<any[]>([]);
+  const [voucherStats, setVoucherStats] = useState<any>({
+    totalIssuedCount: 0,
+    activeCount: 0,
+    activeBalanceTotal: 0,
+    redeemedTotal: 0,
+    expiredCount: 0,
+  });
+  const [loadingVouchers, setLoadingVouchers] = useState(false);
+  const [voucherSearch, setVoucherSearch] = useState("");
+  const [voucherStatusFilter, setVoucherStatusFilter] = useState("ALL");
+
+  const [isIssueVoucherModalOpen, setIsIssueVoucherModalOpen] = useState(false);
+  const [issueVoucherForm, setIssueVoucherForm] = useState({
+    initialAmount: "1000",
+    recipientName: "",
+    recipientPhone: "",
+    customerId: "",
+    expiryDate: "",
+    notes: "",
+  });
+  const [submittingVoucher, setSubmittingVoucher] = useState(false);
+  const [activePrintedVoucher, setActivePrintedVoucher] = useState<any | null>(null);
+  const [selectedVoucherHistory, setSelectedVoucherHistory] = useState<any | null>(null);
 
   // History Modal State
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRecord | null>(null);
@@ -180,9 +233,31 @@ export default function CustomersPage() {
     }
   };
 
+  const loadVouchers = async () => {
+    try {
+      setLoadingVouchers(true);
+      const res = await fetch(`/api/gift-vouchers?q=${encodeURIComponent(voucherSearch)}&status=${voucherStatusFilter}`);
+      const data = await res.json();
+      if (data.success) {
+        setVouchers(data.vouchers || []);
+        if (data.stats) setVoucherStats(data.stats);
+      }
+    } catch {
+      console.error("Failed to load gift vouchers.");
+    } finally {
+      setLoadingVouchers(false);
+    }
+  };
+
   useEffect(() => {
     loadCustomers();
   }, [searchQuery]);
+
+  useEffect(() => {
+    if (activeTab === "GIFT_VOUCHERS") {
+      loadVouchers();
+    }
+  }, [activeTab, voucherSearch, voucherStatusFilter]);
 
   const openNewModal = () => {
     setEditingCustomer(null);
@@ -195,6 +270,8 @@ export default function CustomersPage() {
       creditAllowed: false,
       creditLimit: "10000",
       nicNumber: "",
+      dateOfBirth: "",
+      loyaltyTier: "REGULAR",
     });
     setIsModalOpen(true);
   };
@@ -210,8 +287,146 @@ export default function CustomersPage() {
       creditAllowed: Boolean(c.creditAllowed),
       creditLimit: (c.creditLimit || 0).toString(),
       nicNumber: c.nicNumber || "",
+      dateOfBirth: c.dateOfBirth ? new Date(c.dateOfBirth).toISOString().slice(0, 10) : "",
+      loyaltyTier: c.loyaltyTier || "REGULAR",
     });
     setIsModalOpen(true);
+  };
+
+  const openAdjustPointsModal = (c: CustomerRecord) => {
+    setAdjustCustomer(c);
+    setAdjustPoints("");
+    setAdjustReason("");
+    setIsAdjustPointsModalOpen(true);
+  };
+
+  const handleAdjustPointsSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adjustCustomer) return;
+    const pts = parseInt(adjustPoints, 10);
+    if (isNaN(pts) || pts === 0) {
+      alert("Please enter a valid non-zero points adjustment (e.g. 50 or -20).");
+      return;
+    }
+
+    setSubmittingPoints(true);
+    try {
+      const res = await fetch("/api/loyalty/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: adjustCustomer._id,
+          points: pts,
+          notes: adjustReason.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({
+          type: "success",
+          text: data.message || `Successfully adjusted points for ${adjustCustomer.name}.`,
+        });
+        setIsAdjustPointsModalOpen(false);
+        loadCustomers();
+      } else {
+        alert(data.error || "Failed to adjust points.");
+      }
+    } catch {
+      alert("Network error adjusting points.");
+    } finally {
+      setSubmittingPoints(false);
+    }
+  };
+
+  const openPointsLedgerModal = async (c: CustomerRecord) => {
+    setPointsLedgerCustomer(c);
+    setIsPointsLedgerModalOpen(true);
+    setLoadingPointsLedger(true);
+    try {
+      const res = await fetch(`/api/loyalty/transactions?customerId=${c._id}`);
+      const data = await res.json();
+      if (data.success) {
+        setPointsTransactions(data.transactions || []);
+      }
+    } catch {
+      console.error("Failed to load points ledger.");
+    } finally {
+      setLoadingPointsLedger(false);
+    }
+  };
+
+  const handleIssueVoucherSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amt = parseFloat(issueVoucherForm.initialAmount);
+    if (isNaN(amt) || amt <= 0) {
+      alert("Please enter a valid voucher amount greater than 0.");
+      return;
+    }
+
+    setSubmittingVoucher(true);
+    try {
+      const res = await fetch("/api/gift-vouchers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initialAmount: amt,
+          recipientName: issueVoucherForm.recipientName.trim() || undefined,
+          recipientPhone: issueVoucherForm.recipientPhone.trim() || undefined,
+          customerId: issueVoucherForm.customerId || undefined,
+          expiryDate: issueVoucherForm.expiryDate || undefined,
+          notes: issueVoucherForm.notes.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({
+          type: "success",
+          text: data.message || `Gift voucher ${data.voucher?.code} created successfully.`,
+        });
+        setIsIssueVoucherModalOpen(false);
+        setIssueVoucherForm({
+          initialAmount: "1000",
+          recipientName: "",
+          recipientPhone: "",
+          customerId: "",
+          expiryDate: "",
+          notes: "",
+        });
+        loadVouchers();
+        // Offer instant print
+        if (data.voucher) {
+          setActivePrintedVoucher(data.voucher);
+        }
+      } else {
+        alert(data.error || "Failed to create gift voucher.");
+      }
+    } catch {
+      alert("Network error creating gift voucher.");
+    } finally {
+      setSubmittingVoucher(false);
+    }
+  };
+
+  const handleCancelVoucher = async (code: string) => {
+    if (!confirm(`Are you sure you want to cancel Gift Voucher "${code}"? This will disable any remaining balance.`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/gift-vouchers/${code}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "CANCEL", notes: "Cancelled by store manager" }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({ type: "success", text: `Gift voucher ${code} has been cancelled.` });
+        loadVouchers();
+      } else {
+        alert(data.error || "Failed to cancel voucher.");
+      }
+    } catch {
+      alert("Network error cancelling voucher.");
+    }
   };
 
   const openHistoryModal = async (c: CustomerRecord) => {
@@ -284,6 +499,8 @@ export default function CustomersPage() {
         creditAllowed: formData.creditAllowed,
         creditLimit: parseFloat(formData.creditLimit) || 0,
         nicNumber: formData.nicNumber.trim() || undefined,
+        dateOfBirth: formData.dateOfBirth ? formData.dateOfBirth : undefined,
+        loyaltyTier: formData.loyaltyTier,
       };
 
       const res = await fetch(url, {
@@ -391,27 +608,46 @@ export default function CustomersPage() {
               <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
                 {activeTab === "NAYA_POTHA" ? (
                   <BookOpen className="w-6 h-6 text-amber-600" />
+                ) : activeTab === "LOYALTY" ? (
+                  <Crown className="w-6 h-6 text-purple-600" />
+                ) : activeTab === "GIFT_VOUCHERS" ? (
+                  <Gift className="w-6 h-6 text-emerald-600" />
                 ) : (
                   <Users className="w-6 h-6 text-blue-600" />
                 )}
-                {activeTab === "NAYA_POTHA" ? "Naya Potha (Credit Accounts)" : "Customer Directory"}
+                {activeTab === "NAYA_POTHA"
+                  ? "Naya Potha (Credit Accounts)"
+                  : activeTab === "LOYALTY"
+                  ? "Loyalty Rewards & VIP Tiers"
+                  : activeTab === "GIFT_VOUCHERS"
+                  ? "Digital Gift Vouchers Hub"
+                  : "Customer Directory"}
               </h1>
               {activeTab === "NAYA_POTHA" && (
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
                   ණය පොත
                 </span>
               )}
+              {activeTab === "LOYALTY" && (
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-900 border border-purple-300">
+                  Nexus / Cargills Style
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 mt-1">
               {activeTab === "NAYA_POTHA"
                 ? "Traditional digital credit book for neighborhood stores. Track customer limits, credit sales, and debt settlements."
+                : activeTab === "LOYALTY"
+                ? "Track customer reward points, tiered spend multipliers (Regular, Silver, Gold, Platinum), and Birthday bonuses."
+                : activeTab === "GIFT_VOUCHERS"
+                ? "Issue and manage digital gift vouchers (GV-YYYYMMDD-XXXX), track balances, reprint slips, and manage counter redemptions."
                 : "Manage Sri Lankan customer contact details, purchase frequency, and loyalty records."}
             </p>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap sm:flex-nowrap">
             {/* View Switcher Tabs */}
-            <div className="flex p-1 bg-slate-100 rounded-xl text-xs font-semibold">
+            <div className="flex p-1 bg-slate-100 rounded-xl text-xs font-semibold overflow-x-auto">
               <button
                 type="button"
                 onClick={() => setActiveTab("DIRECTORY")}
@@ -422,7 +658,7 @@ export default function CustomersPage() {
                 }`}
               >
                 <Users className="w-3.5 h-3.5 text-blue-600" />
-                <span>All Customers</span>
+                <span>Customers</span>
               </button>
               <button
                 type="button"
@@ -445,15 +681,60 @@ export default function CustomersPage() {
                   </span>
                 )}
               </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("LOYALTY")}
+                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition ${
+                  activeTab === "LOYALTY"
+                    ? "bg-purple-600 text-white shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <Crown className="w-3.5 h-3.5" />
+                <span>Loyalty & VIP</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("GIFT_VOUCHERS")}
+                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition ${
+                  activeTab === "GIFT_VOUCHERS"
+                    ? "bg-emerald-600 text-white shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <Gift className="w-3.5 h-3.5" />
+                <span>Gift Vouchers</span>
+                {voucherStats?.activeCount > 0 && (
+                  <span
+                    className={`ml-1 px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold ${
+                      activeTab === "GIFT_VOUCHERS"
+                        ? "bg-emerald-800 text-emerald-100"
+                        : "bg-emerald-100 text-emerald-800"
+                    }`}
+                  >
+                    {voucherStats.activeCount}
+                  </span>
+                )}
+              </button>
             </div>
 
-            <button
-              onClick={openNewModal}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold transition-all shadow-sm flex items-center gap-1.5 shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Customer</span>
-            </button>
+            {activeTab === "GIFT_VOUCHERS" ? (
+              <button
+                onClick={() => setIsIssueVoucherModalOpen(true)}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition-all shadow-sm flex items-center gap-1.5 shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Issue Gift Voucher</span>
+              </button>
+            ) : (
+              <button
+                onClick={openNewModal}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold transition-all shadow-sm flex items-center gap-1.5 shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Customer</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -848,6 +1129,512 @@ export default function CustomersPage() {
           </div>
         )}
 
+        {/* ================= TAB 3: LOYALTY REWARDS & VIP TIERS ================= */}
+        {activeTab === "LOYALTY" && (
+          <div className="space-y-6">
+            {/* Loyalty Metric Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 text-xs font-medium">Store Loyalty Points</span>
+                  <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl font-black text-purple-950 font-mono mt-2">
+                  {customers.reduce((sum, c) => sum + (c.loyaltyPoints || 0), 0).toLocaleString()} <span className="text-sm font-normal text-slate-500">pts</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">Available for customer redemptions</p>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 text-xs font-medium">Lifetime Points Earned</span>
+                  <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                    <TrendingUp className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl font-black text-blue-950 font-mono mt-2">
+                  {customers.reduce((sum, c) => sum + (c.lifetimePointsEarned || 0), 0).toLocaleString()} <span className="text-sm font-normal text-slate-500">pts</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">Accrued on Rs. 100 spend blocks</p>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 text-xs font-medium">Total Rewards Redeemed</span>
+                  <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                    <Award className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl font-black text-emerald-700 font-mono mt-2">
+                  {formatCurrency(customers.reduce((sum, c) => sum + (c.lifetimePointsRedeemed || 0), 0))}
+                </div>
+                <p className="text-[11px] text-emerald-600 mt-1">Saved by shoppers via points discount</p>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 text-xs font-medium">VIP Tier Members</span>
+                  <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                    <Crown className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl font-black text-amber-950 mt-2">
+                  {customers.filter((c) => c.loyaltyTier && c.loyaltyTier !== "REGULAR").length}{" "}
+                  <span className="text-sm font-normal text-slate-500">VIP shoppers</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">Silver, Gold & Platinum members</p>
+              </div>
+            </div>
+
+            {/* Loyalty Tier Rules Banner */}
+            <div className="bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white p-5 rounded-2xl shadow-sm border border-purple-800/40">
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Crown className="w-5 h-5 text-amber-400" />
+                    <h3 className="font-extrabold text-sm sm:text-base tracking-tight">
+                      Sri Lanka Tiered Loyalty Program Rules
+                    </h3>
+                  </div>
+                  <p className="text-xs text-purple-200">
+                    Nexus / Cargills style loyalty: Customers earn 1 base point per Rs. 100 spent (1 point = Rs. 1 discount at counter checkout).
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 bg-purple-950/60 px-3 py-2 rounded-xl border border-purple-700/50 text-xs">
+                  <Cake className="w-4 h-4 text-pink-400 shrink-0" />
+                  <span>
+                    <strong className="text-amber-300">Birthday Month:</strong> 2.0x Double Points Multiplier!
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-purple-800/60 text-xs">
+                <div className="bg-white/10 p-3 rounded-xl backdrop-blur-xs">
+                  <div className="font-bold text-slate-300 flex items-center gap-1.5">
+                    <Star className="w-3.5 h-3.5 text-slate-300" />
+                    <span>REGULAR</span>
+                  </div>
+                  <div className="text-base font-black mt-1">1.0x Points</div>
+                  <div className="text-[10px] text-purple-200">Default enrollment</div>
+                </div>
+
+                <div className="bg-white/10 p-3 rounded-xl backdrop-blur-xs">
+                  <div className="font-bold text-slate-200 flex items-center gap-1.5">
+                    <Award className="w-3.5 h-3.5 text-slate-300" />
+                    <span>SILVER</span>
+                  </div>
+                  <div className="text-base font-black mt-1">1.25x Points</div>
+                  <div className="text-[10px] text-purple-200">Cumulative spend &gt; Rs. 25,000</div>
+                </div>
+
+                <div className="bg-white/10 p-3 rounded-xl backdrop-blur-xs">
+                  <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                    <Crown className="w-3.5 h-3.5 text-amber-300" />
+                    <span>GOLD</span>
+                  </div>
+                  <div className="text-base font-black text-amber-200 mt-1">1.5x Points</div>
+                  <div className="text-[10px] text-purple-200">Cumulative spend &gt; Rs. 75,000</div>
+                </div>
+
+                <div className="bg-white/10 p-3 rounded-xl backdrop-blur-xs border border-purple-400/30">
+                  <div className="font-bold text-purple-200 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-purple-300" />
+                    <span>PLATINUM</span>
+                  </div>
+                  <div className="text-base font-black text-purple-200 mt-1">2.0x Points</div>
+                  <div className="text-[10px] text-purple-200">Cumulative spend &gt; Rs. 150,000</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Customers Loyalty Ledger Table */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="relative max-w-sm w-full">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search loyalty member by name or phone..."
+                    className="w-full pl-9 pr-4 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+                <div className="text-xs text-slate-500">
+                  Showing <span className="font-bold text-slate-800">{customers.length}</span> loyalty accounts
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-100 bg-slate-50/75 text-slate-500 font-semibold">
+                      <th className="py-3 px-4">Customer Details</th>
+                      <th className="py-3 px-4">VIP Tier</th>
+                      <th className="py-3 px-4 text-right">Available Points</th>
+                      <th className="py-3 px-4 text-right">Points Earned / Redeemed</th>
+                      <th className="py-3 px-4">Birthday Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {customers.length > 0 ? (
+                      customers.map((c) => {
+                        const tier = c.loyaltyTier || "REGULAR";
+                        const pts = c.loyaltyPoints || 0;
+                        const birthMonth = c.dateOfBirth ? new Date(c.dateOfBirth).getUTCMonth() : -1;
+                        const isBdayMonth = birthMonth === new Date().getUTCMonth();
+
+                        return (
+                          <tr key={c._id} className="hover:bg-slate-50/70 transition-colors">
+                            <td className="py-3 px-4">
+                              <div className="font-bold text-slate-900">{c.name}</div>
+                              <div className="text-slate-500 font-mono text-[11px] flex items-center gap-1.5 mt-0.5">
+                                <Phone className="w-3 h-3 text-slate-400" />
+                                <span>{c.phone}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span
+                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold text-[10px] tracking-wider uppercase ${
+                                  tier === "PLATINUM"
+                                    ? "bg-purple-100 text-purple-900 border border-purple-300"
+                                    : tier === "GOLD"
+                                    ? "bg-amber-100 text-amber-900 border border-amber-300"
+                                    : tier === "SILVER"
+                                    ? "bg-slate-200 text-slate-900 border border-slate-300"
+                                    : "bg-blue-50 text-blue-800 border border-blue-200"
+                                }`}
+                              >
+                                {tier === "PLATINUM" ? (
+                                  <Sparkles className="w-3 h-3 text-purple-600" />
+                                ) : tier === "GOLD" ? (
+                                  <Crown className="w-3 h-3 text-amber-600" />
+                                ) : (
+                                  <Star className="w-3 h-3 text-slate-600" />
+                                )}
+                                <span>{tier}</span>
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono">
+                              <span className="text-sm font-black text-purple-950 bg-purple-50 px-2 py-0.5 rounded-lg border border-purple-200">
+                                {pts.toLocaleString()} pts
+                              </span>
+                              <div className="text-[10px] text-slate-400 mt-0.5">
+                                ≈ {formatCurrency(pts)} discount
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono text-[11px]">
+                              <span className="text-emerald-700 font-semibold">
+                                +{(c.lifetimePointsEarned || 0).toLocaleString()}
+                              </span>{" "}
+                              /{" "}
+                              <span className="text-slate-500">
+                                -{(c.lifetimePointsRedeemed || 0).toLocaleString()}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              {c.dateOfBirth ? (
+                                <div className="space-y-0.5">
+                                  <div className="text-[11px] text-slate-700">
+                                    {new Date(c.dateOfBirth).toLocaleDateString("en-LK", {
+                                      month: "short",
+                                      day: "numeric",
+                                    })}
+                                  </div>
+                                  {isBdayMonth ? (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-pink-100 text-pink-800 rounded font-bold text-[9px]">
+                                      <Cake className="w-2.5 h-2.5 text-pink-600" />
+                                      <span>Birthday Month (2x Points)</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400">Regular</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-[11px] text-slate-400 italic">Not set</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => openAdjustPointsModal(c)}
+                                  title="Adjust Points Balance"
+                                  className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-800 font-semibold rounded-lg text-[10px] transition-colors flex items-center gap-1 border border-purple-200"
+                                >
+                                  <Edit2 className="w-3 h-3 text-purple-600" />
+                                  <span>Adjust</span>
+                                </button>
+                                <button
+                                  onClick={() => openPointsLedgerModal(c)}
+                                  title="View Points Statement"
+                                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold rounded-lg text-[10px] transition-colors flex items-center gap-1"
+                                >
+                                  <FileText className="w-3 h-3 text-slate-600" />
+                                  <span>Statement</span>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center text-slate-400">
+                          No customer loyalty accounts found matching your search.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= TAB 4: DIGITAL GIFT VOUCHERS HUB ================= */}
+        {activeTab === "GIFT_VOUCHERS" && (
+          <div className="space-y-6">
+            {/* Voucher Metric Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 text-xs font-medium">Active Gift Vouchers</span>
+                  <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                    <Gift className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl font-black text-emerald-950 font-mono mt-2">
+                  {voucherStats?.activeCount || 0} <span className="text-sm font-normal text-slate-500">vouchers</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">Ready for counter redemption</p>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 text-xs font-medium">Outstanding Liability</span>
+                  <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                    <Wallet className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl font-black text-amber-950 font-mono mt-2">
+                  {formatCurrency(voucherStats?.activeBalanceTotal || 0)}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">Unredeemed balance across active vouchers</p>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 text-xs font-medium">Total Value Redeemed</span>
+                  <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                    <Receipt className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl font-black text-blue-950 font-mono mt-2">
+                  {formatCurrency(voucherStats?.redeemedTotal || 0)}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">Completed purchases using vouchers</p>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 text-xs font-medium">Total Vouchers Issued</span>
+                  <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
+                    <Tag className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl font-black text-slate-900 font-mono mt-2">
+                  {voucherStats?.totalIssuedCount || 0}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Expired: {voucherStats?.expiredCount || 0} vouchers
+                </p>
+              </div>
+            </div>
+
+            {/* Vouchers Toolbar */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
+                <div className="relative max-w-sm w-full">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={voucherSearch}
+                    onChange={(e) => setVoucherSearch(e.target.value)}
+                    placeholder="Search by code (GV-...), recipient, or purchaser..."
+                    className="w-full pl-9 pr-4 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold overflow-x-auto">
+                  {["ALL", "ACTIVE", "REDEEMED", "EXPIRED", "CANCELLED"].map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setVoucherStatusFilter(st)}
+                      className={`px-3 py-1.5 rounded-lg transition ${
+                        voucherStatusFilter === st
+                          ? "bg-white text-slate-900 shadow-xs"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      {st}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsIssueVoucherModalOpen(true)}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center justify-center gap-1.5 shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Issue New Gift Voucher</span>
+              </button>
+            </div>
+
+            {/* Vouchers List Table */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-100 bg-slate-50/75 text-slate-500 font-semibold">
+                      <th className="py-3 px-4">Voucher Code</th>
+                      <th className="py-3 px-4">Recipient</th>
+                      <th className="py-3 px-4">Purchaser</th>
+                      <th className="py-3 px-4 text-right">Remaining Balance</th>
+                      <th className="py-3 px-4 text-right">Initial Value</th>
+                      <th className="py-3 px-4">Expiry Date</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {loadingVouchers ? (
+                      <tr>
+                        <td colSpan={8} className="py-12 text-center text-slate-400">
+                          Loading gift vouchers...
+                        </td>
+                      </tr>
+                    ) : vouchers.length > 0 ? (
+                      vouchers.map((v) => {
+                        const isExpired = v.status === "EXPIRED" || (v.expiryDate && new Date(v.expiryDate) < new Date());
+                        const isZero = v.currentBalance <= 0;
+
+                        return (
+                          <tr key={v._id} className="hover:bg-slate-50/70 transition-colors">
+                            <td className="py-3 px-4">
+                              <span className="font-mono font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                                {v.code}
+                              </span>
+                              <div className="text-[10px] text-slate-400 mt-1">
+                                Issued {formatSLDateTime(v.createdAt)}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="font-semibold text-slate-900">
+                                {v.recipientName || "Walk-in Recipient"}
+                              </div>
+                              {v.recipientPhone && (
+                                <div className="text-[10px] text-slate-500 font-mono">{v.recipientPhone}</div>
+                              )}
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="text-slate-800">{v.customerName || "Store Direct"}</div>
+                              {v.customerPhone && (
+                                <div className="text-[10px] text-slate-500 font-mono">{v.customerPhone}</div>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono">
+                              <span
+                                className={`text-sm font-black ${
+                                  v.currentBalance > 0 ? "text-emerald-700" : "text-slate-400"
+                                }`}
+                              >
+                                {formatCurrency(v.currentBalance)}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono text-slate-600">
+                              {formatCurrency(v.initialAmount)}
+                            </td>
+                            <td className="py-3 px-4 text-[11px]">
+                              {v.expiryDate ? (
+                                <span className={isExpired ? "text-rose-600 font-bold" : "text-slate-700"}>
+                                  {new Date(v.expiryDate).toLocaleDateString("en-LK", {
+                                    year: "numeric",
+                                    month: "short",
+                                    day: "numeric",
+                                  })}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">No expiry</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4">
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 rounded-full font-bold text-[10px] uppercase tracking-wide ${
+                                  v.status === "ACTIVE"
+                                    ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                    : v.status === "REDEEMED" || isZero
+                                    ? "bg-slate-100 text-slate-700 border border-slate-200"
+                                    : v.status === "EXPIRED" || isExpired
+                                    ? "bg-amber-100 text-amber-800 border border-amber-300"
+                                    : "bg-rose-100 text-rose-800 border border-rose-200"
+                                }`}
+                              >
+                                {v.status === "ACTIVE" && !isExpired && !isZero ? "ACTIVE" : v.status}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => setActivePrintedVoucher(v)}
+                                  title="Print Gift Voucher Thermal Slip"
+                                  className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 font-semibold rounded-lg text-[10px] transition-colors flex items-center gap-1 border border-amber-200"
+                                >
+                                  <Printer className="w-3 h-3 text-amber-600" />
+                                  <span>Print</span>
+                                </button>
+                                {v.redemptionHistory && v.redemptionHistory.length > 0 && (
+                                  <button
+                                    onClick={() => setSelectedVoucherHistory(v)}
+                                    title="View Redemption History"
+                                    className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg text-[10px] transition-colors flex items-center gap-1 border border-blue-200"
+                                  >
+                                    <History className="w-3 h-3 text-blue-600" />
+                                    <span>{v.redemptionHistory.length}</span>
+                                  </button>
+                                )}
+                                {v.status === "ACTIVE" && (
+                                  <button
+                                    onClick={() => handleCancelVoucher(v.code)}
+                                    title="Cancel Unused Voucher"
+                                    className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={8} className="py-12 text-center text-slate-400">
+                          No gift vouchers found. Click "Issue New Gift Voucher" to create one!
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ================= MODAL 1: ADD / EDIT CUSTOMER PROFILE ================= */}
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
@@ -928,6 +1715,41 @@ export default function CustomersPage() {
                     placeholder="e.g. Peradeniya Road, Kandy"
                     className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   />
+                </div>
+
+                {/* Loyalty Tier & Birthday Month */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-purple-50/50 border border-purple-200/70 rounded-xl">
+                  <div>
+                    <label className="block text-xs font-semibold text-purple-950 mb-1 flex items-center gap-1">
+                      <Cake className="w-3.5 h-3.5 text-pink-500" />
+                      <span>Birth Date (Birthday 2x)</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.dateOfBirth}
+                      onChange={(e) => setFormData({ ...formData, dateOfBirth: e.target.value })}
+                      className="w-full px-3 py-1.5 text-xs bg-white border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                    />
+                    <p className="text-[9px] text-purple-700 mt-0.5">2x Points Multiplier in Birthday Month</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-purple-950 mb-1 flex items-center gap-1">
+                      <Crown className="w-3.5 h-3.5 text-amber-500" />
+                      <span>Loyalty Tier</span>
+                    </label>
+                    <select
+                      value={formData.loyaltyTier}
+                      onChange={(e) => setFormData({ ...formData, loyaltyTier: e.target.value as any })}
+                      className="w-full px-3 py-1.5 text-xs bg-white border border-purple-200 rounded-lg font-bold text-purple-950 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                    >
+                      <option value="REGULAR">REGULAR (1.0x)</option>
+                      <option value="SILVER">SILVER (1.25x)</option>
+                      <option value="GOLD">GOLD (1.5x)</option>
+                      <option value="PLATINUM">PLATINUM (2.0x)</option>
+                    </select>
+                    <p className="text-[9px] text-purple-700 mt-0.5">Auto-advances based on spend</p>
+                  </div>
                 </div>
 
                 {/* Store Credit (Naya Potha) Toggle Section */}
@@ -1506,6 +2328,493 @@ export default function CustomersPage() {
             }}
             settlement={activeSettlementSlip}
             onClose={() => setActiveSettlementSlip(null)}
+          />
+        )}
+
+        {/* ================= MODAL 6: ADJUST LOYALTY POINTS ================= */}
+        {isAdjustPointsModalOpen && adjustCustomer && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-base">Adjust Loyalty Points</h3>
+                    <p className="text-xs text-slate-500">{adjustCustomer.name}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsAdjustPointsModalOpen(false)}
+                  className="text-slate-400 hover:text-slate-700"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Points Summary Badge */}
+              <div className="p-3 bg-purple-50/70 border border-purple-200 rounded-xl flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-purple-800 uppercase tracking-wider block font-semibold">
+                    Current Balance
+                  </span>
+                  <span className="text-lg font-black font-mono text-purple-950">
+                    {(adjustCustomer.loyaltyPoints || 0).toLocaleString()} pts
+                  </span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-purple-200 text-purple-900">
+                  {adjustCustomer.loyaltyTier || "REGULAR"}
+                </span>
+              </div>
+
+              <form onSubmit={handleAdjustPointsSubmit} className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Points to Adjust (+ to credit, - to deduct) *
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    required
+                    value={adjustPoints}
+                    onChange={(e) => setAdjustPoints(e.target.value)}
+                    placeholder="e.g. 50 or -20"
+                    className="w-full px-3.5 py-2 text-sm font-bold font-mono border-2 border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                  />
+                  <div className="flex items-center gap-1.5 mt-2">
+                    {[50, 100, 200, -50, -100].map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setAdjustPoints(val.toString())}
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold transition border ${
+                          val > 0
+                            ? "bg-purple-50 hover:bg-purple-100 text-purple-800 border-purple-200"
+                            : "bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-200"
+                        }`}
+                      >
+                        {val > 0 ? `+${val}` : val}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Reason / Description *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={adjustReason}
+                    onChange={(e) => setAdjustReason(e.target.value)}
+                    placeholder="e.g. Courtesy bonus, promotional adjustment"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setIsAdjustPointsModalOpen(false)}
+                    className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingPoints}
+                    className="px-5 py-2 text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white rounded-xl shadow-sm disabled:opacity-50"
+                  >
+                    {submittingPoints ? "Updating..." : "Confirm Adjustment"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ================= MODAL 7: LOYALTY POINTS STATEMENT / LEDGER ================= */}
+        {isPointsLedgerModalOpen && pointsLedgerCustomer && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center">
+                    <FileText className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-base">Points Statement & Audit Trail</h3>
+                    <p className="text-xs text-slate-500">{pointsLedgerCustomer.name} ({pointsLedgerCustomer.phone})</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsPointsLedgerModalOpen(false)}
+                  className="text-slate-400 hover:text-slate-700"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Customer Points Summary Strip */}
+              <div className="grid grid-cols-3 gap-2.5 p-3 bg-purple-50/50 border border-purple-200/60 rounded-xl text-center">
+                <div>
+                  <span className="text-[10px] text-purple-800 uppercase font-semibold block">Available</span>
+                  <span className="text-base font-black font-mono text-purple-950">
+                    {(pointsLedgerCustomer.loyaltyPoints || 0).toLocaleString()} pts
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-purple-800 uppercase font-semibold block">VIP Tier</span>
+                  <span className="text-sm font-bold text-amber-700 uppercase">
+                    {pointsLedgerCustomer.loyaltyTier || "REGULAR"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-purple-800 uppercase font-semibold block">Lifetime Earned</span>
+                  <span className="text-base font-black font-mono text-emerald-800">
+                    +{(pointsLedgerCustomer.lifetimePointsEarned || 0).toLocaleString()} pts
+                  </span>
+                </div>
+              </div>
+
+              {/* Transactions Ledger Table */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                  Recent Points History
+                </h4>
+                {loadingPointsLedger ? (
+                  <div className="p-8 text-center text-slate-400 text-xs">Loading points history...</div>
+                ) : pointsTransactions.length > 0 ? (
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                        <tr>
+                          <th className="py-2.5 px-3">Date</th>
+                          <th className="py-2.5 px-3">Activity</th>
+                          <th className="py-2.5 px-3">Description</th>
+                          <th className="py-2.5 px-3 text-right">Points</th>
+                          <th className="py-2.5 px-3 text-right">Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {pointsTransactions.map((tx: any) => (
+                          <tr key={tx._id} className="hover:bg-slate-50/70">
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                              {formatSLDateTime(tx.createdAt)}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${
+                                  tx.type === "EARN"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : tx.type === "BIRTHDAY_BONUS"
+                                    ? "bg-pink-100 text-pink-800"
+                                    : tx.type === "REDEEM"
+                                    ? "bg-blue-100 text-blue-800"
+                                    : "bg-purple-100 text-purple-800"
+                                }`}
+                              >
+                                {tx.type === "BIRTHDAY_BONUS" ? "BIRTHDAY 2X" : tx.type}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-700">
+                              <div>{tx.description}</div>
+                              {tx.invoiceNumber && (
+                                <span className="font-mono text-[10px] text-slate-400">
+                                  Invoice: {tx.invoiceNumber}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono font-bold">
+                              <span className={tx.points > 0 ? "text-emerald-700" : "text-rose-600"}>
+                                {tx.points > 0 ? `+${tx.points}` : tx.points}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                              {tx.pointsAfter}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="p-8 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl">
+                    No loyalty transactions recorded yet for this customer.
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsPointsLedgerModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= MODAL 8: ISSUE NEW GIFT VOUCHER ================= */}
+        {isIssueVoucherModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[92vh] overflow-y-auto">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                    <Gift className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-base">Issue Digital Gift Voucher</h3>
+                    <p className="text-xs text-slate-500">Auto-generates sequential code GV-YYYYMMDD-XXXX</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsIssueVoucherModalOpen(false)}
+                  className="text-slate-400 hover:text-slate-700"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleIssueVoucherSubmit} className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Voucher Value (LKR) *
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                      Rs.
+                    </span>
+                    <input
+                      type="number"
+                      min="100"
+                      step="any"
+                      required
+                      value={issueVoucherForm.initialAmount}
+                      onChange={(e) => setIssueVoucherForm({ ...issueVoucherForm, initialAmount: e.target.value })}
+                      placeholder="e.g. 1000"
+                      className="w-full pl-10 pr-3 py-2 text-sm font-bold font-mono border-2 border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                    {[500, 1000, 2000, 5000, 10000].map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setIssueVoucherForm({ ...issueVoucherForm, initialAmount: val.toString() })}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition"
+                      >
+                        Rs. {val.toLocaleString()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Recipient Name (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={issueVoucherForm.recipientName}
+                      onChange={(e) => setIssueVoucherForm({ ...issueVoucherForm, recipientName: e.target.value })}
+                      placeholder="e.g. Nimalka Fernando"
+                      className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Recipient Phone (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={issueVoucherForm.recipientPhone}
+                      onChange={(e) => setIssueVoucherForm({ ...issueVoucherForm, recipientPhone: e.target.value })}
+                      placeholder="07XXXXXXXX"
+                      className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Purchasing Customer (Optional)
+                  </label>
+                  <select
+                    value={issueVoucherForm.customerId}
+                    onChange={(e) => setIssueVoucherForm({ ...issueVoucherForm, customerId: e.target.value })}
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  >
+                    <option value="">-- Direct Store Purchase (Walk-in) --</option>
+                    {customers.map((c) => (
+                      <option key={c._id} value={c._id}>
+                        {c.name} ({c.phone})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Expiry Date (Defaults to 1 Year)
+                  </label>
+                  <input
+                    type="date"
+                    value={issueVoucherForm.expiryDate}
+                    onChange={(e) => setIssueVoucherForm({ ...issueVoucherForm, expiryDate: e.target.value })}
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Notes / Occasion (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={issueVoucherForm.notes}
+                    onChange={(e) => setIssueVoucherForm({ ...issueVoucherForm, notes: e.target.value })}
+                    placeholder="e.g. Birthday Gift, Corporate Incentive, Avurudu Special"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setIsIssueVoucherModalOpen(false)}
+                    className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingVoucher}
+                    className="px-5 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-sm disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <Gift className="w-3.5 h-3.5" />
+                    <span>{submittingVoucher ? "Issuing..." : "Issue & Print Slip"}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ================= MODAL 9: GIFT VOUCHER REDEMPTION HISTORY ================= */}
+        {selectedVoucherHistory && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                    <History className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-base">Voucher Redemption History</h3>
+                    <p className="text-xs font-mono text-slate-500">{selectedVoucherHistory.code}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSelectedVoucherHistory(null)}
+                  className="text-slate-400 hover:text-slate-700"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-xl flex justify-between items-center text-xs">
+                <div>
+                  <span className="text-slate-500 block">Initial Value:</span>
+                  <span className="font-bold font-mono text-slate-900">
+                    {formatCurrency(selectedVoucherHistory.initialAmount)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Current Balance:</span>
+                  <span className="font-bold font-mono text-emerald-700 text-sm">
+                    {formatCurrency(selectedVoucherHistory.currentBalance)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Status:</span>
+                  <span className="font-bold text-slate-900">{selectedVoucherHistory.status}</span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                  Counter Redemptions
+                </h4>
+                {selectedVoucherHistory.redemptionHistory && selectedVoucherHistory.redemptionHistory.length > 0 ? (
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                        <tr>
+                          <th className="py-2 px-3">Date</th>
+                          <th className="py-2 px-3">Invoice</th>
+                          <th className="py-2 px-3 text-right">Deducted</th>
+                          <th className="py-2 px-3 text-right">Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {selectedVoucherHistory.redemptionHistory.map((red: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-slate-50/70">
+                            <td className="py-2 px-3 text-slate-500 font-mono text-[11px]">
+                              {formatSLDateTime(red.redeemedAt)}
+                            </td>
+                            <td className="py-2 px-3 font-mono text-slate-800 font-semibold">
+                              {red.invoiceNumber || "N/A"}
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono font-bold text-rose-600">
+                              -{formatCurrency(red.amount)}
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
+                              {formatCurrency(red.balanceAfter)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="p-6 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl">
+                    No redemptions made yet. Full balance available.
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setSelectedVoucherHistory(null)}
+                  className="px-4 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= MODAL 10: PRINTABLE GIFT VOUCHER SLIP ================= */}
+        {activePrintedVoucher && (
+          <GiftVoucherReceipt
+            business={{
+              name: "Sri Lanka Retail POS",
+              phone: "011-2345678",
+              address: "Colombo, Sri Lanka",
+            }}
+            voucher={activePrintedVoucher}
+            onClose={() => setActivePrintedVoucher(null)}
           />
         )}
       </div>

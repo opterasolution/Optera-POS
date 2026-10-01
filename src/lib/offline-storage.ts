@@ -36,10 +36,13 @@ export interface OfflineSaleRecord {
   customerName?: string;
   customerPhone?: string;
   discountTotal?: number;
-  paymentMethod: "CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CREDIT" | "OTHER";
+  paymentMethod: "CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CREDIT" | "CREDIT_NOTE" | "GIFT_VOUCHER" | "OTHER";
   cashReceived?: number;
   changeGiven?: number;
   paymentReference?: string;
+  creditNoteNumber?: string;
+  giftVoucherCode?: string;
+  giftVoucherAmount?: number;
   registerId?: string;
   registerName?: string;
   shiftId?: string;

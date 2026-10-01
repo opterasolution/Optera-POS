@@ -195,13 +195,22 @@ export default function POSPage() {
 
   // Checkout Modal State
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CREDIT" | "CREDIT_NOTE">("CASH");
+  const [paymentMethod, setPaymentMethod] = useState<
+    "CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CREDIT" | "CREDIT_NOTE" | "GIFT_VOUCHER"
+  >("CASH");
   const [cashReceived, setCashReceived] = useState<string>("");
   const [paymentReference, setPaymentReference] = useState("");
   const [creditNoteCodeInput, setCreditNoteCodeInput] = useState("");
   const [validatedCreditNote, setValidatedCreditNote] = useState<any | null>(null);
   const [validatingCreditNote, setValidatingCreditNote] = useState(false);
   const [creditNoteError, setCreditNoteError] = useState<string | null>(null);
+
+  // Gift Voucher Counter Tender State
+  const [giftVoucherCodeInput, setGiftVoucherCodeInput] = useState("");
+  const [validatedGiftVoucher, setValidatedGiftVoucher] = useState<any | null>(null);
+  const [validatingGiftVoucher, setValidatingGiftVoucher] = useState(false);
+  const [giftVoucherError, setGiftVoucherError] = useState<string | null>(null);
+
   const [submittingSale, setSubmittingSale] = useState(false);
 
   // Multi-Currency & Dual-Currency Counter State (CBSL Engine)
@@ -972,8 +981,19 @@ export default function POSPage() {
     }
   }
 
-  // Points that will be earned on this transaction
-  const pointsEarnedOnSale = calculateLoyaltyPointsEarned(netTotal, loyaltySettings);
+  // Customer VIP Tier & Birthday Month Multipliers
+  const customerTier: "REGULAR" | "SILVER" | "GOLD" | "PLATINUM" = matchedCustomer?.loyaltyTier || "REGULAR";
+  const tierMultiplier =
+    customerTier === "PLATINUM" ? 2.0 : customerTier === "GOLD" ? 1.5 : customerTier === "SILVER" ? 1.25 : 1.0;
+  const isBirthdayMonth = matchedCustomer?.dateOfBirth
+    ? new Date(matchedCustomer.dateOfBirth).getUTCMonth() === new Date().getUTCMonth()
+    : false;
+  const birthdayMultiplier = isBirthdayMonth ? 2.0 : 1.0;
+  const totalLoyaltyMultiplier = tierMultiplier * birthdayMultiplier;
+
+  // Points that will be earned on this transaction (with tier multiplier & birthday bonus)
+  const basePointsEarned = calculateLoyaltyPointsEarned(netTotal, loyaltySettings);
+  const pointsEarnedOnSale = Math.floor(basePointsEarned * totalLoyaltyMultiplier);
 
   // Cash Change Calculation
   const cashGivenNum = parseFloat(cashReceived) || 0;
@@ -1077,6 +1097,9 @@ export default function POSPage() {
           setValidatedCreditNote(null);
           setCreditNoteCodeInput("");
           setCreditNoteError(null);
+          setValidatedGiftVoucher(null);
+          setGiftVoucherCodeInput("");
+          setGiftVoucherError(null);
           setIsCheckoutOpen(true);
         },
       });
@@ -1089,6 +1112,9 @@ export default function POSPage() {
     setValidatedCreditNote(null);
     setCreditNoteCodeInput("");
     setCreditNoteError(null);
+    setValidatedGiftVoucher(null);
+    setGiftVoucherCodeInput("");
+    setGiftVoucherError(null);
     setIsCheckoutOpen(true);
   };
 
@@ -1120,6 +1146,37 @@ export default function POSPage() {
     }
   };
 
+  // Validate Gift Voucher code
+  const validateGiftVoucherCode = async () => {
+    if (!giftVoucherCodeInput.trim()) return;
+    setValidatingGiftVoucher(true);
+    setGiftVoucherError(null);
+    setValidatedGiftVoucher(null);
+    try {
+      const res = await fetch(
+        `/api/gift-vouchers/${encodeURIComponent(giftVoucherCodeInput.trim().toUpperCase())}`
+      );
+      const data = await res.json();
+      if (data.success && data.voucher) {
+        if (data.voucher.status !== "ACTIVE") {
+          setGiftVoucherError(`Gift voucher is ${data.voucher.status.toLowerCase()} and cannot be used.`);
+        } else if (new Date(data.voucher.expiryDate) < new Date()) {
+          setGiftVoucherError("Gift voucher has expired.");
+        } else if (data.voucher.currentBalance <= 0) {
+          setGiftVoucherError("Gift voucher balance is Rs. 0.00.");
+        } else {
+          setValidatedGiftVoucher(data.voucher);
+        }
+      } else {
+        setGiftVoucherError(data.error || "Invalid or non-existent gift voucher.");
+      }
+    } catch (err: any) {
+      setGiftVoucherError("Failed to validate gift voucher.");
+    } finally {
+      setValidatingGiftVoucher(false);
+    }
+  };
+
   // Complete Sale Submission (with offline fallback and automatic queueing)
   const handleCompleteSale = async () => {
     if (paymentMethod === "CASH") {
@@ -1143,6 +1200,19 @@ export default function POSPage() {
       if (validatedCreditNote.remainingBalance < netTotal) {
         alert(
           `Credit Note balance (Rs. ${validatedCreditNote.remainingBalance.toFixed(2)}) is insufficient for this sale total of Rs. ${netTotal.toFixed(2)}.`
+        );
+        return;
+      }
+    }
+
+    if (paymentMethod === "GIFT_VOUCHER") {
+      if (!validatedGiftVoucher) {
+        alert("Please enter and validate an active Gift Voucher first.");
+        return;
+      }
+      if (validatedGiftVoucher.currentBalance < netTotal) {
+        alert(
+          `Gift Voucher balance (Rs. ${validatedGiftVoucher.currentBalance.toFixed(2)}) is insufficient for this sale total of Rs. ${netTotal.toFixed(2)}.`
         );
         return;
       }
@@ -1217,6 +1287,14 @@ export default function POSPage() {
         paymentMethod === "CREDIT_NOTE" && validatedCreditNote
           ? validatedCreditNote.creditNoteNumber
           : undefined,
+      giftVoucherCode:
+        paymentMethod === "GIFT_VOUCHER" && validatedGiftVoucher
+          ? validatedGiftVoucher.code
+          : undefined,
+      giftVoucherAmount:
+        paymentMethod === "GIFT_VOUCHER" && validatedGiftVoucher
+          ? Math.min(validatedGiftVoucher.currentBalance, netTotal)
+          : undefined,
       subtotal,
       taxTotal: taxAmount,
       netTotal,
@@ -1251,6 +1329,9 @@ export default function POSPage() {
         foreignChangeGiven: salePayload.foreignChangeGiven,
         foreignCurrencySymbol: salePayload.foreignCurrencySymbol,
         paymentReference: salePayload.paymentReference,
+        creditNoteNumber: salePayload.creditNoteNumber,
+        giftVoucherCode: salePayload.giftVoucherCode,
+        giftVoucherAmount: salePayload.giftVoucherAmount,
         subtotal: salePayload.subtotal,
         taxTotal: salePayload.taxTotal,
         netTotal: salePayload.netTotal,
@@ -1308,6 +1389,14 @@ export default function POSPage() {
         pointsRedeemed: redeemLoyaltyPoints ? pointsToRedeem : 0,
         loyaltyDiscount: redeemLoyaltyPoints ? loyaltyResult.discountAmount : 0,
         appliedPromotions: promoResult.appliedPromotions,
+        giftVoucherRedeemed:
+          paymentMethod === "GIFT_VOUCHER" && validatedGiftVoucher
+            ? {
+                code: validatedGiftVoucher.code,
+                amount: Math.min(validatedGiftVoucher.currentBalance, netTotal),
+                remainingBalance: Math.max(0, validatedGiftVoucher.currentBalance - netTotal),
+              }
+            : undefined,
         createdAt: nowIso,
         isOffline: true,
       };
@@ -1328,6 +1417,9 @@ export default function POSPage() {
       setCouponInput("");
       setRedeemLoyaltyPoints(false);
       setPointsToRedeemInput(0);
+      setValidatedGiftVoucher(null);
+      setGiftVoucherCodeInput("");
+      setGiftVoucherError(null);
       refreshQueueCount();
       if (selectedRegister?._id) fetchCurrentShift(selectedRegister._id);
 
@@ -1369,6 +1461,9 @@ export default function POSPage() {
         setCouponInput("");
         setRedeemLoyaltyPoints(false);
         setPointsToRedeemInput(0);
+        setValidatedGiftVoucher(null);
+        setGiftVoucherCodeInput("");
+        setGiftVoucherError(null);
         // Refresh product stock & active shift metrics
         loadInitialData();
         if (selectedRegister?._id) fetchCurrentShift(selectedRegister._id);
@@ -1784,6 +1879,36 @@ export default function POSPage() {
             </div>
           )}
 
+          {/* Matched Customer Loyalty Tier & Birthday Month Banner */}
+          {matchedCustomer && (
+            <div className="px-3 py-1.5 border-b border-indigo-100 bg-gradient-to-r from-indigo-50/80 to-purple-50/80 flex items-center justify-between text-[11px]">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                    customerTier === "PLATINUM"
+                      ? "bg-purple-100 text-purple-800 border border-purple-300"
+                      : customerTier === "GOLD"
+                      ? "bg-amber-100 text-amber-800 border border-amber-300"
+                      : customerTier === "SILVER"
+                      ? "bg-slate-200 text-slate-800 border border-slate-300"
+                      : "bg-blue-100 text-blue-800 border border-blue-200"
+                  }`}
+                >
+                  VIP {customerTier} ({tierMultiplier}x)
+                </span>
+                <span className="text-slate-600 font-medium flex items-center gap-1">
+                  <Award className="w-3 h-3 text-amber-500" />
+                  <strong>{matchedCustomer.loyaltyPoints || 0}</strong> pts
+                </span>
+                {isBirthdayMonth && (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-pink-100 text-pink-700 border border-pink-200 flex items-center gap-1 animate-pulse">
+                    🎂 Birthday Month (2x Bonus!)
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Cart Line Items List */}
           <div className="flex-1 overflow-y-auto p-3 divide-y divide-slate-100">
             {cart.length > 0 ? (
@@ -2181,6 +2306,19 @@ export default function POSPage() {
                   <Ticket className="w-4 h-4" />
                   <span>Credit Voucher (CN-...)</span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod("GIFT_VOUCHER")}
+                  className={`p-3 rounded-xl border flex items-center gap-2.5 text-xs font-semibold transition-all ${
+                    paymentMethod === "GIFT_VOUCHER"
+                      ? "bg-purple-600 text-white border-purple-600 shadow-sm"
+                      : "border-purple-300 bg-purple-50/40 text-purple-900 hover:bg-purple-100/50"
+                  }`}
+                >
+                  <Gift className="w-4 h-4" />
+                  <span>Gift Voucher (GV-...)</span>
+                </button>
               </div>
 
               {/* Cash Change UX Calculator (Dual-Currency Tender Support) */}
@@ -2550,8 +2688,91 @@ export default function POSPage() {
                 </div>
               )}
 
+              {/* Digital Gift Voucher Redemption UX */}
+              {paymentMethod === "GIFT_VOUCHER" && (
+                <div className="p-4 bg-purple-50/70 border border-purple-200 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-purple-200/60">
+                    <div className="flex items-center gap-1.5">
+                      <Gift className="w-4 h-4 text-purple-700" />
+                      <span className="text-xs font-bold text-purple-950">
+                        Redeem Digital Gift Voucher
+                      </span>
+                    </div>
+                    {validatedGiftVoucher ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                        Valid Voucher
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-200 text-purple-900">
+                        Verification Required
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={giftVoucherCodeInput}
+                      onChange={(e) => {
+                        setGiftVoucherCodeInput(e.target.value.toUpperCase());
+                        setValidatedGiftVoucher(null);
+                        setGiftVoucherError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          validateGiftVoucherCode();
+                        }
+                      }}
+                      placeholder="Enter Voucher Code (e.g. GV-20261001-0001)"
+                      className="flex-1 px-3 py-2 text-xs font-mono font-bold uppercase border border-purple-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:outline-none bg-white text-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={validateGiftVoucherCode}
+                      disabled={validatingGiftVoucher || !giftVoucherCodeInput.trim()}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition"
+                    >
+                      {validatingGiftVoucher ? "Checking..." : "Verify Code"}
+                    </button>
+                  </div>
+
+                  {giftVoucherError && (
+                    <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-xs font-medium text-rose-700 flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{giftVoucherError}</span>
+                    </div>
+                  )}
+
+                  {validatedGiftVoucher && (
+                    <div className="p-3 bg-white border border-purple-200 rounded-xl space-y-2 text-xs">
+                      <div className="flex justify-between font-bold text-slate-900">
+                        <span>Voucher: {validatedGiftVoucher.code}</span>
+                        <span className="text-emerald-600 font-extrabold text-sm">
+                          Balance: {formatCurrency(validatedGiftVoucher.currentBalance)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-slate-500 text-[11px]">
+                        <span>Recipient: {validatedGiftVoucher.recipientName || "Bearer"}</span>
+                        <span>Valid Until: {new Date(validatedGiftVoucher.expiryDate).toLocaleDateString()}</span>
+                      </div>
+                      <div className="pt-2 border-t border-dashed border-slate-200 flex justify-between font-semibold">
+                        <span className="text-slate-600">Bill Total:</span>
+                        <span>{formatCurrency(netTotal)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-purple-700">
+                        <span>Remaining on Voucher after purchase:</span>
+                        <span>
+                          {formatCurrency(Math.max(0, validatedGiftVoucher.currentBalance - netTotal))}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Reference note for Card / QR */}
-              {paymentMethod !== "CASH" && paymentMethod !== "CREDIT" && paymentMethod !== "CREDIT_NOTE" && (
+              {paymentMethod !== "CASH" && paymentMethod !== "CREDIT" && paymentMethod !== "CREDIT_NOTE" && paymentMethod !== "GIFT_VOUCHER" && (
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
                     Approval / Reference Code (Optional)
@@ -2820,6 +3041,23 @@ export default function POSPage() {
                       <div className="p-1 border border-dashed border-indigo-600 bg-indigo-50/50 font-bold text-indigo-900 print:text-black">
                         * PAID VIA STORE CREDIT VOUCHER ({completedSale.creditNoteRedeemed?.creditNoteNumber || "VOUCHER"}) *
                       </div>
+                    </div>
+                  )}
+                  {completedSale.paymentMethod === "GIFT_VOUCHER" && (
+                    <div className="pt-2 text-center text-[10px] space-y-1">
+                      <div className="p-1 border border-dashed border-purple-600 bg-purple-50/50 font-bold text-purple-900 print:text-black">
+                        * PAID VIA DIGITAL GIFT VOUCHER ({completedSale.giftVoucherRedeemed?.code || "GIFT VOUCHER"}) *
+                      </div>
+                      {completedSale.giftVoucherRedeemed?.remainingBalance !== undefined && (
+                        <div className="text-[10px] text-purple-800 font-mono">
+                          Remaining Voucher Balance: {formatCurrency(completedSale.giftVoucherRedeemed.remainingBalance)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {completedSale.pointsEarned > 0 && (
+                    <div className="pt-1.5 text-center text-[10px] text-purple-900 font-bold">
+                      ⭐ Loyalty Points Earned: +{completedSale.pointsEarned} pts
                     </div>
                   )}
                 </div>

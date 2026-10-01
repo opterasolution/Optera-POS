@@ -11,6 +11,8 @@ import { Shift } from "@/models/Shift";
 import { CreditTransaction } from "@/models/CreditTransaction";
 import { Promotion } from "@/models/Promotion";
 import { CreditNote } from "@/models/CreditNote";
+import { GiftVoucher } from "@/models/GiftVoucher";
+import { LoyaltyTransaction } from "@/models/LoyaltyTransaction";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 import { createSaleSchema } from "@/lib/validations/sale";
 
@@ -37,6 +39,8 @@ export async function POST(req: Request) {
       cashReceived,
       paymentReference,
       creditNoteNumber,
+      giftVoucherCode,
+      giftVoucherAmount,
       registerId,
       registerName,
       shiftId,
@@ -221,6 +225,9 @@ export async function POST(req: Request) {
       let customerId = undefined;
       let customerDoc: any = null;
       let pointsEarned = 0;
+      let isBirthdayMonth = false;
+      let pointsBeforeRedeem = 0;
+      let pointsAfterRedeem = 0;
 
       if (customerPhone && customerPhone.trim() !== "") {
         customerDoc = await Customer.findOne({
@@ -239,16 +246,37 @@ export async function POST(req: Request) {
             loyaltyPoints: 0,
             lifetimePointsEarned: 0,
             lifetimePointsRedeemed: 0,
+            loyaltyTier: "REGULAR",
           });
         } else {
-          customerDoc.totalSpent += netTotal;
-          customerDoc.visitCount += 1;
+          customerDoc.totalSpent = (customerDoc.totalSpent || 0) + netTotal;
+          customerDoc.visitCount = (customerDoc.visitCount || 0) + 1;
           customerDoc.lastVisit = new Date();
           if (customerName && customerName !== "Walk-in Customer") {
             customerDoc.name = customerName;
           }
         }
         customerId = customerDoc._id;
+
+        // Auto-upgrade loyalty tier based on cumulative spend
+        const totalSpentAll = customerDoc.totalSpent || 0;
+        const tierThresholds = (business?.loyaltySettings as any)?.tierThresholds || {};
+        const platThreshold = tierThresholds.platinum || 150000;
+        const goldThreshold = tierThresholds.gold || 75000;
+        const silverThreshold = tierThresholds.silver || 25000;
+
+        if (totalSpentAll >= platThreshold) {
+          customerDoc.loyaltyTier = "PLATINUM";
+        } else if (totalSpentAll >= goldThreshold) {
+          customerDoc.loyaltyTier = "GOLD";
+        } else if (totalSpentAll >= silverThreshold) {
+          customerDoc.loyaltyTier = "SILVER";
+        } else {
+          customerDoc.loyaltyTier = "REGULAR";
+        }
+
+        pointsBeforeRedeem = customerDoc.loyaltyPoints || 0;
+        pointsAfterRedeem = pointsBeforeRedeem;
 
         // If loyalty points are being redeemed, verify and deduct
         if (pointsRedeemed && pointsRedeemed > 0) {
@@ -272,14 +300,39 @@ export async function POST(req: Request) {
               { status: 400 }
             );
           }
-          customerDoc.loyaltyPoints = Math.max(0, availablePoints - pointsRedeemed);
+          pointsAfterRedeem = Math.max(0, availablePoints - pointsRedeemed);
+          customerDoc.loyaltyPoints = pointsAfterRedeem;
           customerDoc.lifetimePointsRedeemed = (customerDoc.lifetimePointsRedeemed || 0) + pointsRedeemed;
         }
 
-        // Accrue loyalty points earned on this net purchase
+        // Accrue loyalty points earned on this net purchase with Tier Multipliers & Birthday Bonus
         if (business?.loyaltySettings?.enabled !== false && netTotal > 0) {
           const spendPerPoint = business?.loyaltySettings?.pointsPerSpend || 100;
-          pointsEarned = Math.floor(netTotal / spendPerPoint);
+          const basePoints = Math.floor(netTotal / spendPerPoint);
+
+          // Tier multiplier
+          const tierMults = (business?.loyaltySettings as any)?.tierMultipliers || {};
+          let tierMultiplier = 1.0;
+          if (customerDoc.loyaltyTier === "PLATINUM") tierMultiplier = tierMults.platinum || 2.0;
+          else if (customerDoc.loyaltyTier === "GOLD") tierMultiplier = tierMults.gold || 1.5;
+          else if (customerDoc.loyaltyTier === "SILVER") tierMultiplier = tierMults.silver || 1.25;
+          else tierMultiplier = tierMults.regular || 1.0;
+
+          // Birthday bonus check
+          if (customerDoc.dateOfBirth) {
+            const birthMonth = new Date(customerDoc.dateOfBirth).getUTCMonth();
+            const currentMonth = new Date().getUTCMonth();
+            if (birthMonth === currentMonth) {
+              isBirthdayMonth = true;
+            }
+          }
+          const birthdayMultiplier = isBirthdayMonth
+            ? (business?.loyaltySettings as any)?.birthdayMultiplier || 2.0
+            : 1.0;
+
+          const totalPointsMultiplier = tierMultiplier * birthdayMultiplier;
+          pointsEarned = Math.floor(basePoints * totalPointsMultiplier);
+
           customerDoc.loyaltyPoints = (customerDoc.loyaltyPoints || 0) + pointsEarned;
           customerDoc.lifetimePointsEarned = (customerDoc.lifetimePointsEarned || 0) + pointsEarned;
         }
@@ -399,6 +452,75 @@ export async function POST(req: Request) {
         }
       }
 
+      // If payment is GIFT_VOUCHER or giftVoucherCode provided, verify voucher validity and balance
+      let giftVoucherDoc: any = null;
+      let voucherDeductAmount = 0;
+      const targetVoucherCode =
+        giftVoucherCode?.trim().toUpperCase() ||
+        (paymentMethod === "GIFT_VOUCHER" ? paymentReference?.trim().toUpperCase() : undefined);
+
+      if (paymentMethod === "GIFT_VOUCHER" || targetVoucherCode) {
+        if (!targetVoucherCode) {
+          return NextResponse.json(
+            { success: false, error: "A valid Gift Voucher code is required." },
+            { status: 400 }
+          );
+        }
+
+        giftVoucherDoc = await GiftVoucher.findOne({
+          businessId,
+          code: targetVoucherCode,
+        });
+
+        if (!giftVoucherDoc) {
+          return NextResponse.json(
+            { success: false, error: `Gift Voucher "${targetVoucherCode}" not found.` },
+            { status: 400 }
+          );
+        }
+
+        if (giftVoucherDoc.status === "EXPIRED" || (giftVoucherDoc.expiryDate && new Date(giftVoucherDoc.expiryDate) < new Date())) {
+          giftVoucherDoc.status = "EXPIRED";
+          await giftVoucherDoc.save();
+          return NextResponse.json(
+            { success: false, error: `Gift Voucher "${targetVoucherCode}" has expired.` },
+            { status: 400 }
+          );
+        }
+
+        if (giftVoucherDoc.status === "CANCELLED") {
+          return NextResponse.json(
+            { success: false, error: `Gift Voucher "${targetVoucherCode}" has been cancelled.` },
+            { status: 400 }
+          );
+        }
+
+        if (giftVoucherDoc.status === "REDEEMED" || (giftVoucherDoc.currentBalance || 0) <= 0) {
+          return NextResponse.json(
+            { success: false, error: `Gift Voucher "${targetVoucherCode}" has already been fully redeemed.` },
+            { status: 400 }
+          );
+        }
+
+        voucherDeductAmount =
+          paymentMethod === "GIFT_VOUCHER"
+            ? netTotal
+            : Math.min(
+                giftVoucherDoc.currentBalance,
+                giftVoucherAmount && giftVoucherAmount > 0 ? giftVoucherAmount : netTotal
+              );
+
+        if ((giftVoucherDoc.currentBalance || 0) < voucherDeductAmount) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `Gift Voucher balance (Rs. ${giftVoucherDoc.currentBalance.toFixed(2)}) is insufficient for deduction amount of Rs. ${voucherDeductAmount.toFixed(2)}.`,
+            },
+            { status: 400 }
+          );
+        }
+      }
+
       // 8. Determine active shift if not explicitly provided
       let resolvedShiftId = shiftId && shiftId.trim() ? new Types.ObjectId(shiftId) : undefined;
       if (!resolvedShiftId && registerId && registerId.trim()) {
@@ -449,6 +571,18 @@ export async function POST(req: Request) {
                 creditNoteId: creditNoteDoc._id,
                 creditNoteNumber: creditNoteDoc.creditNoteNumber,
                 amount: netTotal,
+              }
+            : undefined,
+        giftVoucherRedeemed:
+          giftVoucherDoc && voucherDeductAmount > 0
+            ? {
+                voucherId: giftVoucherDoc._id,
+                code: giftVoucherDoc.code,
+                amount: voucherDeductAmount,
+                remainingBalance: Math.max(
+                  0,
+                  Math.round((giftVoucherDoc.currentBalance - voucherDeductAmount) * 100) / 100
+                ),
               }
             : undefined,
         billingType: billingType || "RETAIL",
@@ -503,6 +637,59 @@ export async function POST(req: Request) {
           redeemedAt: new Date(),
         });
         await creditNoteDoc.save();
+      }
+
+      // If redeemed via GIFT_VOUCHER, update voucher remaining balance and redemption history
+      if (giftVoucherDoc && voucherDeductAmount > 0) {
+        const newBalance = Math.max(0, Math.round((giftVoucherDoc.currentBalance - voucherDeductAmount) * 100) / 100);
+        giftVoucherDoc.currentBalance = newBalance;
+        if (newBalance <= 0) {
+          giftVoucherDoc.status = "REDEEMED";
+        }
+        giftVoucherDoc.redemptionHistory.push({
+          saleId: sale._id,
+          invoiceNumber,
+          amount: voucherDeductAmount,
+          balanceAfter: newBalance,
+          redeemedAt: new Date(),
+          cashierName: context.username || "Cashier",
+        });
+        await giftVoucherDoc.save();
+      }
+
+      // Audit log customer loyalty points activity
+      if (customerDoc && pointsRedeemed && pointsRedeemed > 0) {
+        await LoyaltyTransaction.create({
+          businessId,
+          customerId: customerDoc._id,
+          type: "REDEEM",
+          points: -pointsRedeemed,
+          pointsBefore: pointsBeforeRedeem,
+          pointsAfter: pointsAfterRedeem,
+          saleId: sale._id,
+          invoiceNumber,
+          description: `Redeemed ${pointsRedeemed} points for Rs. ${(loyaltyDiscount || pointsRedeemed).toLocaleString()} discount on ${invoiceNumber}`,
+          performedBy: context.userId,
+          performedByName: context.username || "Cashier",
+        });
+      }
+
+      if (customerDoc && pointsEarned > 0) {
+        await LoyaltyTransaction.create({
+          businessId,
+          customerId: customerDoc._id,
+          type: isBirthdayMonth ? "BIRTHDAY_BONUS" : "EARN",
+          points: pointsEarned,
+          pointsBefore: pointsAfterRedeem,
+          pointsAfter: pointsAfterRedeem + pointsEarned,
+          saleId: sale._id,
+          invoiceNumber,
+          description: isBirthdayMonth
+            ? `Earned ${pointsEarned} pts on ${invoiceNumber} (${customerDoc.loyaltyTier} tier + Birthday Month 2x bonus)`
+            : `Earned ${pointsEarned} pts on ${invoiceNumber} (${customerDoc.loyaltyTier} tier)`,
+          performedBy: context.userId,
+          performedByName: context.username || "Cashier",
+        });
       }
 
       // If credit sale, record in CreditTransaction passbook

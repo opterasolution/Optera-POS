@@ -140,7 +140,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { name, phone, email, address, notes, creditAllowed, creditLimit, nicNumber } = parsed.data;
+    const { name, phone, email, address, notes, creditAllowed, creditLimit, nicNumber, dateOfBirth, loyaltyTier } = parsed.data;
     const normalizedPhone = normalizeSLPhone(phone);
 
     if (Boolean(process.env.MONGODB_URI)) {
@@ -175,6 +175,8 @@ export async function POST(req: Request) {
         creditLimit: Number(creditLimit) || 0,
         currentBalance: 0,
         nicNumber: nicNumber?.trim() || undefined,
+        dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
+        loyaltyTier: loyaltyTier || "REGULAR",
       });
 
       await AuditLog.create({

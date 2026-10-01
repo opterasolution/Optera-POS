@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document, Model, Types } from "mongoose";
 
-export type PaymentMethod = "CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CREDIT" | "CREDIT_NOTE" | "OTHER";
+export type PaymentMethod = "CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CREDIT" | "CREDIT_NOTE" | "GIFT_VOUCHER" | "OTHER";
 export type SaleStatus = "COMPLETED" | "CANCELLED" | "REFUNDED";
 export type SaleReturnStatus = "NONE" | "PARTIAL" | "FULLY_RETURNED";
 
@@ -57,6 +57,12 @@ export interface ISale extends Document {
     creditNoteId?: Types.ObjectId;
     creditNoteNumber: string;
     amount: number;
+  };
+  giftVoucherRedeemed?: {
+    voucherId?: Types.ObjectId;
+    code: string;
+    amount: number;
+    remainingBalance: number;
   };
   billingType?: "RETAIL" | "WHOLESALE";
   isTaxInvoice?: boolean;
@@ -133,7 +139,7 @@ const SaleSchema = new Schema<ISale>(
     netTotal: { type: Number, required: true, min: 0 },
     paymentMethod: {
       type: String,
-      enum: ["CASH", "CARD", "QR", "BANK_TRANSFER", "CREDIT", "CREDIT_NOTE", "OTHER"],
+      enum: ["CASH", "CARD", "QR", "BANK_TRANSFER", "CREDIT", "CREDIT_NOTE", "GIFT_VOUCHER", "OTHER"],
       required: true,
     },
     cashReceived: { type: Number, min: 0 },
@@ -167,6 +173,12 @@ const SaleSchema = new Schema<ISale>(
       creditNoteId: { type: Schema.Types.ObjectId, ref: "CreditNote" },
       creditNoteNumber: { type: String, trim: true },
       amount: { type: Number, min: 0 },
+    },
+    giftVoucherRedeemed: {
+      voucherId: { type: Schema.Types.ObjectId, ref: "GiftVoucher" },
+      code: { type: String, trim: true },
+      amount: { type: Number, min: 0 },
+      remainingBalance: { type: Number, min: 0 },
     },
     billingType: { type: String, enum: ["RETAIL", "WHOLESALE"], default: "RETAIL" },
     isTaxInvoice: { type: Boolean, default: false },
