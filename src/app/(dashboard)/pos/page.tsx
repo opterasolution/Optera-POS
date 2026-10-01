@@ -51,6 +51,7 @@ import {
   ShieldAlert,
   KeyRound,
   Globe,
+  UserCheck,
 } from "lucide-react";
 import SupervisorOverrideModal from "@/components/pos/SupervisorOverrideModal";
 import ShiftZReportReceipt, { ShiftZReportData } from "@/components/receipts/ShiftZReportReceipt";
@@ -211,6 +212,10 @@ export default function POSPage() {
   const [validatedGiftVoucher, setValidatedGiftVoucher] = useState<any | null>(null);
   const [validatingGiftVoucher, setValidatingGiftVoucher] = useState(false);
   const [giftVoucherError, setGiftVoucherError] = useState<string | null>(null);
+
+  // Sales Rep / Floor Attendant Selection State (Milestone 23)
+  const [salesReps, setSalesReps] = useState<Array<{ _id: string; name: string; username: string; role: string }>>([]);
+  const [selectedSalesRepId, setSelectedSalesRepId] = useState<string>("");
 
   const [submittingSale, setSubmittingSale] = useState(false);
 
@@ -657,22 +662,24 @@ export default function POSPage() {
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const [prodRes, catRes, bizRes, regRes, promoRes, currRes] = await Promise.all([
+      const [prodRes, catRes, bizRes, regRes, promoRes, currRes, staffRes] = await Promise.all([
         fetch("/api/products"),
         fetch("/api/categories"),
         fetch("/api/business"),
         fetch("/api/registers"),
         fetch("/api/promotions"),
         fetch("/api/currencies"),
+        fetch("/api/staff"),
       ]);
 
-      const [prodData, catData, bizData, regData, promoData, currData] = await Promise.all([
+      const [prodData, catData, bizData, regData, promoData, currData, staffData] = await Promise.all([
         prodRes.json(),
         catRes.json(),
         bizRes.json(),
         regRes.json(),
         promoRes.json(),
         currRes.json(),
+        staffRes.json(),
       ]);
 
       const fetchedProducts = prodData.success ? prodData.products || [] : [];
@@ -689,6 +696,9 @@ export default function POSPage() {
       }
       if (currData?.success && currData.currencySettings) {
         setCurrencySettings(currData.currencySettings);
+      }
+      if (staffData?.success && staffData.staff) {
+        setSalesReps(staffData.staff.filter((s: any) => s.isActive));
       }
 
       if (regData.success && fetchedRegisters.length > 0) {
@@ -1362,6 +1372,8 @@ export default function POSPage() {
       })),
       customerName: customerName.trim() || "Walk-in Customer",
       customerPhone: customerPhone.trim() || undefined,
+      salesRepId: selectedSalesRepId || undefined,
+      salesRepName: salesReps.find((s) => s._id === selectedSalesRepId)?.name || undefined,
       discountTotal: totalDiscount,
       paymentMethod,
       tenderCurrency: paymentMethod === "CASH" ? tenderCurrency : "LKR",
@@ -2267,6 +2279,29 @@ export default function POSPage() {
                 <div className="text-3xl font-black text-blue-950 font-mono mt-0.5">
                   {formatCurrency(netTotal)}
                 </div>
+              </div>
+
+              {/* Floor Attendant / Sales Rep Selector (Milestone 23) */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-700 font-bold flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Attendant / Sales Rep</span>
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-medium">Performance & Commission</span>
+                </div>
+                <select
+                  value={selectedSalesRepId}
+                  onChange={(e) => setSelectedSalesRepId(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">{session?.user?.name || "Logged-in Cashier"} (Default)</option>
+                  {salesReps.map((rep) => (
+                    <option key={rep._id} value={rep._id}>
+                      {rep.name} ({rep.role})
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Customer Loyalty Points Redemption Block */}

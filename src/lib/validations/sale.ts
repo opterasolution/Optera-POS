@@ -54,6 +54,8 @@ export const createSaleSchema = z.object({
   foreignCashReceived: z.number().min(0).optional(),
   foreignChangeGiven: z.number().min(0).optional(),
   foreignCurrencySymbol: z.string().optional(),
+  salesRepId: z.string().optional().or(z.literal("")),
+  salesRepName: z.string().optional().or(z.literal("")),
 });
 
 export type CreateSaleInput = z.infer<typeof createSaleSchema>;

@@ -92,6 +92,10 @@ export interface ISale extends Document {
   foreignCashReceived?: number;
   foreignChangeGiven?: number;
   foreignCurrencySymbol?: string;
+  salesRepId?: Types.ObjectId;
+  salesRepName?: string;
+  commissionAmount?: number;
+  commissionRuleId?: Types.ObjectId;
   status: SaleStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -212,6 +216,10 @@ const SaleSchema = new Schema<ISale>(
     foreignCashReceived: { type: Number },
     foreignChangeGiven: { type: Number },
     foreignCurrencySymbol: { type: String, default: "Rs." },
+    salesRepId: { type: Schema.Types.ObjectId, ref: "User", index: true },
+    salesRepName: { type: String, trim: true },
+    commissionAmount: { type: Number, default: 0, min: 0 },
+    commissionRuleId: { type: Schema.Types.ObjectId, ref: "CommissionRule" },
     status: {
       type: String,
       enum: ["COMPLETED", "CANCELLED", "REFUNDED"],
@@ -225,6 +233,8 @@ SaleSchema.index({ businessId: 1, invoiceNumber: 1 }, { unique: true });
 SaleSchema.index({ businessId: 1, offlineId: 1 }, { sparse: true });
 SaleSchema.index({ businessId: 1, registerId: 1, createdAt: -1 });
 SaleSchema.index({ businessId: 1, shiftId: 1 });
+SaleSchema.index({ businessId: 1, salesRepId: 1, createdAt: -1 });
+SaleSchema.index({ businessId: 1, cashierId: 1, createdAt: -1 });
 SaleSchema.index({ businessId: 1, createdAt: -1 });
 
 export const Sale: Model<ISale> =

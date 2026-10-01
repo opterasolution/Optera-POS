@@ -6,9 +6,11 @@ import { AuditLog } from "@/models/AuditLog";
 import { requireRole } from "@/lib/tenant";
 import { createStaffSchema } from "@/lib/validations/staff";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
-    const context = await requireRole(["OWNER"]);
+    const context = await requireRole(["OWNER", "MANAGER", "SUPERVISOR", "ACCOUNTANT"]);
 
     if (Boolean(process.env.MONGODB_URI)) {
       await connectToDatabase();
@@ -26,6 +28,8 @@ export async function GET() {
         role: u.role,
         phone: u.phone,
         hasSupervisorPin: !!u.supervisorPin,
+        commissionRate: u.commissionRate || 0,
+        monthlyTargetAmount: u.monthlyTargetAmount || 0,
         isActive: u.isActive,
         createdAt: u.createdAt,
       }));
@@ -89,7 +93,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { name, username, password, role, phone, supervisorPin } = parsed.data;
+    const { name, username, password, role, phone, supervisorPin, commissionRate, monthlyTargetAmount } = parsed.data;
 
     if (Boolean(process.env.MONGODB_URI)) {
       await connectToDatabase();
@@ -121,6 +125,8 @@ export async function POST(req: Request) {
         role,
         phone: phone || undefined,
         supervisorPin: hashedPin,
+        commissionRate: commissionRate !== undefined ? Number(commissionRate) : 0,
+        monthlyTargetAmount: monthlyTargetAmount !== undefined ? Number(monthlyTargetAmount) : 0,
         isActive: true,
       });
 

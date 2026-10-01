@@ -16,6 +16,7 @@ export const createStaffSchema = z.object({
     "INVENTORY_CLERK",
     "ACCOUNTANT",
     "CASHIER",
+    "SALES_REP",
   ]),
   phone: z.string().optional().or(z.literal("")),
   supervisorPin: z
@@ -23,6 +24,8 @@ export const createStaffSchema = z.object({
     .regex(/^\d{4,6}$/, "Supervisor PIN must be 4 to 6 digits")
     .optional()
     .or(z.literal("")),
+  commissionRate: z.number().min(0).max(100).optional(),
+  monthlyTargetAmount: z.number().min(0).optional(),
 });
 
 export const updateStaffSchema = z.object({
@@ -36,6 +39,7 @@ export const updateStaffSchema = z.object({
       "INVENTORY_CLERK",
       "ACCOUNTANT",
       "CASHIER",
+      "SALES_REP",
     ])
     .optional(),
   phone: z.string().optional().or(z.literal("")),
@@ -44,6 +48,8 @@ export const updateStaffSchema = z.object({
     .regex(/^\d{4,6}$/, "Supervisor PIN must be 4 to 6 digits")
     .optional()
     .or(z.literal("")),
+  commissionRate: z.number().min(0).max(100).optional(),
+  monthlyTargetAmount: z.number().min(0).optional(),
   isActive: z.boolean().optional(),
 });
 

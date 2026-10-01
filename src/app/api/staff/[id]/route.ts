@@ -6,6 +6,8 @@ import { AuditLog } from "@/models/AuditLog";
 import { requireRole } from "@/lib/tenant";
 import { updateStaffSchema } from "@/lib/validations/staff";
 
+export const dynamic = "force-dynamic";
+
 interface RouteParams {
   params: { id: string };
 }
@@ -68,7 +70,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       );
     }
 
-    const { name, password, role, phone, supervisorPin, isActive } = parsed.data;
+    const { name, password, role, phone, supervisorPin, isActive, commissionRate, monthlyTargetAmount } = parsed.data;
 
     if (Boolean(process.env.MONGODB_URI)) {
       await connectToDatabase();
@@ -95,6 +97,8 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       if (phone !== undefined) updateFields.phone = phone || undefined;
       if (role) updateFields.role = role;
       if (typeof isActive === "boolean") updateFields.isActive = isActive;
+      if (commissionRate !== undefined) updateFields.commissionRate = Number(commissionRate) || 0;
+      if (monthlyTargetAmount !== undefined) updateFields.monthlyTargetAmount = Number(monthlyTargetAmount) || 0;
 
       if (password && password.trim().length >= 4) {
         updateFields.password = await bcrypt.hash(password.trim(), 10);

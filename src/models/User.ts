@@ -7,7 +7,8 @@ export type UserRole =
   | "SUPERVISOR"
   | "INVENTORY_CLERK"
   | "ACCOUNTANT"
-  | "CASHIER";
+  | "CASHIER"
+  | "SALES_REP";
 
 export interface IUser extends Document {
   businessId?: Types.ObjectId; // Optional for SUPER_ADMIN
@@ -17,6 +18,8 @@ export interface IUser extends Document {
   role: UserRole;
   phone?: string;
   supervisorPin?: string; // 4-6 digit numeric PIN (hashed with bcrypt)
+  commissionRate?: number; // Default flat % commission (e.g. 2.5)
+  monthlyTargetAmount?: number; // Default monthly sales quota in LKR (e.g. 500000)
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -49,12 +52,15 @@ const UserSchema = new Schema<IUser>(
         "INVENTORY_CLERK",
         "ACCOUNTANT",
         "CASHIER",
+        "SALES_REP",
       ],
       default: "CASHIER",
       required: true,
     },
     phone: { type: String, trim: true },
     supervisorPin: { type: String },
+    commissionRate: { type: Number, default: 0, min: 0 },
+    monthlyTargetAmount: { type: Number, default: 0, min: 0 },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

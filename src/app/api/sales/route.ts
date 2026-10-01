@@ -13,6 +13,10 @@ import { Promotion } from "@/models/Promotion";
 import { CreditNote } from "@/models/CreditNote";
 import { GiftVoucher } from "@/models/GiftVoucher";
 import { LoyaltyTransaction } from "@/models/LoyaltyTransaction";
+import { User } from "@/models/User";
+import { CommissionRule } from "@/models/CommissionRule";
+import { SalesTarget } from "@/models/SalesTarget";
+import { calculateSaleCommission } from "@/lib/commission";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 import { createSaleSchema } from "@/lib/validations/sale";
 
@@ -58,6 +62,8 @@ export async function POST(req: Request) {
       foreignCashReceived,
       foreignChangeGiven,
       foreignCurrencySymbol,
+      salesRepId,
+      salesRepName,
     } = parsed.data;
 
     if (Boolean(process.env.MONGODB_URI)) {
@@ -534,12 +540,51 @@ export async function POST(req: Request) {
         }
       }
 
+      // Determine Sales Rep and calculate Staff Commission
+      const resolvedSalesRepId =
+        salesRepId && Types.ObjectId.isValid(salesRepId) ? new Types.ObjectId(salesRepId) : undefined;
+      let resolvedSalesRepName = salesRepName?.trim() || undefined;
+
+      const staffTargetUserId = resolvedSalesRepId || context.userId;
+      const staffUser = await User.findById(staffTargetUserId).lean();
+      if (!resolvedSalesRepName && staffUser) {
+        resolvedSalesRepName = staffUser.name;
+      }
+
+      // Fetch active commission rules
+      const activeCommissionRules = await CommissionRule.find({
+        businessId,
+        isActive: true,
+      }).lean();
+
+      const itemsForComm = verifiedItems.map((item) => {
+        const prod = productMap.get(item.productId.toString());
+        return {
+          productId: item.productId,
+          categoryId: prod?.categoryId,
+          total: item.total,
+        };
+      });
+
+      const commResult = calculateSaleCommission({
+        saleTotal: netTotal,
+        items: itemsForComm,
+        staffUserId: staffTargetUserId,
+        staffRole: staffUser?.role || "CASHIER",
+        staffCustomRate: staffUser?.commissionRate || 0,
+        activeRules: activeCommissionRules,
+      });
+
       // 9. Create Sale record
       const sale = await Sale.create({
         businessId,
         invoiceNumber,
         cashierId: context.userId,
         cashierName: context.username || "Cashier",
+        salesRepId: resolvedSalesRepId || (staffUser ? staffUser._id : undefined),
+        salesRepName: resolvedSalesRepName || (staffUser ? staffUser.name : context.username),
+        commissionAmount: commResult.commissionAmount,
+        commissionRuleId: commResult.ruleId,
         customerId,
         customerName: customerName || "Walk-in Customer",
         customerPhone: customerPhone || undefined,
@@ -622,6 +667,29 @@ export async function POST(req: Request) {
             : tenderCurrency || "Rs."),
         status: "COMPLETED",
       });
+
+      // Update active Sales Target for this staff member
+      try {
+        const now = new Date();
+        const activeTarget = await SalesTarget.findOne({
+          businessId,
+          userId: staffTargetUserId,
+          startDate: { $lte: now },
+          endDate: { $gte: now },
+          status: "IN_PROGRESS",
+        });
+
+        if (activeTarget) {
+          activeTarget.achievedAmount = (activeTarget.achievedAmount || 0) + netTotal;
+          activeTarget.achievedUnits = (activeTarget.achievedUnits || 0) + verifiedItems.length;
+          if (activeTarget.achievedAmount >= activeTarget.targetAmount) {
+            activeTarget.status = "ACHIEVED";
+          }
+          await activeTarget.save();
+        }
+      } catch (targetErr) {
+        console.error("Failed to update sales target:", targetErr);
+      }
 
       // If redeemed via CREDIT_NOTE, update voucher remaining balance and redemption log
       if (paymentMethod === "CREDIT_NOTE" && creditNoteDoc) {
