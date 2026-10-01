@@ -78,6 +78,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { label: "Transfers & Branches", href: "/transfers", icon: Truck, allowed: isManager || isInventoryClerk },
     { label: "Sales History", href: "/sales", icon: Receipt },
     { label: "Invoices & B2B", href: "/invoices", icon: FileSpreadsheet, allowed: isManager || isSupervisor || isAccountant },
+    { label: "Quotations & Estimates", href: "/quotations", icon: FileText, allowed: isManager || isSupervisor || isAccountant },
     { label: "Returns & Credit Notes", href: "/returns", icon: RotateCcw },
     { label: "Shifts & Drawers", href: "/shifts", icon: Clock },
     { label: "Expenses & Petty Cash", href: "/expenses", icon: Wallet, allowed: isManager || isSupervisor || isAccountant },

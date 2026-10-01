@@ -10,6 +10,8 @@ import { CreditTransaction } from "@/models/CreditTransaction";
 import { AuditLog } from "@/models/AuditLog";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(
   req: Request,
   { params }: { params: { id: string } }
@@ -91,6 +93,46 @@ export async function POST(
     const invoiceNumber = `INV-${todayStr}-${String(countToday + 1).padStart(4, "0")}`;
 
     const isCredit = paymentMethod === "CREDIT";
+    let creditCustomerDoc: any = null;
+
+    if (isCredit) {
+      if (!quotation.customerId) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Credit invoice conversion requires this quotation to be linked to a registered customer account.",
+          },
+          { status: 400 }
+        );
+      }
+      creditCustomerDoc = await Customer.findOne({ _id: quotation.customerId, businessId });
+      if (!creditCustomerDoc) {
+        return NextResponse.json(
+          { success: false, error: "Linked customer account not found." },
+          { status: 404 }
+        );
+      }
+      if (!creditCustomerDoc.creditAllowed) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `${creditCustomerDoc.name} is not permitted for credit purchases. Please enable credit allowance in Customer settings.`,
+          },
+          { status: 400 }
+        );
+      }
+      const projectedBalance = (creditCustomerDoc.currentBalance || 0) + quotation.netTotal;
+      if (projectedBalance > (creditCustomerDoc.creditLimit || 0)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Credit limit exceeded! Customer Limit: Rs. ${(creditCustomerDoc.creditLimit || 0).toFixed(2)}, Current Balance: Rs. ${(creditCustomerDoc.currentBalance || 0).toFixed(2)}, Invoice Amount: Rs. ${quotation.netTotal.toFixed(2)}.`,
+          },
+          { status: 400 }
+        );
+      }
+    }
+
     const paymentStatus = isCredit ? "UNPAID" : "PAID";
     const amountPaid = isCredit ? 0 : quotation.netTotal;
     const balanceDue = isCredit ? quotation.netTotal : 0;
@@ -169,29 +211,26 @@ export async function POST(
     }
 
     // 6. If credit invoice and customer exists, update credit ledger
-    if (isCredit && quotation.customerId) {
-      const customer = await Customer.findOne({ _id: quotation.customerId, businessId });
-      if (customer) {
-        customer.currentBalance = (customer.currentBalance || 0) + quotation.netTotal;
-        customer.totalSpent = (customer.totalSpent || 0) + quotation.netTotal;
-        customer.lastVisit = new Date();
-        await customer.save();
+    if (isCredit && creditCustomerDoc) {
+      creditCustomerDoc.currentBalance = (creditCustomerDoc.currentBalance || 0) + quotation.netTotal;
+      creditCustomerDoc.totalSpent = (creditCustomerDoc.totalSpent || 0) + quotation.netTotal;
+      creditCustomerDoc.lastVisit = new Date();
+      await creditCustomerDoc.save();
 
-        const txnNumber = `CR-TXN-${todayStr}-${String(Date.now()).slice(-4)}`;
-        await CreditTransaction.create({
-          businessId,
-          customerId: customer._id,
-          saleId: sale._id,
-          type: "INVOICE_PURCHASE",
-          transactionNumber: txnNumber,
-          amount: quotation.netTotal,
-          previousBalance: customer.currentBalance - quotation.netTotal,
-          newBalance: customer.currentBalance,
-          notes: `B2B Tax Invoice ${invoiceNumber} (Converted from ${quotation.quotationNumber})`,
-          dueDate: dueDate ? new Date(dueDate) : undefined,
-          recordedBy: context.username || "Staff",
-        });
-      }
+      const txnNumber = `CR-TXN-${todayStr}-${String(Date.now()).slice(-4)}`;
+      await CreditTransaction.create({
+        businessId,
+        customerId: creditCustomerDoc._id,
+        saleId: sale._id,
+        type: "INVOICE_PURCHASE",
+        transactionNumber: txnNumber,
+        amount: quotation.netTotal,
+        previousBalance: creditCustomerDoc.currentBalance - quotation.netTotal,
+        newBalance: creditCustomerDoc.currentBalance,
+        notes: `B2B Tax Invoice ${invoiceNumber} (Converted from ${quotation.quotationNumber})`,
+        dueDate: dueDate ? new Date(dueDate) : undefined,
+        recordedBy: context.username || "Staff",
+      });
     }
 
     // 7. Update Quotation status to CONVERTED

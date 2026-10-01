@@ -5,6 +5,8 @@ import { AuditLog } from "@/models/AuditLog";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 import { updateQuotationSchema } from "@/lib/validations/quotation";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   req: Request,
   { params }: { params: { id: string } }

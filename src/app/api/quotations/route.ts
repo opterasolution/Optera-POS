@@ -8,6 +8,8 @@ import { AuditLog } from "@/models/AuditLog";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 import { createQuotationSchema } from "@/lib/validations/quotation";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: Request) {
   try {
     const context = await requireAuth();
@@ -23,6 +25,16 @@ export async function GET(req: Request) {
 
     await connectToDatabase();
     const businessId = context.businessId;
+
+    // Auto-update expired quotations
+    await Quotation.updateMany(
+      {
+        businessId,
+        status: { $in: ["DRAFT", "SENT"] },
+        validUntil: { $lt: new Date() },
+      },
+      { $set: { status: "EXPIRED" } }
+    );
 
     const filter: Record<string, unknown> = { businessId };
 

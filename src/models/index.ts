@@ -22,3 +22,5 @@ export { CreditNote, type ICreditNote, type ICreditNoteRedemption, type CreditNo
 export { Expense, type IExpense, type ExpenseCategory, type ExpensePaymentMethod, type ExpensePaidFrom } from "./Expense";
 export { LoyaltyTransaction, type ILoyaltyTransaction, type LoyaltyTransactionType } from "./LoyaltyTransaction";
 export { GiftVoucher, type IGiftVoucher, type IVoucherRedemption, type VoucherStatus } from "./GiftVoucher";
+export { Quotation, type IQuotation, type IQuotationItem, type QuotationStatus } from "./Quotation";
+

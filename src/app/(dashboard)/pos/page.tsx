@@ -34,6 +34,7 @@ import {
   ArrowUpRight,
   DollarSign,
   FileText,
+  FileSpreadsheet,
   BookOpen,
   Wallet,
   MessageSquare,
@@ -243,6 +244,12 @@ export default function POSPage() {
   const [buyerCompanyName, setBuyerCompanyName] = useState("");
   const [buyerTin, setBuyerTin] = useState("");
   const [buyerVatNumber, setBuyerVatNumber] = useState("");
+
+  // Quotation Inward Loading State
+  const [isLoadQuoteModalOpen, setIsLoadQuoteModalOpen] = useState(false);
+  const [quoteSearchInput, setQuoteSearchInput] = useState("");
+  const [activeQuotesList, setActiveQuotesList] = useState<any[]>([]);
+  const [loadingActiveQuotes, setLoadingActiveQuotes] = useState(false);
 
   // Customer Credit & Quick Debt Settlement State
   const [matchedCustomer, setMatchedCustomer] = useState<any | null>(null);
@@ -561,6 +568,89 @@ export default function POSPage() {
     } finally {
       setSubmittingCreditSettlement(false);
     }
+  };
+
+  // Fetch active quotations for loading into POS cart
+  const fetchActiveQuotations = async (query = "") => {
+    setLoadingActiveQuotes(true);
+    try {
+      const url = query.trim()
+        ? `/api/quotations?q=${encodeURIComponent(query.trim())}`
+        : `/api/quotations?status=ACCEPTED`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.success) {
+        setActiveQuotesList(data.quotations || []);
+      }
+    } catch {
+      console.warn("Error fetching quotations in POS");
+    } finally {
+      setLoadingActiveQuotes(false);
+    }
+  };
+
+  const handleOpenLoadQuoteModal = () => {
+    setIsLoadQuoteModalOpen(true);
+    setQuoteSearchInput("");
+    fetchActiveQuotations();
+  };
+
+  const handleApplyQuotationToCart = (quote: any) => {
+    if (cart.length > 0) {
+      if (
+        !confirm(
+          `Your cart already contains ${cart.length} item(s). Loading this quotation will replace the active order. Proceed?`
+        )
+      ) {
+        return;
+      }
+    }
+
+    const newCartItems: CartItem[] = quote.items.map((it: any) => {
+      const matchedProd = products.find((p) => p._id === (it.productId?._id || it.productId));
+      return {
+        productId: it.productId?._id || it.productId,
+        name: it.name,
+        barcode: it.barcode || matchedProd?.barcode,
+        sellingPrice: it.unitPrice,
+        wholesalePrice: it.priceTier === "WHOLESALE" ? it.unitPrice : matchedProd?.wholesalePrice,
+        wholesaleMinQty: matchedProd?.wholesaleMinQty,
+        unitPrice: it.unitPrice,
+        costPrice: it.costPrice || matchedProd?.costPrice || 0,
+        quantity: it.quantity,
+        stockQuantity: matchedProd ? matchedProd.stockQuantity : 999,
+        unit: matchedProd?.unit || "pcs",
+        discount: it.discount || 0,
+      };
+    });
+
+    setCart(newCartItems);
+    setCustomerName(quote.customerName || "Customer");
+    setCustomerPhone(quote.customerPhone || "");
+    if (quote.companyName) {
+      setBuyerCompanyName(quote.companyName);
+    }
+    if (quote.tin) setBuyerTin(quote.tin);
+    if (quote.vatNumber) setBuyerVatNumber(quote.vatNumber);
+
+    const hasWholesale = quote.items.some((it: any) => it.priceTier === "WHOLESALE");
+    if (hasWholesale || quote.companyName) {
+      setBillingMode("WHOLESALE");
+    }
+
+    if (quote.taxBreakdown?.ssclAmount > 0 || quote.taxBreakdown?.vatAmount > 0) {
+      setIsTaxInvoice(true);
+    }
+
+    if (quote.discountTotal > 0) {
+      setOrderDiscount(quote.discountTotal);
+    }
+
+    setIsLoadQuoteModalOpen(false);
+    setStatusMessage({
+      type: "success",
+      text: `Quotation ${quote.quotationNumber} loaded into cart (${quote.items.length} items, ${formatCurrency(quote.netTotal)}). Ready for checkout.`,
+    });
   };
 
   // Load Products, Categories, Registers, and Business Settings (with offline fallback cache)
@@ -1813,14 +1903,26 @@ export default function POSPage() {
               </span>
             </div>
 
-            {cart.length > 0 && (
+            <div className="flex items-center gap-1.5">
               <button
-                onClick={clearCart}
-                className="text-[11px] text-rose-600 hover:text-rose-800 font-semibold flex items-center gap-1"
+                type="button"
+                onClick={handleOpenLoadQuoteModal}
+                className="text-[11px] text-purple-700 hover:text-purple-900 font-bold flex items-center gap-1 px-2 py-0.5 rounded border border-purple-200 bg-purple-50 hover:bg-purple-100 transition shadow-2xs"
+                title="Load Approved Quotation into Cart"
               >
-                <Trash2 className="w-3 h-3" /> Clear
+                <FileSpreadsheet className="w-3 h-3" />
+                <span>Quote</span>
               </button>
-            )}
+
+              {cart.length > 0 && (
+                <button
+                  onClick={clearCart}
+                  className="text-[11px] text-rose-600 hover:text-rose-800 font-semibold flex items-center gap-1 ml-1"
+                >
+                  <Trash2 className="w-3 h-3" /> Clear
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Customer Selection Bar */}
@@ -3934,6 +4036,126 @@ export default function POSPage() {
             settlement={activeSettlementSlip}
             onClose={() => setActiveSettlementSlip(null)}
           />
+        )}
+
+        {/* ================= LOAD QUOTATION INTO POS COUNTER CART MODAL ================= */}
+        {isLoadQuoteModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+            <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[85vh]">
+              <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-purple-400" />
+                  <div>
+                    <h3 className="font-bold text-sm">Load Quotation into POS Cart</h3>
+                    <p className="text-[10px] text-slate-400">
+                      Import approved B2B estimates directly into active checkout counter
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsLoadQuoteModalOpen(false)}
+                  className="p-1 text-slate-400 hover:text-white rounded"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-4 border-b border-slate-100 bg-slate-50 shrink-0">
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Search Quote # (e.g. QT-20261001-0001) or Customer..."
+                      value={quoteSearchInput}
+                      onChange={(e) => setQuoteSearchInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          fetchActiveQuotations(quoteSearchInput);
+                        }
+                      }}
+                      className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-xl text-xs bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => fetchActiveQuotations(quoteSearchInput)}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition"
+                  >
+                    Search
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-4 overflow-y-auto flex-1 divide-y divide-slate-100 text-xs">
+                {loadingActiveQuotes ? (
+                  <div className="py-8 text-center text-slate-400">
+                    <RefreshCw className="w-5 h-5 animate-spin mx-auto text-purple-600 mb-2" />
+                    Searching quotations...
+                  </div>
+                ) : activeQuotesList.length === 0 ? (
+                  <div className="py-8 text-center text-slate-400">
+                    No open quotations found. Type a quotation number above to search.
+                  </div>
+                ) : (
+                  activeQuotesList.map((qt) => {
+                    const isExpired = new Date(qt.validUntil) < new Date();
+                    return (
+                      <div key={qt._id} className="py-3 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-slate-900">{qt.quotationNumber}</span>
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                qt.status === "CONVERTED"
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : isExpired
+                                  ? "bg-rose-100 text-rose-800"
+                                  : "bg-purple-100 text-purple-800"
+                              }`}
+                            >
+                              {qt.status}
+                            </span>
+                          </div>
+                          <div className="font-semibold text-slate-700 truncate">
+                            {qt.companyName || qt.customerName}
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-mono">
+                            {qt.items?.length || 0} items • Valid: {new Date(qt.validUntil).toLocaleDateString()}
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <div className="font-mono font-bold text-purple-700 text-sm">
+                            {formatCurrency(qt.netTotal)}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleApplyQuotationToCart(qt)}
+                            disabled={qt.status === "CONVERTED"}
+                            className="mt-1 px-3 py-1 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white font-bold text-xs rounded-lg transition shadow-xs"
+                          >
+                            Load to Cart
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="p-3 bg-slate-50 border-t border-slate-200 text-right shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsLoadQuoteModalOpen(false)}
+                  className="px-3.5 py-1.5 border border-slate-200 hover:bg-slate-100 rounded-xl font-bold text-xs text-slate-700"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* ================= SUPERVISOR OVERRIDE ACTION GATE MODAL ================= */}
