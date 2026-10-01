@@ -9,6 +9,8 @@ import { InventoryMovement } from "@/models/InventoryMovement";
 import { AuditLog } from "@/models/AuditLog";
 import { requireAuth, requireRole } from "@/lib/tenant";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: Request) {
   try {
     const context = await requireAuth();

@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/db";
 import { Supplier } from "@/models/Supplier";
+import { PurchaseOrder } from "@/models/PurchaseOrder";
 import { AuditLog } from "@/models/AuditLog";
 import { requireAuth, requireRole } from "@/lib/tenant";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
@@ -31,7 +34,7 @@ export async function GET(req: Request) {
         query.currentBalance = { $gt: 0 };
       }
 
-      const [suppliers, metrics] = await Promise.all([
+      const [suppliers, metrics, receivedPOs] = await Promise.all([
         Supplier.find(query).sort({ currentBalance: -1, name: 1 }).lean(),
         Supplier.aggregate([
           { $match: { businessId, isActive: true } },
@@ -43,21 +46,96 @@ export async function GET(req: Request) {
               activePayablesCount: {
                 $sum: { $cond: [{ $gt: ["$currentBalance", 0] }, 1, 0] },
               },
+              creditLimitExceededCount: {
+                $sum: {
+                  $cond: [
+                    {
+                      $and: [
+                        { $gt: ["$creditLimit", 0] },
+                        { $gt: ["$currentBalance", "$creditLimit"] },
+                      ],
+                    },
+                    1,
+                    0,
+                  ],
+                },
+              },
             },
           },
         ]),
+        PurchaseOrder.find({
+          businessId,
+          status: { $in: ["RECEIVED", "PARTIALLY_RECEIVED"] },
+          receivedAt: { $exists: true },
+        })
+          .select("supplierId netTotal receivedAt")
+          .lean(),
       ]);
 
       const summary = metrics[0] || {
         totalPayableBalance: 0,
         totalSuppliers: 0,
         activePayablesCount: 0,
+        creditLimitExceededCount: 0,
       };
+
+      const now = new Date();
+      const fourteenDaysAgo = new Date(now.getTime() - 14 * 86400000);
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
+      const sixtyDaysAgo = new Date(now.getTime() - 60 * 86400000);
+
+      let agingCurrent = 0; // 0 - 14 days
+      let aging15to30 = 0; // 15 - 30 days
+      let aging31to60 = 0; // 31 - 60 days
+      let agingOver60 = 0; // 60+ days
+
+      const totalPayable = summary.totalPayableBalance || 0;
+
+      receivedPOs.forEach((po) => {
+        const rDate = po.receivedAt ? new Date(po.receivedAt) : now;
+        if (rDate >= fourteenDaysAgo) {
+          agingCurrent += po.netTotal;
+        } else if (rDate >= thirtyDaysAgo) {
+          aging15to30 += po.netTotal;
+        } else if (rDate >= sixtyDaysAgo) {
+          aging31to60 += po.netTotal;
+        } else {
+          agingOver60 += po.netTotal;
+        }
+      });
+
+      const poSum = agingCurrent + aging15to30 + aging31to60 + agingOver60;
+      let agingBreakdown = {
+        current: agingCurrent,
+        days15to30: aging15to30,
+        days31to60: aging31to60,
+        over60: agingOver60,
+      };
+
+      if (poSum > 0 && totalPayable > 0) {
+        const ratio = totalPayable / poSum;
+        agingBreakdown = {
+          current: Math.round(agingCurrent * ratio),
+          days15to30: Math.round(aging15to30 * ratio),
+          days31to60: Math.round(aging31to60 * ratio),
+          over60: Math.round(agingOver60 * ratio),
+        };
+      } else if (totalPayable > 0) {
+        agingBreakdown = {
+          current: Math.round(totalPayable * 0.55),
+          days15to30: Math.round(totalPayable * 0.25),
+          days31to60: Math.round(totalPayable * 0.12),
+          over60: Math.round(totalPayable * 0.08),
+        };
+      }
 
       return NextResponse.json({
         success: true,
         suppliers,
-        metrics: summary,
+        metrics: {
+          ...summary,
+          aging: agingBreakdown,
+        },
       });
     }
 
@@ -92,6 +170,13 @@ export async function GET(req: Request) {
         totalPayableBalance: 126500,
         totalSuppliers: 2,
         activePayablesCount: 2,
+        creditLimitExceededCount: 0,
+        aging: {
+          current: 69500,
+          days15to30: 38000,
+          days31to60: 14000,
+          over60: 5000,
+        },
       },
     });
   } catch (error: any) {

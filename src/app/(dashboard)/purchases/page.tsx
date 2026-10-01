@@ -105,7 +105,7 @@ interface ProductOption {
 }
 
 export default function PurchasesPage() {
-  const [activeTab, setActiveTab] = useState<"ORDERS" | "SUPPLIERS">("ORDERS");
+  const [activeTab, setActiveTab] = useState<"ORDERS" | "SUPPLIERS" | "VOUCHERS">("ORDERS");
 
   // Data
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -115,10 +115,34 @@ export default function PurchasesPage() {
   const [business, setBusiness] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Filters
+  // Filters for POs
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [supplierFilter, setSupplierFilter] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Supplier Search & Aging
+  const [supplierSearch, setSupplierSearch] = useState("");
+  const [hasDebtOnly, setHasDebtOnly] = useState(false);
+  const [supplierAging, setSupplierAging] = useState({
+    current: 0,
+    days15to30: 0,
+    days31to60: 0,
+    over60: 0,
+  });
+  const [creditLimitExceededCount, setCreditLimitExceededCount] = useState(0);
+
+  // Vouchers Register Data & Filters
+  const [vouchers, setVouchers] = useState<SupplierPaymentData[]>([]);
+  const [voucherMethodFilter, setVoucherMethodFilter] = useState("ALL");
+  const [voucherSearchQuery, setVoucherSearchQuery] = useState("");
+  const [loadingVouchers, setLoadingVouchers] = useState(false);
+  const [voucherMetrics, setVoucherMetrics] = useState({
+    totalAmount: 0,
+    totalCheque: 0,
+    totalBankTransfer: 0,
+    totalCash: 0,
+    totalVouchers: 0,
+  });
 
   // Metrics
   const [metrics, setMetrics] = useState({
@@ -147,6 +171,9 @@ export default function PurchasesPage() {
   const [addQty, setAddQty] = useState("10");
   const [addCost, setAddCost] = useState("");
   const [submittingPO, setSubmittingPO] = useState(false);
+
+  // PO Details View Modal
+  const [viewingPO, setViewingPO] = useState<PurchaseOrder | null>(null);
 
   // Receive GRN Modal State
   const [receivingPO, setReceivingPO] = useState<PurchaseOrder | null>(null);
@@ -214,6 +241,12 @@ export default function PurchasesPage() {
         setSuppliers(supData.suppliers || []);
         if (supData.metrics) {
           setSupplierPayableTotal(supData.metrics.totalPayableBalance || 0);
+          if (supData.metrics.aging) {
+            setSupplierAging(supData.metrics.aging);
+          }
+          if (typeof supData.metrics.creditLimitExceededCount === "number") {
+            setCreditLimitExceededCount(supData.metrics.creditLimitExceededCount);
+          }
         }
       }
 
@@ -244,9 +277,36 @@ export default function PurchasesPage() {
     }
   };
 
+  // Load Vouchers
+  const loadVouchers = async () => {
+    try {
+      setLoadingVouchers(true);
+      const res = await fetch(
+        `/api/purchases/payments?paymentMethod=${voucherMethodFilter}${
+          voucherSearchQuery ? `&q=${encodeURIComponent(voucherSearchQuery)}` : ""
+        }`
+      );
+      const data = await res.json();
+      if (data.success) {
+        setVouchers(data.payments || []);
+        if (data.metrics) setVoucherMetrics(data.metrics);
+      }
+    } catch (err) {
+      console.error("Failed to load payment vouchers:", err);
+    } finally {
+      setLoadingVouchers(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
   }, [statusFilter, supplierFilter, searchQuery]);
+
+  useEffect(() => {
+    if (activeTab === "VOUCHERS") {
+      loadVouchers();
+    }
+  }, [activeTab, voucherMethodFilter, voucherSearchQuery]);
 
   // Load Supplier Passbook Statement
   const handleOpenStatement = async (supplier: Supplier) => {
@@ -520,6 +580,7 @@ export default function PurchasesPage() {
         }
 
         loadData();
+        loadVouchers();
       } else {
         alert(data.error || "Failed to record payment.");
       }
@@ -696,6 +757,22 @@ export default function PurchasesPage() {
               {suppliers.length}
             </span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("VOUCHERS")}
+            className={`pb-3 text-xs font-bold flex items-center gap-2 border-b-2 transition ${
+              activeTab === "VOUCHERS"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <CreditCard className="w-4 h-4" />
+            <span>Payment Vouchers (PV) Register</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 font-mono text-slate-700">
+              {voucherMetrics.totalVouchers || vouchers.length}
+            </span>
+          </button>
         </div>
 
         {/* ================= TAB 1: PURCHASE ORDERS ================= */}
@@ -817,15 +894,33 @@ export default function PurchasesPage() {
                               <span className="font-semibold text-slate-800 block">
                                 {totalOrdered} Units ({po.items.length} SKUs)
                               </span>
-                              {(po.status === "RECEIVED" || po.status === "PARTIALLY_RECEIVED") && (
+                              <div className="mt-1 flex items-center gap-1.5">
+                                <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden max-w-[90px]">
+                                  <div
+                                    className={`h-full transition-all ${
+                                      totalReceived >= totalOrdered
+                                        ? "bg-emerald-500"
+                                        : totalReceived > 0
+                                        ? "bg-amber-500"
+                                        : "bg-slate-300"
+                                    }`}
+                                    style={{
+                                      width: `${Math.min(100, Math.round((totalReceived / (totalOrdered || 1)) * 100))}%`,
+                                    }}
+                                  />
+                                </div>
                                 <span
-                                  className={`text-[10px] font-bold ${
-                                    totalReceived >= totalOrdered ? "text-emerald-700" : "text-amber-700"
+                                  className={`text-[10px] font-bold font-mono ${
+                                    totalReceived >= totalOrdered
+                                      ? "text-emerald-700"
+                                      : totalReceived > 0
+                                      ? "text-amber-700"
+                                      : "text-slate-400"
                                   }`}
                                 >
-                                  Received: {totalReceived} Units
+                                  {totalReceived}/{totalOrdered}
                                 </span>
-                              )}
+                              </div>
                             </td>
 
                             <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
@@ -852,6 +947,16 @@ export default function PurchasesPage() {
 
                             <td className="py-3 px-4 text-right">
                               <div className="flex items-center justify-end gap-1.5">
+                                {/* View PO Details */}
+                                <button
+                                  type="button"
+                                  onClick={() => setViewingPO(po)}
+                                  title="View Order Details & SKUs"
+                                  className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 transition"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </button>
+
                                 {/* Print PO */}
                                 <button
                                   type="button"
@@ -900,6 +1005,154 @@ export default function PurchasesPage() {
         {/* ================= TAB 2: SUPPLIERS & ACCOUNTS PAYABLE ================= */}
         {activeTab === "SUPPLIERS" && (
           <div className="space-y-4">
+            {/* Accounts Payable Aging Analysis Widget */}
+            <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-xs space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">
+                    Accounts Payable (AP) Aging Analysis
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Debt breakdown categorized by distributor credit terms and receipt dates
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Net Payable</span>
+                  <span className="text-base font-black font-mono text-rose-700">
+                    {formatCurrency(supplierPayableTotal)}
+                  </span>
+                </div>
+              </div>
+
+              {/* 4 Aging Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200">
+                  <div className="flex justify-between items-center text-[10px] text-emerald-800 font-bold uppercase">
+                    <span>0 – 14 Days</span>
+                    <span className="bg-emerald-200/60 px-1 rounded">Current</span>
+                  </div>
+                  <div className="text-base font-black font-mono text-emerald-900 mt-1">
+                    {formatCurrency(supplierAging.current)}
+                  </div>
+                  <span className="text-[9px] text-emerald-700">Normal credit cycle</span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-blue-50/70 border border-blue-200">
+                  <div className="flex justify-between items-center text-[10px] text-blue-800 font-bold uppercase">
+                    <span>15 – 30 Days</span>
+                    <span className="bg-blue-200/60 px-1 rounded">Due Soon</span>
+                  </div>
+                  <div className="text-base font-black font-mono text-blue-900 mt-1">
+                    {formatCurrency(supplierAging.days15to30)}
+                  </div>
+                  <span className="text-[9px] text-blue-700">Standard 30-day terms</span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200">
+                  <div className="flex justify-between items-center text-[10px] text-amber-800 font-bold uppercase">
+                    <span>31 – 60 Days</span>
+                    <span className="bg-amber-200/60 px-1 rounded">Action Due</span>
+                  </div>
+                  <div className="text-base font-black font-mono text-amber-900 mt-1">
+                    {formatCurrency(supplierAging.days31to60)}
+                  </div>
+                  <span className="text-[9px] text-amber-700">Issue settlement cheque</span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-rose-50/70 border border-rose-200">
+                  <div className="flex justify-between items-center text-[10px] text-rose-800 font-bold uppercase">
+                    <span>60+ Days</span>
+                    <span className="bg-rose-200/60 px-1 rounded">Overdue</span>
+                  </div>
+                  <div className="text-base font-black font-mono text-rose-900 mt-1">
+                    {formatCurrency(supplierAging.over60)}
+                  </div>
+                  <span className="text-[9px] text-rose-700">Supply hold risk</span>
+                </div>
+              </div>
+
+              {/* Proportional visual bar */}
+              {supplierPayableTotal > 0 && (
+                <div className="space-y-1">
+                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden flex">
+                    <div
+                      className="bg-emerald-500 h-full transition-all"
+                      style={{
+                        width: `${Math.round((supplierAging.current / supplierPayableTotal) * 100)}%`,
+                      }}
+                      title={`Current (0-14d): ${formatCurrency(supplierAging.current)}`}
+                    />
+                    <div
+                      className="bg-blue-500 h-full transition-all"
+                      style={{
+                        width: `${Math.round((supplierAging.days15to30 / supplierPayableTotal) * 100)}%`,
+                      }}
+                      title={`15-30d: ${formatCurrency(supplierAging.days15to30)}`}
+                    />
+                    <div
+                      className="bg-amber-500 h-full transition-all"
+                      style={{
+                        width: `${Math.round((supplierAging.days31to60 / supplierPayableTotal) * 100)}%`,
+                      }}
+                      title={`31-60d: ${formatCurrency(supplierAging.days31to60)}`}
+                    />
+                    <div
+                      className="bg-rose-500 h-full transition-all"
+                      style={{
+                        width: `${Math.round((supplierAging.over60 / supplierPayableTotal) * 100)}%`,
+                      }}
+                      title={`60+d Overdue: ${formatCurrency(supplierAging.over60)}`}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[9px] text-slate-400 font-mono">
+                    <span>🟢 0-14d: {Math.round((supplierAging.current / (supplierPayableTotal || 1)) * 100)}%</span>
+                    <span>🔵 15-30d: {Math.round((supplierAging.days15to30 / (supplierPayableTotal || 1)) * 100)}%</span>
+                    <span>🟡 31-60d: {Math.round((supplierAging.days31to60 / (supplierPayableTotal || 1)) * 100)}%</span>
+                    <span>🔴 60+d: {Math.round((supplierAging.over60 / (supplierPayableTotal || 1)) * 100)}%</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Credit Limit Alert Banner */}
+              {creditLimitExceededCount > 0 && (
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>
+                      <strong>{creditLimitExceededCount} Vendor(s) have exceeded agreed credit limits.</strong> Settle outstanding bills to avoid delivery stoppages.
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Supplier Search & Filter Bar */}
+            <div className="p-3.5 bg-white rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+              <div className="relative flex-1 w-full sm:w-72">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={supplierSearch}
+                  onChange={(e) => setSupplierSearch(e.target.value)}
+                  placeholder="Search vendor by name, phone, code, rep..."
+                  className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={hasDebtOnly}
+                    onChange={(e) => setHasDebtOnly(e.target.checked)}
+                    className="rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                  />
+                  <span>Show Only Vendors With Pending Debt</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Supplier Table */}
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
               <div className="overflow-x-auto">
                 <table className="w-full text-xs text-left">
@@ -913,96 +1166,350 @@ export default function PurchasesPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {suppliers.length === 0 ? (
+                    {suppliers
+                      .filter((s) => {
+                        if (hasDebtOnly && s.currentBalance <= 0) return false;
+                        if (!supplierSearch.trim()) return true;
+                        const q = supplierSearch.toLowerCase();
+                        return (
+                          s.name.toLowerCase().includes(q) ||
+                          (s.code && s.code.toLowerCase().includes(q)) ||
+                          (s.contactPerson && s.contactPerson.toLowerCase().includes(q)) ||
+                          s.phone.toLowerCase().includes(q)
+                        );
+                      })
+                      .map((s) => {
+                        const isOverLimit = s.creditLimit > 0 && s.currentBalance > s.creditLimit;
+
+                        return (
+                          <tr key={s._id} className="hover:bg-slate-50/70 transition">
+                            <td className="py-3 px-4">
+                              <span className="font-bold text-slate-900 text-sm block">{s.name}</span>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                {s.code && <span className="font-mono text-[10px] text-slate-400">Code: {s.code}</span>}
+                                {isOverLimit && (
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-100 text-rose-700">
+                                    ⚠️ Exceeded Limit
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="py-3 px-4 text-slate-600">
+                              <span className="font-medium block">{s.contactPerson || "Sales Rep"}</span>
+                              <span className="font-mono text-[11px] text-slate-500">{s.phone}</span>
+                            </td>
+
+                            <td className="py-3 px-4">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700">
+                                {s.paymentTermsDays === 0 ? "Cash on Delivery (COD)" : `${s.paymentTermsDays} Days Credit`}
+                              </span>
+                            </td>
+
+                            <td className="py-3 px-4 text-right">
+                              <span
+                                className={`font-mono font-black text-sm block ${
+                                  s.currentBalance > 0 ? "text-rose-600" : "text-emerald-700"
+                                }`}
+                              >
+                                {formatCurrency(s.currentBalance || 0)}
+                              </span>
+                              {s.creditLimit > 0 && (
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  Limit: {formatCurrency(s.creditLimit)}
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="py-3 px-4 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                {/* Pay Supplier */}
+                                {s.currentBalance > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setPayingSupplier(s);
+                                      setPaymentAmount(s.currentBalance.toString());
+                                      setChequeDate(new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10));
+                                    }}
+                                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                                  >
+                                    <Wallet className="w-3 h-3" /> Pay Debt
+                                  </button>
+                                )}
+
+                                {/* Statement / Ledger */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenStatement(s)}
+                                  className="px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition"
+                                >
+                                  Statement
+                                </button>
+
+                                {/* Edit */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSupplierForm({
+                                      _id: s._id,
+                                      name: s.name,
+                                      code: s.code || "",
+                                      contactPerson: s.contactPerson || "",
+                                      phone: s.phone,
+                                      email: s.email || "",
+                                      address: s.address || "",
+                                      taxNumber: s.taxNumber || "",
+                                      paymentTermsDays: s.paymentTermsDays,
+                                      creditLimit: s.creditLimit,
+                                      notes: (s as any).notes || "",
+                                    });
+                                    setIsSupplierModalOpen(true);
+                                  }}
+                                  className="px-2 py-1 text-xs text-slate-400 hover:text-slate-700"
+                                >
+                                  Edit
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= TAB 3: PAYMENT VOUCHERS REGISTER ================= */}
+        {activeTab === "VOUCHERS" && (
+          <div className="space-y-4">
+            {/* KPI Cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="p-3.5 bg-white rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                  <Wallet className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Total Disbursed
+                  </span>
+                  <div className="text-lg font-black text-slate-900 font-mono">
+                    {formatCurrency(voucherMetrics.totalAmount)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-white rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Cheque Settlements
+                  </span>
+                  <div className="text-lg font-black text-blue-900 font-mono">
+                    {formatCurrency(voucherMetrics.totalCheque)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-white rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
+                  <CreditCard className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Bank Transfers
+                  </span>
+                  <div className="text-lg font-black text-purple-900 font-mono">
+                    {formatCurrency(voucherMetrics.totalBankTransfer)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-white rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                  <DollarSign className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Cash Payments
+                  </span>
+                  <div className="text-lg font-black text-amber-900 font-mono">
+                    {formatCurrency(voucherMetrics.totalCash)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="p-3.5 bg-white rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
+                {[
+                  { id: "ALL", label: "All Methods" },
+                  { id: "CHEQUE", label: "Cheques" },
+                  { id: "BANK_TRANSFER", label: "Bank Transfer" },
+                  { id: "CASH", label: "Cash" },
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setVoucherMethodFilter(m.id)}
+                    className={`px-3 py-1.5 rounded-xl font-semibold whitespace-nowrap transition ${
+                      voucherMethodFilter === m.id
+                        ? "bg-blue-600 text-white shadow-xs"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <div className="relative flex-1 md:w-64">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={voucherSearchQuery}
+                    onChange={(e) => setVoucherSearchQuery(e.target.value)}
+                    placeholder="Search Voucher #, Cheque #, Vendor..."
+                    className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Vouchers Table */}
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <tr>
+                      <th className="py-3 px-4">Voucher # & Date</th>
+                      <th className="py-3 px-4">Supplier & Reference</th>
+                      <th className="py-3 px-4">Payment Channel & Details</th>
+                      <th className="py-3 px-4 text-right">Settled Amount</th>
+                      <th className="py-3 px-4 text-right">Payable Impact</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {loadingVouchers ? (
                       <tr>
-                        <td colSpan={5} className="py-8 text-center text-slate-400">
-                          No suppliers registered yet.
+                        <td colSpan={6} className="py-8 text-center text-slate-400">
+                          Loading payment vouchers...
+                        </td>
+                      </tr>
+                    ) : vouchers.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-10 text-center space-y-2">
+                          <CreditCard className="w-8 h-8 text-slate-300 mx-auto" />
+                          <p className="text-slate-500 font-semibold">No payment vouchers found.</p>
+                          <p className="text-slate-400 text-xs">
+                            Settle supplier debts in the Suppliers tab to generate vouchers.
+                          </p>
                         </td>
                       </tr>
                     ) : (
-                      suppliers.map((s) => (
-                        <tr key={s._id} className="hover:bg-slate-50/70 transition">
+                      vouchers.map((v) => (
+                        <tr key={v.paymentNumber} className="hover:bg-slate-50/70 transition">
                           <td className="py-3 px-4">
-                            <span className="font-bold text-slate-900 text-sm block">{s.name}</span>
-                            {s.code && <span className="font-mono text-[10px] text-slate-400">Code: {s.code}</span>}
-                          </td>
-
-                          <td className="py-3 px-4 text-slate-600">
-                            <span className="font-medium block">{s.contactPerson || "Sales Rep"}</span>
-                            <span className="font-mono text-[11px] text-slate-500">{s.phone}</span>
-                          </td>
-
-                          <td className="py-3 px-4">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700">
-                              {s.paymentTermsDays === 0 ? "Cash on Delivery (COD)" : `${s.paymentTermsDays} Days Credit`}
+                            <span className="font-mono font-bold text-slate-900 block">
+                              {v.paymentNumber}
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              {formatSLDateTime(v.createdAt)}
                             </span>
                           </td>
 
-                          <td className="py-3 px-4 text-right">
-                            <span
-                              className={`font-mono font-black text-sm block ${
-                                s.currentBalance > 0 ? "text-rose-600" : "text-emerald-700"
-                              }`}
-                            >
-                              {formatCurrency(s.currentBalance || 0)}
-                            </span>
-                            {s.creditLimit > 0 && (
-                              <span className="text-[10px] text-slate-400 font-mono">
-                                Limit: {formatCurrency(s.creditLimit)}
+                          <td className="py-3 px-4">
+                            <span className="font-bold text-slate-900 block">{v.supplierName}</span>
+                            {v.poNumber && (
+                              <span className="font-mono text-[10px] text-blue-700">
+                                PO: {v.poNumber}
                               </span>
                             )}
                           </td>
 
-                          <td className="py-3 px-4 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              {/* Pay Supplier */}
-                              {s.currentBalance > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setPayingSupplier(s);
-                                    setPaymentAmount(s.currentBalance.toString());
-                                    setChequeDate(new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10));
-                                  }}
-                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
-                                >
-                                  <Wallet className="w-3 h-3" /> Pay Debt
-                                </button>
-                              )}
-
-                              {/* Statement / Ledger */}
-                              <button
-                                type="button"
-                                onClick={() => handleOpenStatement(s)}
-                                className="px-2 py-1 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition"
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                  v.paymentMethod === "CHEQUE"
+                                    ? "bg-blue-100 text-blue-800"
+                                    : v.paymentMethod === "BANK_TRANSFER"
+                                    ? "bg-purple-100 text-purple-800"
+                                    : "bg-emerald-100 text-emerald-800"
+                                }`}
                               >
-                                Statement
-                              </button>
-
-                              {/* Edit */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSupplierForm({
-                                    _id: s._id,
-                                    name: s.name,
-                                    code: s.code || "",
-                                    contactPerson: s.contactPerson || "",
-                                    phone: s.phone,
-                                    email: s.email || "",
-                                    address: s.address || "",
-                                    taxNumber: s.taxNumber || "",
-                                    paymentTermsDays: s.paymentTermsDays,
-                                    creditLimit: s.creditLimit,
-                                    notes: (s as any).notes || "",
-                                  });
-                                  setIsSupplierModalOpen(true);
-                                }}
-                                className="px-2 py-1 text-xs text-slate-400 hover:text-slate-700"
-                              >
-                                Edit
-                              </button>
+                                {v.paymentMethod}
+                              </span>
                             </div>
+                            {v.paymentMethod === "CHEQUE" && (
+                              <div className="text-[10px] text-slate-600 mt-1 space-y-0.5 font-mono">
+                                <div>Chq: <strong>{v.chequeNumber || "N/A"}</strong> ({v.bankName || "Bank"})</div>
+                                {v.chequeDate && (
+                                  <div className="text-amber-700">
+                                    Realize: {new Date(v.chequeDate).toLocaleDateString()}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {v.paymentMethod === "BANK_TRANSFER" && (
+                              <div className="text-[10px] text-slate-600 mt-1 font-mono">
+                                Ref: {v.referenceNumber || v.chequeNumber || "Online Transfer"}
+                                {v.bankName && ` • ${v.bankName}`}
+                              </div>
+                            )}
+                            {v.notes && (
+                              <div className="text-[10px] text-slate-400 italic mt-0.5">
+                                {v.notes}
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="py-3 px-4 text-right font-mono font-black text-sm text-emerald-700">
+                            {formatCurrency(v.amount)}
+                          </td>
+
+                          <td className="py-3 px-4 text-right font-mono text-[11px] text-slate-600">
+                            <span className="line-through text-slate-400 block">
+                              {formatCurrency(v.balanceBefore)}
+                            </span>
+                            <span className="font-bold text-slate-900 block">
+                              → {formatCurrency(v.balanceAfter)}
+                            </span>
+                          </td>
+
+                          <td className="py-3 px-4 text-right">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setActivePrintPayment({
+                                  paymentNumber: v.paymentNumber,
+                                  supplierName: v.supplierName,
+                                  amount: v.amount,
+                                  balanceBefore: v.balanceBefore,
+                                  balanceAfter: v.balanceAfter,
+                                  paymentMethod: v.paymentMethod,
+                                  chequeNumber: v.chequeNumber,
+                                  chequeDate: v.chequeDate,
+                                  bankName: v.bankName,
+                                  referenceNumber: v.referenceNumber,
+                                  poNumber: v.poNumber,
+                                  notes: v.notes,
+                                  paidBy: v.paidBy || "Store Accountant",
+                                  createdAt: v.createdAt,
+                                })
+                              }
+                              className="px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-semibold flex items-center gap-1 ml-auto shadow-xs"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              <span>Voucher</span>
+                            </button>
                           </td>
                         </tr>
                       ))
@@ -1288,114 +1795,353 @@ export default function PurchasesPage() {
         )}
 
         {/* ================= MODAL: RECEIVE GRN ================= */}
-        {receivingPO && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[95vh] overflow-y-auto">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                    <Check className="w-4 h-4" />
+        {receivingPO && (() => {
+          const batchReceivingValue = receivingPO.items.reduce((sum, item) => {
+            const recVal = receivedQtyMap[item.productId] ?? item.quantityOrdered;
+            const prevRec = item.quantityReceived || 0;
+            const delta = Math.max(0, recVal - prevRec);
+            return sum + delta * item.unitCost;
+          }, 0);
+
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[95vh] overflow-y-auto">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                      <Check className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-sm">Goods Receiving Note (GRN Intake)</h3>
+                      <p className="text-[11px] text-slate-500 font-mono">{receivingPO.poNumber}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReceivingPO(null)}
+                    className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Supplier & Bill Banner */}
+                <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs space-y-2">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">Vendor:</span>
+                      <span className="font-bold text-slate-900">{receivingPO.supplierName}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-slate-500 block text-[10px]">Receiving To:</span>
+                      <span className="font-semibold text-slate-800">{receivingPO.branchName || "Main Central Warehouse"}</span>
+                    </div>
                   </div>
                   <div>
-                    <h3 className="font-bold text-slate-900 text-sm">Goods Receiving Note (GRN Intake)</h3>
-                    <p className="text-[11px] text-slate-500 font-mono">{receivingPO.poNumber}</p>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                      Supplier Invoice / Delivery Bill Number *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={supplierBillNumber}
+                      onChange={(e) => setSupplierBillNumber(e.target.value)}
+                      placeholder="Enter bill # on supplier paper receipt (e.g. INV-10928)"
+                      className="w-full px-3 py-1.5 bg-white border border-blue-300 rounded-lg text-xs font-mono font-bold focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Items Verification Table */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-800">Verify Delivered Quantities:</span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const fullMap: Record<string, number> = {};
+                          receivingPO.items.forEach((it) => {
+                            fullMap[it.productId] = it.quantityOrdered;
+                          });
+                          setReceivedQtyMap(fullMap);
+                        }}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                      >
+                        All Ordered
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const zeroMap: Record<string, number> = {};
+                          receivingPO.items.forEach((it) => {
+                            zeroMap[it.productId] = 0;
+                          });
+                          setReceivedQtyMap(zeroMap);
+                        }}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="overflow-hidden border border-slate-200 rounded-xl">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-slate-100 text-[10px] font-bold text-slate-600 uppercase">
+                        <tr>
+                          <th className="py-2.5 px-3">Product Name</th>
+                          <th className="py-2.5 px-3 text-center">Ordered</th>
+                          <th className="py-2.5 px-3 text-center">Delivered Qty</th>
+                          <th className="py-2.5 px-3 text-right">Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-mono text-xs">
+                        {receivingPO.items.map((it) => {
+                          const recVal = receivedQtyMap[it.productId] ?? it.quantityOrdered;
+                          const isShort = recVal < it.quantityOrdered;
+
+                          return (
+                            <tr key={it.productId} className="hover:bg-slate-50">
+                              <td className="py-2 px-3 font-sans">
+                                <span className="font-semibold text-slate-800 block">{it.name}</span>
+                                {isShort && (
+                                  <span className="text-[10px] text-amber-700 font-bold block">
+                                    ⚠️ Short by {it.quantityOrdered - recVal} {it.unit} (Partial)
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2 px-3 text-center text-slate-700">
+                                {it.quantityOrdered} {it.unit}
+                              </td>
+                              <td className="py-2 px-3 text-center">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={recVal}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value) || 0;
+                                    setReceivedQtyMap({
+                                      ...receivedQtyMap,
+                                      [it.productId]: val,
+                                    });
+                                  }}
+                                  className={`w-16 px-1.5 py-1 text-center font-bold font-mono border rounded text-xs ${
+                                    isShort ? "border-amber-400 bg-amber-50 text-amber-800" : "border-slate-300"
+                                  }`}
+                                />{" "}
+                                <span className="text-[10px] text-slate-500 font-sans">{it.unit}</span>
+                              </td>
+                              <td className="py-2 px-3 text-right text-slate-700">
+                                {formatCurrency(it.unitCost)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Batch Net Credit Banner */}
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-emerald-800 font-bold block">Estimated Inward Stock Value:</span>
+                    <span className="text-[10px] text-emerald-600">
+                      Will be credited to {receivingPO.supplierName}&apos;s Accounts Payable balance
+                    </span>
+                  </div>
+                  <div className="text-right font-mono font-black text-emerald-900 text-sm">
+                    {formatCurrency(batchReceivingValue)}
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setReceivingPO(null)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={submittingReceive}
+                    onClick={handleConfirmReceiveGRN}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/25 transition disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{submittingReceive ? "Receiving Stock..." : "Confirm GRN & Post to Inventory"}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ================= MODAL: VIEW PO DETAILS ================= */}
+        {viewingPO && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[95vh] overflow-y-auto">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
+                    <FileText className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-sm">
+                      Purchase Order: {viewingPO.poNumber}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 font-mono">
+                      Issued {formatSLDateTime(viewingPO.createdAt)} by {viewingPO.createdBy}
+                    </p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setReceivingPO(null)}
+                  onClick={() => setViewingPO(null)}
                   className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Supplier & Bill Banner */}
-              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Supplier:</span>
-                  <span className="font-bold text-slate-900">{receivingPO.supplierName}</span>
-                </div>
+              {/* Status and Destination banner */}
+              <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                    Supplier Invoice / Delivery Bill Number *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={supplierBillNumber}
-                    onChange={(e) => setSupplierBillNumber(e.target.value)}
-                    placeholder="Enter bill # on supplier paper receipt"
-                    className="w-full px-3 py-1.5 bg-white border border-blue-300 rounded-lg text-xs font-mono font-bold focus:outline-none"
-                  />
+                  <span className="text-slate-500 block">Supplier:</span>
+                  <span className="font-bold text-slate-900 text-sm block">{viewingPO.supplierName}</span>
+                  {viewingPO.supplierInvoiceNumber && (
+                    <span className="text-[11px] font-mono text-blue-700">
+                      Bill Ref: {viewingPO.supplierInvoiceNumber}
+                    </span>
+                  )}
+                </div>
+
+                <div className="text-right">
+                  <span className="text-slate-500 block">Order Status:</span>
+                  <span
+                    className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider mt-0.5 ${
+                      viewingPO.status === "RECEIVED"
+                        ? "bg-emerald-100 text-emerald-800"
+                        : viewingPO.status === "PARTIALLY_RECEIVED"
+                        ? "bg-amber-100 text-amber-800"
+                        : viewingPO.status === "SENT"
+                        ? "bg-blue-100 text-blue-800"
+                        : viewingPO.status === "CANCELLED"
+                        ? "bg-rose-100 text-rose-800"
+                        : "bg-slate-100 text-slate-800"
+                    }`}
+                  >
+                    {viewingPO.status.replace("_", " ")}
+                  </span>
+                  <span className="text-[11px] text-slate-500 block mt-1">
+                    Destination: {viewingPO.branchName || "Main Central Warehouse"}
+                  </span>
                 </div>
               </div>
 
-              {/* Items Verification Table */}
+              {/* Items Table */}
               <div className="overflow-hidden border border-slate-200 rounded-xl">
                 <table className="w-full text-xs text-left">
                   <thead className="bg-slate-100 text-[10px] font-bold text-slate-600 uppercase">
                     <tr>
                       <th className="py-2.5 px-3">Product Name</th>
-                      <th className="py-2.5 px-3 w-20 text-center">Ordered</th>
-                      <th className="py-2.5 px-3 w-28 text-center">Arrived Qty</th>
+                      <th className="py-2.5 px-3 text-center">Ordered</th>
+                      <th className="py-2.5 px-3 text-center">Received</th>
+                      <th className="py-2.5 px-3 text-right">Unit Cost</th>
+                      <th className="py-2.5 px-3 text-right">Line Total</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-mono text-xs">
-                    {receivingPO.items.map((it) => {
-                      const recVal = receivedQtyMap[it.productId] ?? it.quantityOrdered;
-                      const isShort = recVal < it.quantityOrdered;
-
-                      return (
-                        <tr key={it.productId} className="hover:bg-slate-50">
-                          <td className="py-2 px-3 font-sans font-semibold text-slate-800">
-                            {it.name}
-                          </td>
-                          <td className="py-2 px-3 text-center text-slate-700">
-                            {it.quantityOrdered} {it.unit}
-                          </td>
-                          <td className="py-2 px-3 text-center">
-                            <input
-                              type="number"
-                              min="0"
-                              value={recVal}
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                setReceivedQtyMap({
-                                  ...receivedQtyMap,
-                                  [it.productId]: val,
-                                });
-                              }}
-                              className={`w-16 px-1.5 py-1 text-center font-bold font-mono border rounded text-xs ${
-                                isShort ? "border-amber-400 bg-amber-50 text-amber-800" : "border-slate-300"
-                              }`}
-                            />{" "}
-                            <span className="text-[10px] text-slate-500 font-sans">{it.unit}</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {viewingPO.items.map((it, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50">
+                        <td className="py-2.5 px-3 font-sans font-semibold text-slate-800">
+                          {it.name}
+                          {it.sku && <span className="block text-[10px] text-slate-400 font-mono">{it.sku}</span>}
+                        </td>
+                        <td className="py-2.5 px-3 text-center text-slate-700">
+                          {it.quantityOrdered} {it.unit}
+                        </td>
+                        <td className="py-2.5 px-3 text-center">
+                          <span
+                            className={`font-bold ${
+                              (it.quantityReceived || 0) >= it.quantityOrdered
+                                ? "text-emerald-700"
+                                : (it.quantityReceived || 0) > 0
+                                ? "text-amber-700"
+                                : "text-slate-400"
+                            }`}
+                          >
+                            {it.quantityReceived || 0} {it.unit}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-slate-700">
+                          {formatCurrency(it.unitCost)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-bold text-slate-900">
+                          {formatCurrency(it.total)}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
+                  <tfoot className="bg-slate-50 font-bold border-t border-slate-200 text-xs">
+                    <tr>
+                      <td colSpan={4} className="py-2.5 px-3 text-right uppercase text-[10px] text-slate-600 font-sans">
+                        Net Purchase Total:
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono text-slate-900 font-black text-sm">
+                        {formatCurrency(viewingPO.netTotal)}
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
 
+              {viewingPO.cancellationReason && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900">
+                  <span className="font-bold">Cancellation Reason: </span>
+                  <span>{viewingPO.cancellationReason}</span>
+                </div>
+              )}
+
               {/* Actions */}
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <div className="flex items-center justify-between pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setReceivingPO(null)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                  onClick={() => {
+                    setActivePrintPO(viewingPO);
+                    setViewingPO(null);
+                  }}
+                  className="px-3.5 py-2 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition"
                 >
-                  Cancel
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print PO</span>
                 </button>
-                <button
-                  type="button"
-                  disabled={submittingReceive}
-                  onClick={handleConfirmReceiveGRN}
-                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/25 transition disabled:opacity-50"
-                >
-                  {submittingReceive ? "Receiving Stock..." : "Confirm GRN & Post to Inventory"}
-                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setViewingPO(null)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                  >
+                    Close
+                  </button>
+                  {(viewingPO.status === "SENT" || viewingPO.status === "PARTIALLY_RECEIVED" || viewingPO.status === "DRAFT") && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleOpenReceiveModal(viewingPO);
+                        setViewingPO(null);
+                      }}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/25 transition flex items-center gap-1.5"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Receive Goods (GRN)</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
