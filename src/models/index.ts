@@ -27,3 +27,5 @@ export { Quotation, type IQuotation, type IQuotationItem, type QuotationStatus }
 export { CommissionRule, type ICommissionRule, type CommissionSchemeType, type ICategoryCommissionRate, type IVolumeCommissionTier } from "./CommissionRule";
 export { SalesTarget, type ISalesTarget, type TargetPeriod, type TargetStatus } from "./SalesTarget";
 export { CommissionPayout, type ICommissionPayout, type CommissionPayoutStatus, type PayoutPaymentMethod, type IPayoutSaleItem } from "./CommissionPayout";
+export { Batch, type IBatch, type BatchStatus } from "./Batch";
+

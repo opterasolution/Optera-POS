@@ -3,6 +3,7 @@ import { connectToDatabase } from "@/lib/db";
 import { PurchaseOrder } from "@/models/PurchaseOrder";
 import { Supplier } from "@/models/Supplier";
 import { Product } from "@/models/Product";
+import { Batch } from "@/models/Batch";
 import { BranchStock } from "@/models/BranchStock";
 import { InventoryMovement } from "@/models/InventoryMovement";
 import { AuditLog } from "@/models/AuditLog";
@@ -158,8 +159,49 @@ export async function PATCH(
                 referenceId: body.supplierInvoiceNumber || po.poNumber,
                 createdBy: context.userId,
               });
+
+              // Create Batch document if batch number and expiry date are provided
+              const riItem = Array.isArray(body.receivedItems)
+                ? body.receivedItems.find((r: any) => r.productId === pidStr)
+                : null;
+              const batchNum = riItem?.batchNumber || item.batchNumber;
+              const expDate = riItem?.expiryDate || item.expiryDate;
+              const mfgDate = riItem?.manufacturingDate || item.manufacturingDate;
+
+              if (batchNum && expDate) {
+                await Batch.create({
+                  businessId,
+                  productId: prod._id,
+                  productName: prod.name,
+                  productBarcode: prod.barcode,
+                  productSku: prod.sku,
+                  batchNumber: batchNum.trim(),
+                  manufacturingDate: mfgDate ? new Date(mfgDate) : undefined,
+                  expiryDate: new Date(expDate),
+                  costPrice: item.unitCost,
+                  sellingPrice: prod.sellingPrice,
+                  initialQuantity: delta,
+                  quantityAvailable: delta,
+                  quantitySold: 0,
+                  quantityDamaged: 0,
+                  status: "ACTIVE",
+                  supplierId: po.supplierId,
+                  supplierName: po.supplierName,
+                  purchaseOrderId: po._id,
+                  poNumber: po.poNumber,
+                  branchId: po.branchId,
+                  branchName: po.branchName,
+                  notes: `Auto-intake from PO ${po.poNumber}`,
+                });
+                prod.isBatchTracked = true;
+                await prod.save();
+              }
             }
           }
+
+          const riItem = Array.isArray(body.receivedItems)
+            ? body.receivedItems.find((r: any) => r.productId === pidStr)
+            : null;
 
           updatedItems.push({
             productId: item.productId,
@@ -170,6 +212,9 @@ export async function PATCH(
             quantityReceived: cumulativeRec,
             unitCost: item.unitCost,
             total: item.total,
+            batchNumber: riItem?.batchNumber || item.batchNumber,
+            manufacturingDate: riItem?.manufacturingDate ? new Date(riItem.manufacturingDate) : item.manufacturingDate,
+            expiryDate: riItem?.expiryDate ? new Date(riItem.expiryDate) : item.expiryDate,
             notes: item.notes,
           });
         }

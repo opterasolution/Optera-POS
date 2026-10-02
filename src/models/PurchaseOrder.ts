@@ -11,6 +11,9 @@ export interface IPurchaseOrderItem {
   quantityReceived: number;
   unitCost: number;
   total: number;
+  batchNumber?: string;
+  manufacturingDate?: Date;
+  expiryDate?: Date;
   notes?: string;
 }
 
@@ -79,6 +82,16 @@ const PurchaseOrderItemSchema = new Schema<IPurchaseOrderItem>(
       type: Number,
       required: true,
       min: 0,
+    },
+    batchNumber: {
+      type: String,
+      trim: true,
+    },
+    manufacturingDate: {
+      type: Date,
+    },
+    expiryDate: {
+      type: Date,
     },
     notes: {
       type: String,

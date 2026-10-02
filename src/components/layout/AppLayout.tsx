@@ -29,6 +29,7 @@ import {
   FileSpreadsheet,
   Award,
   MessageSquare,
+  Calendar,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -75,6 +76,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, allowed: isManager || isSupervisor },
     { label: "Products", href: "/products", icon: Package, allowed: isManager || isInventoryClerk },
     { label: "Inventory", href: "/inventory", icon: Boxes, allowed: isManager || isInventoryClerk },
+    { label: "Batches & Expiry", href: "/batches", icon: Calendar, allowed: isManager || isInventoryClerk },
     { label: "Barcode & Labels", href: "/labels", icon: Barcode, allowed: isManager || isInventoryClerk },
     { label: "Purchases & Vendors", href: "/purchases", icon: FileText, allowed: isManager || isInventoryClerk },
     { label: "Transfers & Branches", href: "/transfers", icon: Truck, allowed: isManager || isInventoryClerk },

@@ -13,6 +13,7 @@ export interface IProduct extends Document {
   stockQuantity: number;
   lowStockThreshold: number;
   unit: string;
+  isBatchTracked?: boolean;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -41,6 +42,7 @@ const ProductSchema = new Schema<IProduct>(
     stockQuantity: { type: Number, required: true, default: 0 },
     lowStockThreshold: { type: Number, default: 5, min: 0 },
     unit: { type: String, default: "pcs", trim: true },
+    isBatchTracked: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

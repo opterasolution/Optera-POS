@@ -16,10 +16,12 @@ import { LoyaltyTransaction } from "@/models/LoyaltyTransaction";
 import { User } from "@/models/User";
 import { CommissionRule } from "@/models/CommissionRule";
 import { SalesTarget } from "@/models/SalesTarget";
+import { Batch } from "@/models/Batch";
 import { calculateSaleCommission } from "@/lib/commission";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 import { createSaleSchema } from "@/lib/validations/sale";
 import { dispatchSms } from "@/lib/sms";
+import { allocateBatchesFefo } from "@/lib/fefo";
 
 export async function POST(req: Request) {
   try {
@@ -136,6 +138,37 @@ export async function POST(req: Request) {
 
         calculatedSubtotal += lineTotal;
 
+        // If product is batch-tracked, allocate via FEFO engine
+        let allocatedBatchId: Types.ObjectId | undefined;
+        let allocatedBatchNumber: string | undefined;
+        let allocatedExpiryDate: Date | undefined;
+
+        if (dbProduct.isBatchTracked) {
+          const fefoResult = await allocateBatchesFefo({
+            businessId,
+            productId: dbProduct._id,
+            requestedQuantity: item.quantity,
+            preferredBatchId: item.batchId && Types.ObjectId.isValid(item.batchId) ? item.batchId : undefined,
+          });
+
+          if (!fefoResult.success) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: `FEFO batch dispensing failed for "${dbProduct.name}": ${fefoResult.error}`,
+              },
+              { status: 400 }
+            );
+          }
+
+          if (fefoResult.allocations.length > 0) {
+            const primaryAlloc = fefoResult.allocations[0];
+            allocatedBatchId = new Types.ObjectId(primaryAlloc.batchId);
+            allocatedBatchNumber = primaryAlloc.batchNumber;
+            allocatedExpiryDate = primaryAlloc.expiryDate;
+          }
+        }
+
         verifiedItems.push({
           productId: dbProduct._id,
           name: dbProduct.name,
@@ -147,6 +180,9 @@ export async function POST(req: Request) {
           discount: lineDiscount,
           total: lineTotal,
           priceTier: isWholesaleItem ? "WHOLESALE" : "RETAIL",
+          batchId: allocatedBatchId,
+          batchNumber: allocatedBatchNumber,
+          expiryDate: allocatedExpiryDate,
         });
       }
 
@@ -848,6 +884,20 @@ export async function POST(req: Request) {
           $inc: { stockQuantity: -item.quantity },
         });
 
+        // If item was allocated to a batch, decrement batch stock
+        if (item.batchId) {
+          const batchDoc = await Batch.findOne({ _id: item.batchId, businessId });
+          if (batchDoc) {
+            const nextAvail = Math.max(0, batchDoc.quantityAvailable - item.quantity);
+            batchDoc.quantityAvailable = nextAvail;
+            batchDoc.quantitySold = (batchDoc.quantitySold || 0) + item.quantity;
+            if (nextAvail === 0) {
+              batchDoc.status = "DEPLETED";
+            }
+            await batchDoc.save();
+          }
+        }
+
         await InventoryMovement.create({
           businessId,
           productId: item.productId,
@@ -855,7 +905,9 @@ export async function POST(req: Request) {
           quantityChange: -item.quantity,
           previousStock: prevStock,
           newStock,
-          reason: `POS Sale ${invoiceNumber}`,
+          reason: item.batchNumber
+            ? `POS Sale ${invoiceNumber} (Batch: ${item.batchNumber})`
+            : `POS Sale ${invoiceNumber}`,
           referenceId: invoiceNumber,
           createdBy: context.userId,
         });

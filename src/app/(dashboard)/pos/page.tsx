@@ -101,6 +101,7 @@ interface Product {
   wholesaleMinQty?: number;
   stockQuantity: number;
   unit: string;
+  isBatchTracked?: boolean;
   categoryId?: { _id: string; name: string; color?: string } | string;
 }
 
@@ -123,6 +124,10 @@ interface CartItem {
   stockQuantity: number;
   unit: string;
   discount: number;
+  isBatchTracked?: boolean;
+  batchId?: string;
+  batchNumber?: string;
+  expiryDate?: string;
 }
 
 interface BusinessSettings {
@@ -895,6 +900,7 @@ export default function POSPage() {
           stockQuantity: product.stockQuantity,
           unit: product.unit,
           discount: 0,
+          isBatchTracked: product.isBatchTracked,
         },
       ];
     });
@@ -1369,6 +1375,8 @@ export default function POSPage() {
         unitPrice: item.unitPrice,
         discount: item.discount,
         total: item.unitPrice * item.quantity - (item.discount || 0),
+        priceTier: billingMode,
+        batchId: item.batchId || undefined,
       })),
       customerName: customerName.trim() || "Walk-in Customer",
       customerPhone: customerPhone.trim() || undefined,
@@ -1862,9 +1870,16 @@ export default function POSPage() {
                       }`}
                     >
                       <div>
-                        <span className="text-[10px] text-slate-400 font-mono block">
-                          {p.barcode ? `EAN: ${p.barcode}` : p.sku || "RETAIL"}
-                        </span>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[10px] text-slate-400 font-mono block">
+                            {p.barcode ? `EAN: ${p.barcode}` : p.sku || "RETAIL"}
+                          </span>
+                          {p.isBatchTracked && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              FEFO
+                            </span>
+                          )}
+                        </div>
                         <h4 className="font-semibold text-slate-800 text-xs sm:text-sm line-clamp-2 mt-0.5 leading-tight group-hover:text-blue-600">
                           {p.name}
                         </h4>

@@ -16,6 +16,9 @@ export interface ISaleItem {
   discount: number;
   total: number;
   priceTier?: "RETAIL" | "WHOLESALE";
+  batchId?: Types.ObjectId;
+  batchNumber?: string;
+  expiryDate?: Date;
 }
 
 export interface ISale extends Document {
@@ -114,6 +117,9 @@ const SaleItemSchema = new Schema<ISaleItem>(
     discount: { type: Number, default: 0, min: 0 },
     total: { type: Number, required: true, min: 0 },
     priceTier: { type: String, enum: ["RETAIL", "WHOLESALE"], default: "RETAIL" },
+    batchId: { type: Schema.Types.ObjectId, ref: "Batch" },
+    batchNumber: { type: String, trim: true },
+    expiryDate: { type: Date },
   },
   { _id: false }
 );

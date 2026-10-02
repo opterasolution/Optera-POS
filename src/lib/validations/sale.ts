@@ -5,6 +5,7 @@ export const saleItemInputSchema = z.object({
   quantity: z.number().min(0.001, "Quantity must be greater than 0"),
   discount: z.number().min(0).default(0),
   priceTier: z.enum(["RETAIL", "WHOLESALE"]).default("RETAIL").optional(),
+  batchId: z.string().optional().or(z.literal("")),
 });
 
 export const createSaleSchema = z.object({
