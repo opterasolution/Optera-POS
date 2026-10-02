@@ -18,6 +18,9 @@ export const productSchema = z.object({
   stockQuantity: z.number().int("Stock must be a whole number").default(0),
   lowStockThreshold: z.number().int().min(0).default(5),
   unit: z.string().default("pcs"),
+  pluCode: z.string().optional().or(z.literal("")),
+  isWeighable: z.boolean().default(false),
+  tareWeightGrams: z.number().min(0).default(0).optional(),
   isActive: z.boolean().default(true),
 });
 

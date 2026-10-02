@@ -52,6 +52,7 @@ import {
   KeyRound,
   Globe,
   UserCheck,
+  Scale,
 } from "lucide-react";
 import QRCodeImage from "@/components/common/QRCodeImage";
 import SupervisorOverrideModal from "@/components/pos/SupervisorOverrideModal";
@@ -84,6 +85,10 @@ import {
 } from "@/lib/offline-storage";
 import LanguageSwitcher from "@/components/common/LanguageSwitcher";
 import { useLanguage, useTranslation } from "@/lib/i18n/LanguageContext";
+import { parseVariableWeightBarcode } from "@/lib/hardware/barcode-scale";
+import { triggerCashDrawerKick } from "@/lib/hardware/escpos";
+import { createCFDBroadcastChannel, CFDMessage } from "@/lib/hardware/cfd-channel";
+import WeighingScaleModal, { IWeighableProduct } from "@/components/pos/WeighingScaleModal";
 
 interface RegisterOption {
   _id: string;
@@ -100,6 +105,9 @@ interface Product {
   nameTamil?: string;
   barcode?: string;
   sku?: string;
+  pluCode?: string;
+  isWeighable?: boolean;
+  tareWeightGrams?: number;
   costPrice: number;
   sellingPrice: number;
   wholesalePrice?: number;
@@ -122,6 +130,9 @@ interface CartItem {
   nameSinhala?: string;
   nameTamil?: string;
   barcode?: string;
+  pluCode?: string;
+  isWeighable?: boolean;
+  tareWeightGrams?: number;
   unitPrice: number;
   costPrice: number;
   sellingPrice: number;
@@ -163,6 +174,32 @@ interface BusinessSettings {
     footerMessage?: string;
     defaultWidth?: "58mm" | "80mm";
     receiptLanguage?: "en" | "si" | "ta" | "bilingual_si" | "bilingual_ta" | "trilingual";
+  };
+  hardwareSettings?: {
+    weighingScale?: {
+      enabled?: boolean;
+      scaleModel?: string;
+      baudRate?: number;
+      autoTare?: boolean;
+      defaultTareWeightGrams?: number;
+    };
+    variableWeightBarcodes?: {
+      enabled?: boolean;
+      weightPrefixes?: string[];
+      pricePrefixes?: string[];
+      defaultUnit?: "kg" | "g";
+    };
+    cashDrawer?: {
+      enabled?: boolean;
+      autoKickOnCash?: boolean;
+      kickPin?: "PIN2" | "PIN5";
+      openKeyShortcut?: string;
+    };
+    customerDisplay?: {
+      enabled?: boolean;
+      welcomeMessage?: string;
+      promotionalMessage?: string;
+    };
   };
 }
 
@@ -335,6 +372,11 @@ export default function POSPage() {
 
   // Barcode input ref
   const barcodeInputRef = useRef<HTMLInputElement>(null);
+
+  // Hardware Peripherals, Weighing Scale & Customer Facing Display State
+  const [isWeighModalOpen, setIsWeighModalOpen] = useState(false);
+  const [weighModalInitialProduct, setWeighModalInitialProduct] = useState<Product | null>(null);
+  const cfdChannelRef = useRef<BroadcastChannel | null>(null);
 
   // Fetch active shift for current register
   const fetchCurrentShift = async (registerId?: string) => {
@@ -800,12 +842,15 @@ export default function POSPage() {
     }
   }, [lastSyncResult]);
 
-  // Keyboard shortcut: focus barcode input on F2
+  // Keyboard shortcuts: F2 for barcode input, F9 for cash drawer kick
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "F2") {
         e.preventDefault();
         barcodeInputRef.current?.focus();
+      } else if (e.key === "F9") {
+        e.preventDefault();
+        handleNoSaleDrawerKick();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -850,8 +895,8 @@ export default function POSPage() {
     );
   };
 
-  // Add product to cart
-  const addToCart = (product: Product) => {
+  // Add product to cart (supports weighable decimal quantities e.g. 0.850 kg)
+  const addToCart = (product: Product, quantityToAdd: number = 1) => {
     if (product.stockQuantity <= 0) {
       setStatusMessage({ type: "error", text: `"${product.name}" is currently OUT OF STOCK.` });
       return;
@@ -862,7 +907,8 @@ export default function POSPage() {
 
       if (existingIndex > -1) {
         const item = prevCart[existingIndex];
-        if (item.quantity + 1 > product.stockQuantity) {
+        const newQty = Math.round((item.quantity + quantityToAdd) * 1000) / 1000;
+        if (newQty > product.stockQuantity) {
           setStatusMessage({
             type: "error",
             text: `Cannot add more. Only ${product.stockQuantity} ${product.unit} available in stock.`,
@@ -870,7 +916,6 @@ export default function POSPage() {
           return prevCart;
         }
 
-        const newQty = item.quantity + 1;
         const newUnitPrice = getItemUnitPrice(
           {
             sellingPrice: item.sellingPrice ?? product.sellingPrice,
@@ -896,7 +941,7 @@ export default function POSPage() {
           wholesalePrice: product.wholesalePrice,
           wholesaleMinQty: product.wholesaleMinQty,
         },
-        1,
+        quantityToAdd,
         billingMode
       );
 
@@ -908,12 +953,15 @@ export default function POSPage() {
           nameSinhala: product.nameSinhala,
           nameTamil: product.nameTamil,
           barcode: product.barcode,
+          pluCode: product.pluCode,
+          isWeighable: product.isWeighable,
+          tareWeightGrams: product.tareWeightGrams,
           sellingPrice: product.sellingPrice,
           wholesalePrice: product.wholesalePrice,
           wholesaleMinQty: product.wholesaleMinQty,
           unitPrice,
           costPrice: product.costPrice,
-          quantity: 1,
+          quantity: quantityToAdd,
           stockQuantity: product.stockQuantity,
           unit: product.unit,
           discount: 0,
@@ -994,13 +1042,21 @@ export default function POSPage() {
     });
   };
 
-  // No-Sale Cash Drawer Kick
+  // No-Sale Cash Drawer Kick (Hardware ESC/POS & audio feedback)
   const handleNoSaleDrawerKick = () => {
     const userRole = session?.user?.role;
-    const executeKick = (supervisorName?: string) => {
+    const executeKick = async (supervisorName?: string) => {
+      try {
+        await triggerCashDrawerKick({
+          pin: (business?.hardwareSettings?.cashDrawer?.kickPin as any) || "PIN2",
+          audioFeedback: true,
+        });
+      } catch (err) {
+        console.warn("Cash drawer kick pulse error:", err);
+      }
       setStatusMessage({
         type: "success",
-        text: `Cash drawer opened (No Sale)${supervisorName ? ` authorized by ${supervisorName}` : ""}.`,
+        text: `Cash drawer kicked (No Sale)${supervisorName ? ` authorized by ${supervisorName}` : ""}.`,
       });
     };
 
@@ -1020,20 +1076,61 @@ export default function POSPage() {
     });
   };
 
-  // Handle Barcode Scan (Enter key from USB scanner)
+  // Handle Barcode Scan (Enter key from USB scanner, scale sticker, or manual entry)
   const handleBarcodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const code = barcodeInput.trim();
     if (!code) return;
+
+    // Check Variable-Weight Barcode (e.g. 2000105008502 for 850g or 2800105002046 for Rs. 204)
+    const parsedScale = parseVariableWeightBarcode(code);
+    if (parsedScale && parsedScale.isVariableBarcode && parsedScale.pluCode) {
+      const matched = products.find(
+        (p) =>
+          p.pluCode === parsedScale.pluCode ||
+          p.barcode === parsedScale.pluCode ||
+          p.sku?.toLowerCase() === parsedScale.pluCode.toLowerCase()
+      );
+
+      if (matched) {
+        let weightKg = 1;
+        if (parsedScale.type === "WEIGHT" && parsedScale.weightInKg) {
+          weightKg = parsedScale.weightInKg;
+        } else if (parsedScale.type === "PRICE" && parsedScale.embeddedPrice && matched.sellingPrice > 0) {
+          weightKg = Math.round((parsedScale.embeddedPrice / matched.sellingPrice) * 1000) / 1000;
+        }
+
+        addToCart(matched, weightKg);
+        setBarcodeInput("");
+        setStatusMessage({
+          type: "success",
+          text: `Scale Sticker: ${matched.name} (${weightKg} kg @ ${formatCurrency(matched.sellingPrice)}/kg)`,
+        });
+        return;
+      } else {
+        setStatusMessage({
+          type: "error",
+          text: `Variable-weight barcode with PLU "${parsedScale.pluCode}" scanned, but no matching product found.`,
+        });
+        setBarcodeInput("");
+        return;
+      }
+    }
 
     const matched = products.find(
       (p) => p.barcode === code || p.sku?.toLowerCase() === code.toLowerCase()
     );
 
     if (matched) {
-      addToCart(matched);
-      setBarcodeInput("");
-      setStatusMessage({ type: "success", text: `Scanned: ${matched.name}` });
+      if (matched.isWeighable) {
+        setWeighModalInitialProduct(matched);
+        setIsWeighModalOpen(true);
+        setBarcodeInput("");
+      } else {
+        addToCart(matched);
+        setBarcodeInput("");
+        setStatusMessage({ type: "success", text: `Scanned: ${matched.name}` });
+      }
     } else {
       setStatusMessage({ type: "error", text: `No product found matching barcode "${code}".` });
       setBarcodeInput("");
@@ -1171,6 +1268,93 @@ export default function POSPage() {
           val <= (foreignAmountDue > 100 ? foreignAmountDue * 2 : 200)
       )
     : [];
+
+  // Customer Facing Display (CFD) Synchronization via BroadcastChannel
+  useEffect(() => {
+    const channel = createCFDBroadcastChannel();
+    if (channel) {
+      cfdChannelRef.current = channel;
+
+      channel.onmessage = (event: MessageEvent<CFDMessage>) => {
+        if (event.data?.type === "SYNC_REQUEST") {
+          channel.postMessage({
+            type: "SYNC_STATE",
+            state: {
+              status: cart.length > 0 ? (isCheckoutOpen ? "CHECKOUT" : "SCANNING") : "IDLE",
+              businessName: business?.name || "Corner Store POS",
+              registerName: selectedRegister?.name || "Register 01",
+              cashierName: (session?.user as any)?.name || "Cashier",
+              welcomeMessage: business?.hardwareSettings?.customerDisplay?.welcomeMessage,
+              promotionalMessage: business?.hardwareSettings?.customerDisplay?.promotionalMessage,
+              items: cart.map((item) => ({
+                id: item.productId,
+                name: item.name,
+                nameSi: item.nameSinhala,
+                nameTa: item.nameTamil,
+                price: item.unitPrice,
+                quantity: item.quantity,
+                unit: item.unit,
+                isWeighable: item.isWeighable,
+                tareWeightGrams: item.tareWeightGrams,
+                lineTotal: Math.round(item.unitPrice * item.quantity * 100) / 100,
+                discountAmount: item.discount,
+              })),
+              subtotal,
+              discountTotal: totalDiscount,
+              taxTotal: taxAmount,
+              grandTotal: netTotal,
+              currency: business?.currency || "LKR",
+              lastUpdated: Date.now(),
+            },
+          });
+        }
+      };
+    }
+
+    return () => {
+      channel?.close();
+    };
+  }, [cart, isCheckoutOpen, business, selectedRegister, session, subtotal, totalDiscount, taxAmount, netTotal]);
+
+  useEffect(() => {
+    if (!cfdChannelRef.current) return;
+    if (cart.length === 0) {
+      if (!completedSale) {
+        cfdChannelRef.current.postMessage({ type: "RESET_IDLE" });
+      }
+    } else {
+      cfdChannelRef.current.postMessage({
+        type: "CART_UPDATE",
+        state: {
+          status: isCheckoutOpen ? "CHECKOUT" : "SCANNING",
+          businessName: business?.name || "Corner Store POS",
+          registerName: selectedRegister?.name || "Register 01",
+          cashierName: (session?.user as any)?.name || "Cashier",
+          welcomeMessage: business?.hardwareSettings?.customerDisplay?.welcomeMessage,
+          promotionalMessage: business?.hardwareSettings?.customerDisplay?.promotionalMessage,
+          items: cart.map((item) => ({
+            id: item.productId,
+            name: item.name,
+            nameSi: item.nameSinhala,
+            nameTa: item.nameTamil,
+            price: item.unitPrice,
+            quantity: item.quantity,
+            unit: item.unit,
+            isWeighable: item.isWeighable,
+            tareWeightGrams: item.tareWeightGrams,
+            lineTotal: Math.round(item.unitPrice * item.quantity * 100) / 100,
+            discountAmount: item.discount,
+          })),
+          subtotal,
+          discountTotal: totalDiscount,
+          taxTotal: taxAmount,
+          grandTotal: netTotal,
+          currency: business?.currency || "LKR",
+          lastUpdated: Date.now(),
+        },
+      });
+    }
+  }, [cart, subtotal, totalDiscount, taxAmount, netTotal, isCheckoutOpen, business, selectedRegister, session, completedSale]);
 
   // Open Checkout Modal
   const openCheckout = () => {
@@ -1539,6 +1723,26 @@ export default function POSPage() {
       setCompletedSale(completedSaleObj);
       setWhatsappPhoneInput(offlineRecord.customerPhone || customerPhone || "");
       setShowWhatsAppSection(Boolean(offlineRecord.customerPhone || customerPhone));
+
+      // Kick cash drawer on cash payment
+      if (paymentMethod === "CASH") {
+        triggerCashDrawerKick({
+          pin: (business?.hardwareSettings?.cashDrawer?.kickPin as any) || "PIN2",
+          audioFeedback: true,
+        }).catch(console.error);
+      }
+
+      // Notify Customer Facing Display (CFD)
+      cfdChannelRef.current?.postMessage({
+        type: "SALE_COMPLETED",
+        payment: {
+          method: paymentMethod,
+          tendered: cashGivenNum > 0 ? cashGivenNum : netTotal,
+          change: changeDue,
+          receiptNumber: tempInvoiceNumber,
+        },
+      });
+
       setIsCheckoutOpen(false);
       setCart([]);
       setOrderDiscount(0);
@@ -1578,6 +1782,27 @@ export default function POSPage() {
         setCompletedSale(data.sale);
         setWhatsappPhoneInput(data.sale.customerPhone || customerPhone || "");
         setShowWhatsAppSection(Boolean(data.sale.customerPhone || customerPhone));
+
+        // Kick cash drawer on cash payment
+        if (paymentMethod === "CASH") {
+          triggerCashDrawerKick({
+            pin: (business?.hardwareSettings?.cashDrawer?.kickPin as any) || "PIN2",
+            audioFeedback: true,
+          }).catch(console.error);
+        }
+
+        // Notify Customer Facing Display (CFD)
+        cfdChannelRef.current?.postMessage({
+          type: "SALE_COMPLETED",
+          payment: {
+            method: paymentMethod,
+            tendered: cashGivenNum > 0 ? cashGivenNum : netTotal,
+            change: changeDue,
+            receiptNumber: data.sale.invoiceNumber,
+            receiptUrl: typeof window !== "undefined" ? `${window.location.origin}/pos/receipt/${data.sale._id}` : undefined,
+          },
+        });
+
         if (paymentMethod === "CREDIT" && matchedCustomer) {
           setMatchedCustomer((prev: any) =>
             prev ? { ...prev, currentBalance: (prev.currentBalance || 0) + netTotal } : null
@@ -1761,6 +1986,48 @@ export default function POSPage() {
                 )}
               </div>
 
+              {/* Hardware Peripherals: Weigh Scale, Drawer F9, CFD */}
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWeighModalInitialProduct(null);
+                    setIsWeighModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-teal-50 text-teal-800 border border-teal-300 shadow-2xs hover:bg-teal-100 transition"
+                  title="Electronic Weighing Scale & Produce Station"
+                >
+                  <Scale className="w-3.5 h-3.5 text-teal-600" />
+                  <span className="hidden xl:inline">Scale</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleNoSaleDrawerKick}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300 shadow-2xs hover:bg-amber-100 transition"
+                  title="Kick Cash Drawer (F9)"
+                >
+                  <Unlock className="w-3.5 h-3.5 text-amber-600" />
+                  <span className="hidden xl:inline">Drawer (F9)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.open(
+                      "/pos/customer-display",
+                      "cfd_window",
+                      "width=1024,height=768,menubar=no,toolbar=no,location=no,status=no"
+                    );
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-300 shadow-2xs hover:bg-indigo-100 transition"
+                  title="Pop Out Customer Facing Display (CFD) for Secondary Monitor"
+                >
+                  <Monitor className="w-3.5 h-3.5 text-indigo-600" />
+                  <span className="hidden xl:inline">CFD</span>
+                </button>
+              </div>
+
               {/* Network Status & Offline Resilience Queue */}
               <div className="flex items-center gap-1.5 shrink-0">
                 {isOnline ? (
@@ -1887,7 +2154,14 @@ export default function POSPage() {
                   return (
                     <button
                       key={p._id}
-                      onClick={() => addToCart(p)}
+                      onClick={() => {
+                        if (p.isWeighable) {
+                          setWeighModalInitialProduct(p);
+                          setIsWeighModalOpen(true);
+                        } else {
+                          addToCart(p);
+                        }
+                      }}
                       disabled={isOut}
                       className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all group relative overflow-hidden ${
                         isOut
@@ -1900,11 +2174,18 @@ export default function POSPage() {
                           <span className="text-[10px] text-slate-400 font-mono block">
                             {p.barcode ? `EAN: ${p.barcode}` : p.sku || "RETAIL"}
                           </span>
-                          {p.isBatchTracked && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
-                              FEFO
-                            </span>
-                          )}
+                          <div className="flex items-center gap-1">
+                            {p.isWeighable && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200 flex items-center gap-0.5">
+                                <Scale className="w-2.5 h-2.5" /> Scale
+                              </span>
+                            )}
+                            {p.isBatchTracked && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                FEFO
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <h4 className="font-semibold text-slate-800 text-xs sm:text-sm line-clamp-2 mt-0.5 leading-tight group-hover:text-blue-600">
                           {language === "si" && p.nameSinhala
@@ -2097,22 +2378,41 @@ export default function POSPage() {
                     )}
                     <span className="text-[10px] text-slate-400 font-mono">
                       {formatCurrency(item.unitPrice)} / {item.unit}
+                      {item.isWeighable && (
+                        <span className="ml-1 text-[9px] text-teal-600 font-semibold inline-flex items-center gap-0.5">
+                          <Scale className="w-2.5 h-2.5" /> {item.quantity.toFixed(3)} kg
+                        </span>
+                      )}
                     </span>
                   </div>
 
                   {/* Quantity Stepper */}
                   <div className="flex items-center gap-1 shrink-0 bg-slate-100 rounded-lg p-0.5">
                     <button
-                      onClick={() => updateQuantity(item.productId, item.quantity - 1)}
+                      onClick={() =>
+                        updateQuantity(
+                          item.productId,
+                          item.isWeighable
+                            ? Math.max(0, Math.round((item.quantity - 0.1) * 1000) / 1000)
+                            : item.quantity - 1
+                        )
+                      }
                       className="w-6 h-6 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:text-slate-900 transition-colors"
                     >
                       <Minus className="w-3 h-3" />
                     </button>
-                    <span className="w-7 text-center font-bold text-xs font-mono text-slate-900">
-                      {item.quantity}
+                    <span className="min-w-[28px] px-1 text-center font-bold text-xs font-mono text-slate-900">
+                      {item.isWeighable ? item.quantity.toFixed(3) : item.quantity}
                     </span>
                     <button
-                      onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                      onClick={() =>
+                        updateQuantity(
+                          item.productId,
+                          item.isWeighable
+                            ? Math.round((item.quantity + 0.1) * 1000) / 1000
+                            : item.quantity + 1
+                        )
+                      }
                       className="w-6 h-6 rounded flex items-center justify-center text-slate-600 hover:bg-white hover:text-slate-900 transition-colors"
                     >
                       <Plus className="w-3 h-3" />
@@ -4283,6 +4583,31 @@ export default function POSPage() {
           action={overrideModal.action}
           actionDescription={overrideModal.actionDescription}
           details={overrideModal.details}
+        />
+
+        {/* ================= WEIGHING SCALE & PRODUCE MODAL ================= */}
+        <WeighingScaleModal
+          isOpen={isWeighModalOpen}
+          onClose={() => {
+            setIsWeighModalOpen(false);
+            setWeighModalInitialProduct(null);
+          }}
+          products={
+            weighModalInitialProduct
+              ? [weighModalInitialProduct, ...products.filter((p) => p._id !== weighModalInitialProduct._id)]
+              : products
+          }
+          onAddWeighedItem={(prod, netWeightKg) => {
+            const foundProd = products.find((p) => p._id === prod._id);
+            if (foundProd) {
+              addToCart(foundProd, netWeightKg);
+              setStatusMessage({
+                type: "success",
+                text: `Added weighed item: ${foundProd.name} (${netWeightKg} kg @ ${formatCurrency(foundProd.sellingPrice)}/kg)`,
+              });
+            }
+          }}
+          currency={business?.currency || "LKR"}
         />
       </div>
     </AppLayout>

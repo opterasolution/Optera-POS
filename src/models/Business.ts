@@ -45,6 +45,33 @@ export interface ISmsSettings {
   };
 }
 
+export interface IHardwareSettings {
+  weighingScale?: {
+    enabled?: boolean;
+    scaleModel?: string; // "CAS", "TOLEDO", "DIBAL", "GENERIC"
+    baudRate?: number;    // default 9600
+    autoTare?: boolean;
+    defaultTareWeightGrams?: number;
+  };
+  variableWeightBarcodes?: {
+    enabled?: boolean;
+    weightPrefixes?: string[]; // default ["20", "21", "02"]
+    pricePrefixes?: string[];  // default ["28", "29"]
+    defaultUnit?: "kg" | "g";
+  };
+  cashDrawer?: {
+    enabled?: boolean;
+    autoKickOnCash?: boolean;
+    kickPin?: "PIN2" | "PIN5";
+    openKeyShortcut?: string; // default "F9"
+  };
+  customerDisplay?: {
+    enabled?: boolean;
+    welcomeMessage?: string;
+    promotionalMessage?: string;
+  };
+}
+
 export interface IBusiness extends Document {
   name: string;
   businessType: string;
@@ -113,6 +140,7 @@ export interface IBusiness extends Document {
     maxUsers?: number;
     maxRegisters?: number;
   };
+  hardwareSettings?: IHardwareSettings;
   onboardingCompleted?: boolean;
   onboardingStep?: number;
   catalogPreset?: string;
@@ -244,6 +272,32 @@ const BusinessSchema = new Schema<IBusiness>(
       maxProducts: { type: Number, default: 500 },
       maxUsers: { type: Number, default: 5 },
       maxRegisters: { type: Number, default: 2 },
+    },
+    hardwareSettings: {
+      weighingScale: {
+        enabled: { type: Boolean, default: false },
+        scaleModel: { type: String, default: "CAS" },
+        baudRate: { type: Number, default: 9600 },
+        autoTare: { type: Boolean, default: false },
+        defaultTareWeightGrams: { type: Number, default: 0 },
+      },
+      variableWeightBarcodes: {
+        enabled: { type: Boolean, default: true },
+        weightPrefixes: { type: [String], default: ["20", "21", "02"] },
+        pricePrefixes: { type: [String], default: ["28", "29"] },
+        defaultUnit: { type: String, enum: ["kg", "g"], default: "kg" },
+      },
+      cashDrawer: {
+        enabled: { type: Boolean, default: true },
+        autoKickOnCash: { type: Boolean, default: true },
+        kickPin: { type: String, enum: ["PIN2", "PIN5"], default: "PIN2" },
+        openKeyShortcut: { type: String, default: "F9" },
+      },
+      customerDisplay: {
+        enabled: { type: Boolean, default: true },
+        welcomeMessage: { type: String, default: "Welcome! ආයුබෝවන්! வணக்கம்!" },
+        promotionalMessage: { type: String, default: "Fresh local produce daily • Islandwide quality guaranteed" },
+      },
     },
     onboardingCompleted: { type: Boolean, default: false },
     onboardingStep: { type: Number, default: 1 },

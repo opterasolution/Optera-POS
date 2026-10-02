@@ -8,6 +8,9 @@ export interface IProduct extends Document {
   nameTamil?: string;
   sku?: string;
   barcode?: string;
+  pluCode?: string;
+  isWeighable?: boolean;
+  tareWeightGrams?: number;
   costPrice: number;
   sellingPrice: number;
   wholesalePrice?: number;
@@ -39,6 +42,9 @@ const ProductSchema = new Schema<IProduct>(
     nameTamil: { type: String, trim: true },
     sku: { type: String, trim: true },
     barcode: { type: String, trim: true },
+    pluCode: { type: String, trim: true },
+    isWeighable: { type: Boolean, default: false },
+    tareWeightGrams: { type: Number, default: 0, min: 0 },
     costPrice: { type: Number, required: true, min: 0, default: 0 },
     sellingPrice: { type: Number, required: true, min: 0 },
     wholesalePrice: { type: Number, min: 0 },
@@ -54,6 +60,7 @@ const ProductSchema = new Schema<IProduct>(
 
 // Compound indexes for ultra-fast multi-tenant queries
 ProductSchema.index({ businessId: 1, barcode: 1 });
+ProductSchema.index({ businessId: 1, pluCode: 1 });
 ProductSchema.index({ businessId: 1, sku: 1 });
 ProductSchema.index({ businessId: 1, name: "text" });
 

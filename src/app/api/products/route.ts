@@ -192,6 +192,9 @@ export async function POST(req: Request) {
       stockQuantity,
       lowStockThreshold,
       unit,
+      pluCode,
+      isWeighable,
+      tareWeightGrams,
     } = parsed.data;
 
     if (Boolean(process.env.MONGODB_URI)) {
@@ -242,6 +245,9 @@ export async function POST(req: Request) {
         name,
         sku: sku || undefined,
         barcode: barcode || undefined,
+        pluCode: pluCode || undefined,
+        isWeighable: Boolean(isWeighable),
+        tareWeightGrams: tareWeightGrams || 0,
         costPrice,
         sellingPrice,
         wholesalePrice: wholesalePrice !== undefined ? wholesalePrice : undefined,
