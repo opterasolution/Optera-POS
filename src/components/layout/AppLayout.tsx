@@ -31,6 +31,7 @@ import {
   MessageSquare,
   Calendar,
   Bike,
+  ChefHat,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n/LanguageContext";
@@ -78,6 +79,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
       : []),
     { label: t("nav.posCounter", "POS Counter"), href: "/pos", icon: ShoppingCart, highlight: true },
     { label: t("nav.delivery", "Delivery Hub"), href: "/delivery", icon: Bike },
+    { label: t("nav.kds", "Kitchen Display (KDS)"), href: "/kds", icon: ChefHat },
     { label: t("nav.dashboard", "Dashboard"), href: "/dashboard", icon: LayoutDashboard, allowed: isManager || isSupervisor },
     { label: t("nav.products", "Products"), href: "/products", icon: Package, allowed: isManager || isInventoryClerk },
     { label: t("nav.inventory", "Inventory"), href: "/inventory", icon: Boxes, allowed: isManager || isInventoryClerk },

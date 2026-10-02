@@ -67,6 +67,44 @@ export async function PATCH(
           }
           order.scheduledPrepEnd = new Date(now.getTime() + order.prepTimeMinutes * 60 * 1000);
           notes = `Order accepted with ${order.prepTimeMinutes} mins prep time.`;
+
+          // Auto-dispatch ticket to Kitchen Display System (KDS)
+          try {
+            const { KitchenTicket } = await import("@/models/KitchenTicket");
+            const existingKds = await KitchenTicket.findOne({
+              businessId: context.businessId,
+              orderNumber: order.externalOrderId,
+            });
+            if (!existingKds) {
+              const countToday = await KitchenTicket.countDocuments({
+                businessId: context.businessId,
+              });
+              await KitchenTicket.create({
+                businessId: context.businessId,
+                ticketNumber: `KOT-${(countToday + 1).toString().padStart(3, "0")}`,
+                orderNumber: order.externalOrderId,
+                source: order.platform === "UBER_EATS" ? "UBER_EATS" : order.platform.startsWith("PICKME") ? "PICKME" : "DIRECT_DELIVERY",
+                tableOrCustomer: `${order.platform.replace("_", " ")} • ${order.customer?.name || "Customer"}`,
+                orderType: "DELIVERY",
+                serverName: "Online Dispatcher",
+                station: "ALL",
+                priority: "RUSH",
+                targetPrepMinutes: order.prepTimeMinutes || 15,
+                notes: order.customer?.deliveryNotes || undefined,
+                status: "NEW",
+                items: (order.items || []).map((it: any) => ({
+                  name: it.name,
+                  quantity: it.quantity,
+                  unit: "portions",
+                  notes: it.specialInstructions,
+                  station: "HOT_KITCHEN",
+                  status: "PENDING",
+                })),
+              });
+            }
+          } catch (kdsErr) {
+            console.error("Auto KDS dispatch error:", kdsErr);
+          }
           break;
 
         case "START_PREP":

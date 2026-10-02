@@ -4,6 +4,7 @@ export interface TranslationsSchema {
   nav: {
     posCounter: string;
     delivery: string;
+    kds: string;
     dashboard: string;
     products: string;
     inventory: string;
@@ -131,6 +132,7 @@ export const translations: Record<Language, TranslationsSchema> = {
     nav: {
       posCounter: "POS Counter",
       delivery: "Delivery Hub",
+      kds: "Kitchen Display (KDS)",
       dashboard: "Dashboard",
       products: "Products",
       inventory: "Inventory",
@@ -256,6 +258,7 @@ export const translations: Record<Language, TranslationsSchema> = {
     nav: {
       posCounter: "විකුණුම් පර්යන්තය",
       delivery: "බෙදාහැරීම් මධ්‍යස්ථානය",
+      kds: "මුළුතැන්ගෙයි පුවරුව (KDS)",
       dashboard: "පාලක පුවරුව",
       products: "භාණ්ඩ",
       inventory: "තොග පාලනය",
@@ -381,6 +384,7 @@ export const translations: Record<Language, TranslationsSchema> = {
     nav: {
       posCounter: "விற்பனை கவுண்டர்",
       delivery: "டெலிவரி மையம்",
+      kds: "சமையலறை திரை (KDS)",
       dashboard: "டாஷ்போர்டு",
       products: "தயாரிப்புகள்",
       inventory: "சரக்கு இருப்பு",

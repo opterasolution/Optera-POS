@@ -87,6 +87,24 @@ export interface IDeliverySettings {
   notifySoundEnabled?: boolean;
 }
 
+export interface IKdsStation {
+  id: string;
+  name: string;
+  nameSi?: string;
+  nameTa?: string;
+  color?: string;
+}
+
+export interface IKdsSettings {
+  enabled?: boolean;
+  soundAlerts?: boolean;
+  targetPrepTimeMinutes?: number; // default 15 mins
+  alertThresholdMinutes?: number; // default 10 mins
+  autoPrintKOT?: boolean;
+  defaultStation?: string; // "ALL"
+  stations?: IKdsStation[];
+}
+
 export interface IBusiness extends Document {
   name: string;
   businessType: string;
@@ -157,6 +175,7 @@ export interface IBusiness extends Document {
   };
   hardwareSettings?: IHardwareSettings;
   deliverySettings?: IDeliverySettings;
+  kdsSettings?: IKdsSettings;
   onboardingCompleted?: boolean;
   onboardingStep?: number;
   catalogPreset?: string;
@@ -328,6 +347,23 @@ const BusinessSchema = new Schema<IBusiness>(
       autoAcceptOrders: { type: Boolean, default: false },
       defaultPrepTimeMinutes: { type: Number, default: 15, min: 1 },
       notifySoundEnabled: { type: Boolean, default: true },
+    },
+    kdsSettings: {
+      enabled: { type: Boolean, default: true },
+      soundAlerts: { type: Boolean, default: true },
+      targetPrepTimeMinutes: { type: Number, default: 15, min: 1 },
+      alertThresholdMinutes: { type: Number, default: 10, min: 1 },
+      autoPrintKOT: { type: Boolean, default: false },
+      defaultStation: { type: String, default: "ALL" },
+      stations: [
+        {
+          id: { type: String, required: true },
+          name: { type: String, required: true },
+          nameSi: { type: String },
+          nameTa: { type: String },
+          color: { type: String },
+        },
+      ],
     },
     onboardingCompleted: { type: Boolean, default: false },
     onboardingStep: { type: Number, default: 1 },

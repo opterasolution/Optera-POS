@@ -54,6 +54,7 @@ import {
   UserCheck,
   Scale,
   Bike,
+  ChefHat,
 } from "lucide-react";
 import QRCodeImage from "@/components/common/QRCodeImage";
 import SupervisorOverrideModal from "@/components/pos/SupervisorOverrideModal";
@@ -255,6 +256,9 @@ export default function POSPage() {
 
   // Delivery Partner Hub Active Order State
   const [activeDeliveryCount, setActiveDeliveryCount] = useState<number>(0);
+
+  // Kitchen Display (KDS) Sending State
+  const [sendingToKitchen, setSendingToKitchen] = useState(false);
 
   // Checkout Modal State
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
@@ -1044,6 +1048,52 @@ export default function POSPage() {
         });
       },
     });
+  };
+
+  // Send Active Cart Items to Kitchen Display System (KDS KOT)
+  const handleSendCartToKitchen = async () => {
+    if (cart.length === 0) {
+      setStatusMessage({ type: "error", text: "Cart is empty. Add food items to send to kitchen." });
+      return;
+    }
+    setSendingToKitchen(true);
+    try {
+      const res = await fetch("/api/kds/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderNumber: `POS-${Date.now().toString().slice(-4)}`,
+          source: "POS_COUNTER",
+          tableOrCustomer: customerName || "Walk-in Counter",
+          orderType: "DINE_IN",
+          serverName: (session?.user as any)?.name || "Cashier",
+          priority: "NORMAL",
+          targetPrepMinutes: 15,
+          items: cart.map((c) => ({
+            name: c.name,
+            nameSi: c.nameSinhala,
+            nameTa: c.nameTamil,
+            quantity: c.quantity,
+            unit: c.unit || "portions",
+            station: "HOT_KITCHEN",
+          })),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setStatusMessage({
+          type: "success",
+          text: `Ticket ${data.ticket?.ticketNumber || "KOT"} sent to kitchen display!`,
+        });
+      } else {
+        const err = await res.json();
+        setStatusMessage({ type: "error", text: err.error || "Failed to dispatch to kitchen." });
+      }
+    } catch {
+      setStatusMessage({ type: "error", text: "Network error sending to kitchen." });
+    } finally {
+      setSendingToKitchen(false);
+    }
   };
 
   // No-Sale Cash Drawer Kick (Hardware ESC/POS & audio feedback)
@@ -2078,6 +2128,15 @@ export default function POSPage() {
                     </span>
                   )}
                 </Link>
+
+                <Link
+                  href="/kds"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs hover:bg-amber-100 transition"
+                  title="Kitchen Display System (KDS) & Multi-Station Routing"
+                >
+                  <ChefHat className="w-3.5 h-3.5 text-amber-600" />
+                  <span className="hidden xl:inline">KDS</span>
+                </Link>
               </div>
 
               {/* Network Status & Offline Resilience Queue */}
@@ -2653,6 +2712,18 @@ export default function POSPage() {
                 </div>
               )}
             </div>
+
+            {/* Send to Kitchen (KOT) Action */}
+            <button
+              type="button"
+              onClick={handleSendCartToKitchen}
+              disabled={cart.length === 0 || sendingToKitchen}
+              className="w-full py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition disabled:opacity-50"
+              title="Dispatch active food items to Kitchen Display (KDS) as KOT"
+            >
+              <ChefHat className={`w-3.5 h-3.5 text-amber-600 ${sendingToKitchen ? "animate-spin" : ""}`} />
+              <span>{sendingToKitchen ? "Dispatching..." : "Send to Kitchen (KOT)"}</span>
+            </button>
 
             {/* High Visibility Checkout Action */}
             <button
