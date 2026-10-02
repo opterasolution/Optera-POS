@@ -53,6 +53,7 @@ import {
   Globe,
   UserCheck,
   Scale,
+  Bike,
 } from "lucide-react";
 import QRCodeImage from "@/components/common/QRCodeImage";
 import SupervisorOverrideModal from "@/components/pos/SupervisorOverrideModal";
@@ -251,6 +252,9 @@ export default function POSPage() {
   const [couponInput, setCouponInput] = useState("");
   const [redeemLoyaltyPoints, setRedeemLoyaltyPoints] = useState(false);
   const [pointsToRedeemInput, setPointsToRedeemInput] = useState<number>(0);
+
+  // Delivery Partner Hub Active Order State
+  const [activeDeliveryCount, setActiveDeliveryCount] = useState<number>(0);
 
   // Checkout Modal State
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
@@ -1356,6 +1360,36 @@ export default function POSPage() {
     }
   }, [cart, subtotal, totalDiscount, taxAmount, netTotal, isCheckoutOpen, business, selectedRegister, session, completedSale]);
 
+  // Delivery Orders Poller for POS Toolbar Indicator
+  useEffect(() => {
+    let isMounted = true;
+    const checkDeliveryOrders = async () => {
+      try {
+        const res = await fetch("/api/delivery/orders?limit=15");
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && data.orders) {
+            const active = data.orders.filter(
+              (o: any) =>
+                o.orderStatus === "PENDING_ACCEPT" ||
+                o.orderStatus === "PREPARING" ||
+                o.orderStatus === "READY_FOR_PICKUP"
+            ).length;
+            setActiveDeliveryCount(active);
+          }
+        }
+      } catch {
+        // silent fallback if offline
+      }
+    };
+    checkDeliveryOrders();
+    const interval = setInterval(checkDeliveryOrders, 15000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
   // Open Checkout Modal
   const openCheckout = () => {
     if (cart.length === 0) {
@@ -2026,6 +2060,24 @@ export default function POSPage() {
                   <Monitor className="w-3.5 h-3.5 text-indigo-600" />
                   <span className="hidden xl:inline">CFD</span>
                 </button>
+
+                <Link
+                  href="/delivery"
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border shadow-2xs transition ${
+                    activeDeliveryCount > 0
+                      ? "bg-amber-100 text-amber-950 border-amber-400 hover:bg-amber-200 ring-2 ring-amber-300 ring-offset-1"
+                      : "bg-sky-50 text-sky-800 border-sky-300 shadow-2xs hover:bg-sky-100"
+                  }`}
+                  title="Delivery Partner Hub (PickMe Flash & Uber Eats Sri Lanka)"
+                >
+                  <Bike className={`w-3.5 h-3.5 ${activeDeliveryCount > 0 ? "text-amber-700 animate-bounce" : "text-sky-600"}`} />
+                  <span className="hidden xl:inline">Delivery</span>
+                  {activeDeliveryCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-amber-600 text-white animate-pulse">
+                      {activeDeliveryCount}
+                    </span>
+                  )}
+                </Link>
               </div>
 
               {/* Network Status & Offline Resilience Queue */}

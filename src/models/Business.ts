@@ -72,6 +72,21 @@ export interface IHardwareSettings {
   };
 }
 
+export interface IDeliverySettings {
+  pickmeEnabled?: boolean;
+  pickmeApiKey?: string;
+  pickmeStoreId?: string;
+  pickmeCommissionPercent?: number; // default 22%
+  uberEatsEnabled?: boolean;
+  uberEatsApiKey?: string;
+  uberEatsStoreId?: string;
+  uberEatsCommissionPercent?: number; // default 25%
+  directDeliveryEnabled?: boolean;
+  autoAcceptOrders?: boolean;
+  defaultPrepTimeMinutes?: number; // default 15
+  notifySoundEnabled?: boolean;
+}
+
 export interface IBusiness extends Document {
   name: string;
   businessType: string;
@@ -141,6 +156,7 @@ export interface IBusiness extends Document {
     maxRegisters?: number;
   };
   hardwareSettings?: IHardwareSettings;
+  deliverySettings?: IDeliverySettings;
   onboardingCompleted?: boolean;
   onboardingStep?: number;
   catalogPreset?: string;
@@ -298,6 +314,20 @@ const BusinessSchema = new Schema<IBusiness>(
         welcomeMessage: { type: String, default: "Welcome! ආයුබෝවන්! வணக்கம்!" },
         promotionalMessage: { type: String, default: "Fresh local produce daily • Islandwide quality guaranteed" },
       },
+    },
+    deliverySettings: {
+      pickmeEnabled: { type: Boolean, default: false },
+      pickmeApiKey: { type: String, trim: true },
+      pickmeStoreId: { type: String, trim: true },
+      pickmeCommissionPercent: { type: Number, default: 22, min: 0 },
+      uberEatsEnabled: { type: Boolean, default: false },
+      uberEatsApiKey: { type: String, trim: true },
+      uberEatsStoreId: { type: String, trim: true },
+      uberEatsCommissionPercent: { type: Number, default: 25, min: 0 },
+      directDeliveryEnabled: { type: Boolean, default: true },
+      autoAcceptOrders: { type: Boolean, default: false },
+      defaultPrepTimeMinutes: { type: Number, default: 15, min: 1 },
+      notifySoundEnabled: { type: Boolean, default: true },
     },
     onboardingCompleted: { type: Boolean, default: false },
     onboardingStep: { type: Number, default: 1 },

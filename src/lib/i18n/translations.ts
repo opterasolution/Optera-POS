@@ -3,6 +3,7 @@ export type Language = "en" | "si" | "ta";
 export interface TranslationsSchema {
   nav: {
     posCounter: string;
+    delivery: string;
     dashboard: string;
     products: string;
     inventory: string;
@@ -129,6 +130,7 @@ export const translations: Record<Language, TranslationsSchema> = {
   en: {
     nav: {
       posCounter: "POS Counter",
+      delivery: "Delivery Hub",
       dashboard: "Dashboard",
       products: "Products",
       inventory: "Inventory",
@@ -253,6 +255,7 @@ export const translations: Record<Language, TranslationsSchema> = {
   si: {
     nav: {
       posCounter: "විකුණුම් පර්යන්තය",
+      delivery: "බෙදාහැරීම් මධ්‍යස්ථානය",
       dashboard: "පාලක පුවරුව",
       products: "භාණ්ඩ",
       inventory: "තොග පාලනය",
@@ -377,6 +380,7 @@ export const translations: Record<Language, TranslationsSchema> = {
   ta: {
     nav: {
       posCounter: "விற்பனை கவுண்டர்",
+      delivery: "டெலிவரி மையம்",
       dashboard: "டாஷ்போர்டு",
       products: "தயாரிப்புகள்",
       inventory: "சரக்கு இருப்பு",
