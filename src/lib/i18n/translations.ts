@@ -5,6 +5,7 @@ export interface TranslationsSchema {
     posCounter: string;
     delivery: string;
     kds: string;
+    tables: string;
     dashboard: string;
     products: string;
     inventory: string;
@@ -133,6 +134,7 @@ export const translations: Record<Language, TranslationsSchema> = {
       posCounter: "POS Counter",
       delivery: "Delivery Hub",
       kds: "Kitchen Display (KDS)",
+      tables: "Dining Tables",
       dashboard: "Dashboard",
       products: "Products",
       inventory: "Inventory",
@@ -259,6 +261,7 @@ export const translations: Record<Language, TranslationsSchema> = {
       posCounter: "විකුණුම් පර්යන්තය",
       delivery: "බෙදාහැරීම් මධ්‍යස්ථානය",
       kds: "මුළුතැන්ගෙයි පුවරුව (KDS)",
+      tables: "මේස කළමනාකරණය",
       dashboard: "පාලක පුවරුව",
       products: "භාණ්ඩ",
       inventory: "තොග පාලනය",
@@ -385,6 +388,7 @@ export const translations: Record<Language, TranslationsSchema> = {
       posCounter: "விற்பனை கவுண்டர்",
       delivery: "டெலிவரி மையம்",
       kds: "சமையலறை திரை (KDS)",
+      tables: "சாப்பாட்டு மேசைகள்",
       dashboard: "டாஷ்போர்டு",
       products: "தயாரிப்புகள்",
       inventory: "சரக்கு இருப்பு",

@@ -105,6 +105,14 @@ export interface IKdsSettings {
   stations?: IKdsStation[];
 }
 
+export interface IRestaurantSettings {
+  enabled?: boolean;
+  serviceChargeEnabled?: boolean;
+  serviceChargePercent?: number; // default 10% standard Sri Lankan restaurant service charge
+  sections?: string[];
+  autoSendKdsOnTableOrder?: boolean;
+}
+
 export interface IBusiness extends Document {
   name: string;
   businessType: string;
@@ -176,6 +184,7 @@ export interface IBusiness extends Document {
   hardwareSettings?: IHardwareSettings;
   deliverySettings?: IDeliverySettings;
   kdsSettings?: IKdsSettings;
+  restaurantSettings?: IRestaurantSettings;
   onboardingCompleted?: boolean;
   onboardingStep?: number;
   catalogPreset?: string;
@@ -364,6 +373,16 @@ const BusinessSchema = new Schema<IBusiness>(
           color: { type: String },
         },
       ],
+    },
+    restaurantSettings: {
+      enabled: { type: Boolean, default: true },
+      serviceChargeEnabled: { type: Boolean, default: true },
+      serviceChargePercent: { type: Number, default: 10, min: 0 },
+      sections: {
+        type: [String],
+        default: ["Main Dining Hall", "Outdoor Patio", "VIP Lounge"],
+      },
+      autoSendKdsOnTableOrder: { type: Boolean, default: true },
     },
     onboardingCompleted: { type: Boolean, default: false },
     onboardingStep: { type: Number, default: 1 },

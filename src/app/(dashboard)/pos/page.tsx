@@ -55,6 +55,7 @@ import {
   Scale,
   Bike,
   ChefHat,
+  UtensilsCrossed,
 } from "lucide-react";
 import QRCodeImage from "@/components/common/QRCodeImage";
 import SupervisorOverrideModal from "@/components/pos/SupervisorOverrideModal";
@@ -2136,6 +2137,15 @@ export default function POSPage() {
                 >
                   <ChefHat className="w-3.5 h-3.5 text-amber-600" />
                   <span className="hidden xl:inline">KDS</span>
+                </Link>
+
+                <Link
+                  href="/tables"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-900 border border-emerald-300 shadow-2xs hover:bg-emerald-100 transition"
+                  title="Dining Room & Table Floor Plan"
+                >
+                  <UtensilsCrossed className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="hidden xl:inline">Tables</span>
                 </Link>
               </div>
 
