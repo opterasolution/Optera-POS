@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { Types } from "mongoose";
 import { connectToDatabase } from "@/lib/db";
-import { Customer } from "@/models/Customer";
+import { Customer, generatePortalToken } from "@/models/Customer";
 import { CreditTransaction } from "@/models/CreditTransaction";
 import { Shift } from "@/models/Shift";
 import { Register } from "@/models/Register";
@@ -226,9 +226,16 @@ export async function POST(
         performedBy: context.username || "Manager",
       });
 
+      // Ensure customer has portalToken for live statement access
+      if (!customer.portalToken) {
+        customer.portalToken = generatePortalToken();
+      }
+
       // Update customer balance
       customer.currentBalance = balanceAfter;
       await customer.save();
+
+      const portalUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://pos.srilanka.lk"}/portal/statement/${customer.portalToken}`;
 
       // Audit log
       await AuditLog.create({
@@ -266,6 +273,7 @@ export async function POST(
               balance: balanceAfter.toLocaleString(),
               storeName: (businessDoc as any)?.name || "Our Store",
               ref: transactionNumber,
+              portalUrl,
             },
             metadata: { transactionNumber, creditTransactionId: creditTxn._id.toString() },
           });
@@ -281,8 +289,11 @@ export async function POST(
           _id: customer._id,
           name: customer.name,
           phone: customer.phone,
+          portalToken: customer.portalToken,
+          portalUrl,
           creditLimit: customer.creditLimit,
           previousBalance: balanceBefore,
+          remainingBalance: balanceAfter,
           currentBalance: balanceAfter,
         },
       });

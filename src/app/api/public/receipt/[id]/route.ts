@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/db";
 import { Sale } from "@/models/Sale";
 import { Business } from "@/models/Business";
+import { Customer } from "@/models/Customer";
 
 /**
  * Public Receipt Lookup API Route
@@ -39,6 +40,24 @@ export async function GET(
         .select("name businessType phone email address logo currency taxSettings receiptSettings bankDetails")
         .lean();
 
+      // Fetch customer portalToken if linked
+      let customerPortalToken: string | undefined;
+      if (sale.customerId) {
+        const cust = await Customer.findById(sale.customerId).select("portalToken").lean();
+        if (cust?.portalToken) {
+          customerPortalToken = cust.portalToken;
+        }
+      }
+
+      // Generate verification authenticity token
+      const verificationToken = Buffer.from(
+        `${sale._id}:${sale.invoiceNumber}:${sale.netTotal}`
+      )
+        .toString("base64")
+        .replace(/[^a-zA-Z0-9]/g, "")
+        .slice(0, 12)
+        .toUpperCase();
+
       // Sanitize sale object for customer viewing (hide internal tenant keys & costs)
       const customerReceipt = {
         _id: sale._id,
@@ -46,6 +65,7 @@ export async function GET(
         cashierName: sale.cashierName || "Counter Staff",
         customerName: sale.customerName || "Customer",
         customerPhone: sale.customerPhone,
+        customerPortalToken,
         registerName: sale.registerName,
         registerNumber: sale.registerNumber,
         items: (sale.items || []).map((it: any) => ({
@@ -55,19 +75,39 @@ export async function GET(
           unit: it.unit || "unit",
           quantity: it.quantity,
           unitPrice: it.unitPrice,
+          discount: it.discount || 0,
           total: it.total,
+          batchNumber: it.batchNumber,
+          expiryDate: it.expiryDate,
         })),
         subtotal: sale.subtotal,
         discountTotal: sale.discountTotal || 0,
         taxTotal: sale.taxTotal || 0,
         netTotal: sale.netTotal,
+        taxBreakdown: sale.taxBreakdown,
+        isTaxInvoice: sale.isTaxInvoice,
+        buyerDetails: sale.buyerDetails,
         paymentMethod: sale.paymentMethod,
         cashReceived: sale.cashReceived,
         changeGiven: sale.changeGiven,
+        paymentReference: sale.paymentReference,
+        paymentStatus: sale.paymentStatus,
+        dueDate: sale.dueDate,
+        amountPaid: sale.amountPaid,
+        balanceDue: sale.balanceDue,
         pointsEarned: sale.pointsEarned,
         pointsRedeemed: sale.pointsRedeemed,
         loyaltyDiscount: sale.loyaltyDiscount,
+        giftVoucherRedeemed: sale.giftVoucherRedeemed,
+        creditNoteRedeemed: sale.creditNoteRedeemed,
         appliedPromotions: sale.appliedPromotions,
+        tenderCurrency: sale.tenderCurrency,
+        exchangeRate: sale.exchangeRate,
+        foreignAmount: sale.foreignAmount,
+        foreignCashReceived: sale.foreignCashReceived,
+        foreignChangeGiven: sale.foreignChangeGiven,
+        foreignCurrencySymbol: sale.foreignCurrencySymbol,
+        verificationToken,
         createdAt: sale.createdAt,
       };
 
@@ -93,11 +133,27 @@ export async function GET(
         _id: saleId,
         invoiceNumber: saleId.startsWith("INV-") ? saleId : "INV-2026-0034",
         cashierName: "Store Cashier",
-        customerName: "Valued Customer",
+        customerName: "Sunil Perera",
+        customerPhone: "0771234567",
+        customerPortalToken: "demo_portal_token_sunil",
         paymentMethod: "CASH",
         items: [
-          { name: "Keeri Samba Rice 5kg", quantity: 1, unitPrice: 1450, total: 1450 },
-          { name: "Sunlight Soap 110g", quantity: 2, unitPrice: 120, total: 240 },
+          {
+            name: "Keeri Samba Rice 5kg",
+            quantity: 1,
+            unitPrice: 1450,
+            total: 1450,
+            batchNumber: "LOT-2026-092",
+            expiryDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+          {
+            name: "Sunlight Soap 110g",
+            quantity: 2,
+            unitPrice: 120,
+            total: 240,
+            batchNumber: "LOT-2026-041",
+            expiryDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+          },
         ],
         subtotal: 1690,
         discountTotal: 0,
@@ -105,13 +161,22 @@ export async function GET(
         netTotal: 1690,
         cashReceived: 2000,
         changeGiven: 310,
+        verificationToken: "SL-VER-772910",
         createdAt: new Date().toISOString(),
       },
       business: {
         name: "Kandy Super Grocers",
         phone: "0771234567",
+        email: "support@kandygrocers.lk",
         address: "No. 45, Peradeniya Road, Kandy",
         currency: "LKR",
+        taxSettings: {
+          enabled: true,
+          tin: "109847291-7000",
+          vatNumber: "109847291-7000",
+          ssclEnabled: true,
+          ssclRate: 2.5,
+        },
         receiptSettings: {
           headerMessage: "Thank you for shopping at Kandy Super Grocers!",
           footerMessage: "Goods returnable within 3 days with receipt. Please come again!",

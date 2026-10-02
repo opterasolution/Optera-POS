@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/db";
-import { Customer } from "@/models/Customer";
+import { Customer, generatePortalToken } from "@/models/Customer";
 import { Sale } from "@/models/Sale";
 import { requireAuth } from "@/lib/tenant";
 import { customerSchema } from "@/lib/validations/customer";
@@ -23,6 +23,11 @@ export async function GET(
 
       if (!customer) {
         return NextResponse.json({ success: false, error: "Customer not found." }, { status: 404 });
+      }
+
+      if (!customer.portalToken) {
+        customer.portalToken = generatePortalToken();
+        await customer.save();
       }
 
       // Fetch customer purchase history

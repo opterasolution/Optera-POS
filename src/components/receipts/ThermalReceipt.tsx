@@ -1,13 +1,21 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
+import QRCodeImage from "@/components/common/QRCodeImage";
 
 export interface ThermalReceiptProps {
   business: {
     name: string;
     phone?: string;
     address?: string;
+    taxSettings?: {
+      enabled?: boolean;
+      tin?: string;
+      vatNumber?: string;
+      ssclEnabled?: boolean;
+      ssclRate?: number;
+    };
     receiptSettings?: {
       headerMessage?: string;
       footerMessage?: string;
@@ -15,6 +23,7 @@ export interface ThermalReceiptProps {
     };
   };
   sale: {
+    _id?: string;
     invoiceNumber: string;
     cashierName: string;
     customerName?: string;
@@ -26,6 +35,8 @@ export interface ThermalReceiptProps {
       unitPrice: number;
       quantity: number;
       total: number;
+      batchNumber?: string;
+      expiryDate?: string | Date;
     }>;
     subtotal: number;
     discountTotal?: number;
@@ -53,6 +64,8 @@ export interface ThermalReceiptProps {
     createdAt: string | Date;
   };
   width?: "58mm" | "80mm";
+  publicReceiptUrl?: string;
+  showQrCode?: boolean;
   className?: string;
 }
 
@@ -60,10 +73,25 @@ export default function ThermalReceipt({
   business,
   sale,
   width,
+  publicReceiptUrl,
+  showQrCode = true,
   className = "",
 }: ThermalReceiptProps) {
   const receiptWidth = width || business.receiptSettings?.defaultWidth || "58mm";
   const is80mm = receiptWidth === "80mm";
+
+  const [mountedOrigin, setMountedOrigin] = useState<string>("");
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setMountedOrigin(window.location.origin);
+    }
+  }, []);
+
+  const qrUrl =
+    publicReceiptUrl ||
+    (mountedOrigin
+      ? `${mountedOrigin}/receipt/${sale._id || sale.invoiceNumber}`
+      : `https://pos.srilanka.lk/receipt/${sale._id || sale.invoiceNumber}`);
 
   return (
     <div
@@ -81,6 +109,12 @@ export default function ThermalReceipt({
         )}
         {business.phone && (
           <p className="text-[10px] text-zinc-700 font-bold">Tel: {business.phone}</p>
+        )}
+        {business.taxSettings?.tin && (
+          <p className="text-[9px] text-zinc-700 font-mono">TIN: {business.taxSettings.tin}</p>
+        )}
+        {business.taxSettings?.vatNumber && (
+          <p className="text-[9px] text-zinc-700 font-mono">VAT Reg: {business.taxSettings.vatNumber}</p>
         )}
         {business.receiptSettings?.headerMessage && (
           <p className="text-[9px] text-zinc-600 italic mt-1">
@@ -144,6 +178,12 @@ export default function ThermalReceipt({
                 <span>
                   {item.quantity} x {formatCurrency(item.unitPrice)}
                 </span>
+                {item.batchNumber && (
+                  <span className="text-[8px] font-mono text-zinc-500">
+                    Lot: {item.batchNumber}
+                    {item.expiryDate ? ` Exp: ${new Date(item.expiryDate).toLocaleDateString("en-GB")}` : ""}
+                  </span>
+                )}
               </div>
             </div>
           ))}
@@ -286,6 +326,26 @@ export default function ThermalReceipt({
           </div>
         )}
       </div>
+
+      {/* Digital QR E-Receipt Scan Area */}
+      {showQrCode && qrUrl && (
+        <div className="border-t border-dashed border-zinc-400 my-2 pt-2 text-center space-y-1">
+          <div className="flex justify-center py-0.5">
+            <QRCodeImage
+              value={qrUrl}
+              size={is80mm ? 96 : 80}
+              margin={1}
+              className="border border-zinc-200 p-0.5 rounded bg-white shadow-xs"
+            />
+          </div>
+          <p className="text-[9px] font-bold text-zinc-900 tracking-tight uppercase">
+            Scan for Digital E-Receipt & Tax Invoice
+          </p>
+          <p className="text-[8px] text-zinc-500 font-mono break-all line-clamp-1">
+            {qrUrl}
+          </p>
+        </div>
+      )}
 
       {/* Footer Return Policy */}
       <div className="border-t border-dashed border-zinc-400 my-2 pt-2 text-center space-y-1">

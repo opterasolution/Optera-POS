@@ -4,7 +4,7 @@ import { connectToDatabase } from "@/lib/db";
 import { Sale, ISaleItem } from "@/models/Sale";
 import { Product } from "@/models/Product";
 import { Business } from "@/models/Business";
-import { Customer } from "@/models/Customer";
+import { Customer, generatePortalToken } from "@/models/Customer";
 import { InventoryMovement } from "@/models/InventoryMovement";
 import { AuditLog } from "@/models/AuditLog";
 import { Shift } from "@/models/Shift";
@@ -290,8 +290,12 @@ export async function POST(req: Request) {
             lifetimePointsEarned: 0,
             lifetimePointsRedeemed: 0,
             loyaltyTier: "REGULAR",
+            portalToken: generatePortalToken(),
           });
         } else {
+          if (!customerDoc.portalToken) {
+            customerDoc.portalToken = generatePortalToken();
+          }
           customerDoc.totalSpent = (customerDoc.totalSpent || 0) + netTotal;
           customerDoc.visitCount = (customerDoc.visitCount || 0) + 1;
           customerDoc.lastVisit = new Date();
@@ -796,6 +800,12 @@ export async function POST(req: Request) {
           performedByName: context.username || "Cashier",
         });
 
+        // Resolve shortlink URLs for customer self-service
+        const portalUrl = customerDoc.portalToken
+          ? `${process.env.NEXT_PUBLIC_APP_URL || "https://pos.srilanka.lk"}/portal/statement/${customerDoc.portalToken}`
+          : `${process.env.NEXT_PUBLIC_APP_URL || "https://pos.srilanka.lk"}/portal`;
+        const receiptUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://pos.srilanka.lk"}/receipt/${sale._id || invoiceNumber}`;
+
         // Trigger SMS alert for loyalty points earned (async safe)
         if (customerDoc.phone) {
           try {
@@ -809,9 +819,11 @@ export async function POST(req: Request) {
               variables: {
                 customerName: customerDoc.name,
                 points: pointsEarned.toString(),
+                totalPoints: (customerDoc.loyaltyPoints || 0).toString(),
                 balance: (customerDoc.loyaltyPoints || 0).toString(),
                 tier: customerDoc.loyaltyTier || "REGULAR",
                 storeName: business?.name || "Our Store",
+                portalUrl,
               },
               metadata: { invoiceNumber, saleId: sale._id.toString() },
             });
@@ -851,6 +863,11 @@ export async function POST(req: Request) {
         if (customerDoc.phone) {
           try {
             const formattedDue = dueDate ? new Date(dueDate).toLocaleDateString() : "Due on demand";
+            const portalUrl = customerDoc.portalToken
+              ? `${process.env.NEXT_PUBLIC_APP_URL || "https://pos.srilanka.lk"}/portal/statement/${customerDoc.portalToken}`
+              : `${process.env.NEXT_PUBLIC_APP_URL || "https://pos.srilanka.lk"}/portal`;
+            const receiptUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://pos.srilanka.lk"}/receipt/${sale._id || invoiceNumber}`;
+
             await dispatchSms({
               businessId,
               recipientPhone: customerDoc.phone,
@@ -865,6 +882,8 @@ export async function POST(req: Request) {
                 storeName: business?.name || "Our Store",
                 dueDate: formattedDue,
                 ref: invoiceNumber,
+                receiptUrl,
+                portalUrl,
               },
               metadata: { invoiceNumber, transactionNumber, saleId: sale._id.toString() },
             });

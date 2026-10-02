@@ -5,7 +5,7 @@ export { Category, type ICategory } from "./Category";
 export { Product, type IProduct } from "./Product";
 export { InventoryMovement, type IInventoryMovement, type MovementType } from "./InventoryMovement";
 export { Sale, type ISale, type ISaleItem, type PaymentMethod, type SaleStatus } from "./Sale";
-export { Customer, type ICustomer } from "./Customer";
+export { Customer, type ICustomer, generatePortalToken } from "./Customer";
 export { AuditLog, type IAuditLog } from "./AuditLog";
 export { SubscriptionInvoice, type ISubscriptionInvoice } from "./SubscriptionInvoice";
 export { Register, type IRegister } from "./Register";

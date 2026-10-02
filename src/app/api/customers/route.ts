@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/db";
-import { Customer } from "@/models/Customer";
+import { Customer, generatePortalToken } from "@/models/Customer";
 import { AuditLog } from "@/models/AuditLog";
 import { requireAuth } from "@/lib/tenant";
 import { customerSchema } from "@/lib/validations/customer";
@@ -21,6 +21,7 @@ const defaultDemoCustomers = [
     loyaltyPoints: 124,
     lifetimePointsEarned: 154,
     lifetimePointsRedeemed: 30,
+    portalToken: "demo_portal_token_sunil",
   },
   {
     _id: "cust_2",
@@ -35,6 +36,7 @@ const defaultDemoCustomers = [
     loyaltyPoints: 86,
     lifetimePointsEarned: 86,
     lifetimePointsRedeemed: 0,
+    portalToken: "demo_portal_token_anoma",
   },
   {
     _id: "cust_3",
@@ -49,6 +51,7 @@ const defaultDemoCustomers = [
     loyaltyPoints: 34,
     lifetimePointsEarned: 34,
     lifetimePointsRedeemed: 0,
+    portalToken: "demo_portal_token_kamal",
   },
 ];
 
@@ -177,6 +180,7 @@ export async function POST(req: Request) {
         nicNumber: nicNumber?.trim() || undefined,
         dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
         loyaltyTier: loyaltyTier || "REGULAR",
+        portalToken: generatePortalToken(),
       });
 
       await AuditLog.create({
@@ -202,6 +206,7 @@ export async function POST(req: Request) {
       notes,
       totalSpent: 0,
       visitCount: 0,
+      portalToken: generatePortalToken(),
       createdAt: new Date().toISOString(),
     };
 

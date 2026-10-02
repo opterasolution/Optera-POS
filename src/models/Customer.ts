@@ -25,8 +25,19 @@ export interface ICustomer extends Document {
   lifetimePointsRedeemed?: number;
   loyaltyTier?: "REGULAR" | "SILVER" | "GOLD" | "PLATINUM";
   dateOfBirth?: Date;
+  portalToken?: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export function generatePortalToken(): string {
+  // Generate secure 32-character random hex token for public portal links
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let token = "";
+  for (let i = 0; i < 32; i++) {
+    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return token;
 }
 
 const CustomerSchema = new Schema<ICustomer>(
@@ -64,6 +75,7 @@ const CustomerSchema = new Schema<ICustomer>(
       default: "REGULAR",
     },
     dateOfBirth: { type: Date },
+    portalToken: { type: String, trim: true, index: true, sparse: true },
   },
   { timestamps: true }
 );
@@ -71,8 +83,10 @@ const CustomerSchema = new Schema<ICustomer>(
 CustomerSchema.index({ businessId: 1, phone: 1 });
 CustomerSchema.index({ businessId: 1, currentBalance: -1 });
 CustomerSchema.index({ businessId: 1, loyaltyTier: 1 });
+CustomerSchema.index({ portalToken: 1 }, { sparse: true });
 
 export const Customer: Model<ICustomer> =
   mongoose.models.Customer || mongoose.model<ICustomer>("Customer", CustomerSchema);
 
 export default Customer;
+

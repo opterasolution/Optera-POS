@@ -1,8 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
 import { Printer, X } from "lucide-react";
+import QRCodeImage from "@/components/common/QRCodeImage";
 
 export interface CreditSettlementData {
   transactionNumber: string;
@@ -17,6 +18,8 @@ export interface CreditSettlementData {
   notes?: string;
   cashierName?: string;
   registerName?: string;
+  portalToken?: string;
+  portalUrl?: string;
   createdAt: string | Date;
 }
 
@@ -43,6 +46,19 @@ export default function CreditSettlementReceipt({
 }: CreditSettlementReceiptProps) {
   const receiptWidth = width || business.receiptSettings?.defaultWidth || "58mm";
   const is80mm = receiptWidth === "80mm";
+
+  const [mountedOrigin, setMountedOrigin] = useState<string>("");
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setMountedOrigin(window.location.origin);
+    }
+  }, []);
+
+  const qrStatementUrl =
+    settlement.portalUrl ||
+    (settlement.portalToken
+      ? `${mountedOrigin || "https://pos.srilanka.lk"}/portal/statement/${settlement.portalToken}`
+      : "");
 
   const handlePrint = () => {
     window.print();
@@ -187,6 +203,23 @@ export default function CreditSettlementReceipt({
               <div className="border-t border-black pt-1">Customer Signature</div>
             </div>
           </div>
+
+          {/* Live Naya Potha Statement QR Code */}
+          {qrStatementUrl && (
+            <div className="pt-2 text-center space-y-1 border-t border-dashed border-zinc-400">
+              <div className="flex justify-center py-0.5">
+                <QRCodeImage
+                  value={qrStatementUrl}
+                  size={is80mm ? 80 : 68}
+                  margin={1}
+                  className="border border-zinc-200 p-0.5 rounded bg-white shadow-xs"
+                />
+              </div>
+              <p className="text-[8px] font-bold text-zinc-900 tracking-tight uppercase">
+                Scan to view Live Naya Potha Statement
+              </p>
+            </div>
+          )}
 
           {/* Footer */}
           <div className="text-center text-[9px] text-zinc-500 pt-2 border-t border-dashed border-zinc-400">

@@ -53,6 +53,7 @@ import {
   Globe,
   UserCheck,
 } from "lucide-react";
+import QRCodeImage from "@/components/common/QRCodeImage";
 import SupervisorOverrideModal from "@/components/pos/SupervisorOverrideModal";
 import ShiftZReportReceipt, { ShiftZReportData } from "@/components/receipts/ShiftZReportReceipt";
 import CreditSettlementReceipt, { CreditSettlementData } from "@/components/receipts/CreditSettlementReceipt";
@@ -3212,6 +3213,25 @@ export default function POSPage() {
                       ⭐ Loyalty Points Earned: +{completedSale.pointsEarned} pts
                     </div>
                   )}
+                </div>
+
+                {/* Scannable E-Receipt QR Code */}
+                <div className="border-t border-dashed border-slate-300 pt-2 text-center space-y-1">
+                  <div className="flex justify-center">
+                    <QRCodeImage
+                      value={
+                        typeof window !== "undefined"
+                          ? `${window.location.origin}/receipt/${completedSale._id || completedSale.invoiceNumber}`
+                          : `https://pos.srilanka.lk/receipt/${completedSale._id || completedSale.invoiceNumber}`
+                      }
+                      size={80}
+                      margin={1}
+                      className="border border-slate-200 p-0.5 rounded bg-white shadow-2xs"
+                    />
+                  </div>
+                  <p className="text-[9px] font-bold text-slate-800 uppercase tracking-tight">
+                    Scan for Digital E-Receipt & IRD Check
+                  </p>
                 </div>
 
                 <div className="border-t border-dashed border-slate-300 pt-2 text-center text-[10px] text-slate-500">

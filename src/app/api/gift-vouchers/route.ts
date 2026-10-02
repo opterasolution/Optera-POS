@@ -238,11 +238,14 @@ export async function POST(req: Request) {
           eventType: "GIFT_VOUCHER",
           templateKey: "giftVoucher",
           variables: {
+            recipientName: voucher.recipientName || voucher.customerName || "Valued Customer",
             customerName: voucher.recipientName || voucher.customerName || "Valued Customer",
             code: voucher.code,
             amount: voucher.initialAmount.toLocaleString(),
+            expiryDate: voucher.expiryDate ? new Date(voucher.expiryDate).toLocaleDateString() : "No expiry",
             dueDate: voucher.expiryDate ? new Date(voucher.expiryDate).toLocaleDateString() : "No expiry",
             storeName: (businessDoc as any)?.name || "Our Store",
+            voucherUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://pos.srilanka.lk"}/portal`,
           },
           metadata: { voucherCode: voucher.code, voucherId: voucher._id.toString() },
         });

@@ -4,19 +4,19 @@ import { SmsLog, SmsEventType, SmsDeliveryStatus } from "@/models/SmsLog";
 
 export const DEFAULT_SMS_TEMPLATES = {
   creditSale:
-    "Dear {customerName}, purchase of Rs. {amount} added to your credit at {storeName}. Outstanding balance: Rs. {balance}. Due: {dueDate}. Thank you!",
+    "Dear {customerName}, purchase of Rs. {amount} added to your credit at {storeName}. Outstanding balance: Rs. {balance}. Due: {dueDate}. View receipt: {receiptUrl} | Statement: {portalUrl}. Thank you!",
   creditSettlement:
-    "Dear {customerName}, payment of Rs. {amount} received at {storeName}. Your remaining balance is Rs. {balance}. Ref: {ref}. Thank you!",
+    "Dear {customerName}, payment of Rs. {amount} received at {storeName}. Remaining balance: Rs. {balance}. Ref: {ref}. View statement: {portalUrl}. Thank you!",
   overdueReminder:
-    "Dear {customerName}, a friendly reminder from {storeName} that your credit balance of Rs. {balance} is overdue. Please settle at your earliest convenience. Tel: {phone}",
+    "Dear {customerName}, reminder from {storeName}: your credit balance of Rs. {balance} is overdue. Please settle soon. View statement: {portalUrl}. Tel: {phone}",
   loyaltyAccrual:
-    "Congratulations {customerName}! You earned {points} pts at {storeName}. Total points: {totalPoints} ({tier} VIP). Redeem rewards on your next visit!",
+    "Congratulations {customerName}! You earned {points} pts at {storeName}. Total: {totalPoints} pts ({tier} VIP). View balance: {portalUrl}. Thank you!",
   giftVoucher:
-    "Dear {recipientName}, you received a digital gift voucher worth Rs. {amount} from {storeName}! Voucher Code: {code}. Valid until {expiryDate}.",
+    "Dear {recipientName}, you received a gift voucher worth Rs. {amount} from {storeName}! Code: {code}. Check balance: {voucherUrl}. Valid until {expiryDate}.",
   quotation:
-    "Dear {customerName}, quotation {quoteNumber} for Rs. {amount} is ready at {storeName}. Valid until {validUntil}. Thank you for choosing us!",
+    "Dear {customerName}, quotation {quoteNumber} for Rs. {amount} is ready at {storeName}. Valid until {validUntil}. View details: {receiptUrl}. Thank you!",
   quotationAlert:
-    "Dear {customerName}, quotation {ref} for Rs. {amount} is ready at {storeName}. Valid until {dueDate}. Thank you for choosing us!",
+    "Dear {customerName}, quotation {ref} for Rs. {amount} is ready at {storeName}. Valid until {dueDate}. View details: {receiptUrl}. Thank you!",
 };
 
 /**

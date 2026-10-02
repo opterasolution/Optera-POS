@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { formatCurrency, formatSLDateTime, amountToWords } from "@/lib/formatters";
 import { formatForeignCurrency } from "@/lib/currency";
+import QRCodeImage from "@/components/common/QRCodeImage";
 
 export interface TaxInvoiceData {
   _id: string;
@@ -50,6 +51,8 @@ export interface TaxInvoiceData {
     discount?: number;
     total: number;
     priceTier?: "RETAIL" | "WHOLESALE";
+    batchNumber?: string;
+    expiryDate?: string | Date;
   }>;
   subtotal: number;
   discountTotal: number;
@@ -329,11 +332,15 @@ export default function CommercialTaxInvoiceA4({
                         </td>
                         <td className="py-2.5 px-3">
                           <div className="font-semibold text-slate-900">{item.name}</div>
-                          {item.barcode && (
-                            <div className="text-[10px] font-mono text-slate-400">
-                              Barcode: {item.barcode}
-                            </div>
-                          )}
+                          <div className="flex flex-wrap items-center gap-x-2 text-[10px] font-mono text-slate-500">
+                            {item.barcode && <span>Barcode: {item.barcode}</span>}
+                            {item.batchNumber && (
+                              <span className="text-blue-700 font-semibold">
+                                Lot: {item.batchNumber}
+                                {item.expiryDate ? ` (Exp: ${new Date(item.expiryDate).toLocaleDateString("en-GB")})` : ""}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-2.5 px-3 text-center">
                           <span
@@ -366,7 +373,7 @@ export default function CommercialTaxInvoiceA4({
 
               {/* 4. Financial Totals & Tax Breakdown */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t border-slate-200">
-                {/* Left: Amount in Words & Bank Details */}
+                {/* Left: Amount in Words, Bank Details, and IRD Verification QR */}
                 <div className="space-y-4">
                   <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-0.5">
@@ -375,6 +382,35 @@ export default function CommercialTaxInvoiceA4({
                     <p className="text-xs font-semibold text-slate-900 italic">
                       {amountToWords(invoice.netTotal)}
                     </p>
+                  </div>
+
+                  {/* Official IRD & E-Receipt Verification QR Code */}
+                  <div className="p-3 bg-white border border-slate-200 rounded-xl flex items-center gap-3 shadow-2xs">
+                    <div className="shrink-0 bg-white p-1 rounded border border-slate-200">
+                      <QRCodeImage
+                        value={
+                          typeof window !== "undefined"
+                            ? `${window.location.origin}/receipt/${invoice._id || invoice.invoiceNumber}`
+                            : `https://pos.srilanka.lk/receipt/${invoice._id || invoice.invoiceNumber}`
+                        }
+                        size={64}
+                        margin={1}
+                      />
+                    </div>
+                    <div className="text-[10px] space-y-0.5">
+                      <div className="font-bold text-slate-900 uppercase tracking-tight flex items-center gap-1">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>IRD Verified E-Invoice</span>
+                      </div>
+                      <p className="text-slate-500 leading-snug">
+                        Scan QR to verify tax compliance, authentic line items, warranty terms, and digital audit trail.
+                      </p>
+                      <p className="text-[9px] font-mono text-blue-600 font-semibold truncate max-w-[200px]">
+                        {typeof window !== "undefined"
+                          ? `${window.location.origin}/receipt/${invoice._id || invoice.invoiceNumber}`
+                          : `/receipt/${invoice._id || invoice.invoiceNumber}`}
+                      </p>
+                    </div>
                   </div>
 
                   {business.bankDetails?.accountNumber && (

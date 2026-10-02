@@ -38,6 +38,7 @@ import {
   Star,
   Cake,
   Tag,
+  ExternalLink,
 } from "lucide-react";
 import { formatCurrency, formatSLDateTime, isValidSLPhone } from "@/lib/formatters";
 import CreditSettlementReceipt, { CreditSettlementData } from "@/components/receipts/CreditSettlementReceipt";
@@ -65,6 +66,7 @@ interface CustomerRecord {
   lifetimePointsEarned?: number;
   lifetimePointsRedeemed?: number;
   dateOfBirth?: string;
+  portalToken?: string;
 }
 
 interface SummaryData {
@@ -573,6 +575,8 @@ export default function CustomersPage() {
           paymentReference: paymentRef.trim() || undefined,
           notes: paymentNotes.trim() || undefined,
           cashierName: "Store Cashier",
+          portalToken: data.customer?.portalToken || paymentCustomer.portalToken,
+          portalUrl: data.customer?.portalUrl,
           createdAt: new Date(),
         };
 
@@ -2150,6 +2154,52 @@ export default function CustomersPage() {
                   <div className="text-sm font-bold text-slate-900 font-mono">
                     {selectedCustomer.visitCount} visits
                   </div>
+                </div>
+              </div>
+
+              {/* Customer Self-Service Portal Fast Link */}
+              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-blue-900 flex items-center gap-1.5">
+                    <Receipt className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Naya Potha Self-Service Statement Link</span>
+                  </span>
+                  {selectedCustomer.portalToken && (
+                    <a
+                      href={`/portal/statement/${selectedCustomer.portalToken}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] font-bold text-blue-700 hover:underline flex items-center gap-0.5"
+                    >
+                      <span>Open Portal</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={
+                      typeof window !== "undefined" && selectedCustomer.portalToken
+                        ? `${window.location.origin}/portal/statement/${selectedCustomer.portalToken}`
+                        : `/portal/statement/${selectedCustomer.portalToken || selectedCustomer._id}`
+                    }
+                    className="flex-1 px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-mono text-slate-700 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window !== "undefined" && selectedCustomer.portalToken) {
+                        navigator.clipboard.writeText(
+                          `${window.location.origin}/portal/statement/${selectedCustomer.portalToken}`
+                        );
+                      }
+                    }}
+                    className="px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-[11px] font-semibold text-slate-700 shrink-0"
+                  >
+                    Copy Link
+                  </button>
                 </div>
               </div>
 
