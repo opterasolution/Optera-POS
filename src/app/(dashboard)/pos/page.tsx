@@ -82,6 +82,8 @@ import {
   enqueueOfflineSale,
   OfflineSaleRecord,
 } from "@/lib/offline-storage";
+import LanguageSwitcher from "@/components/common/LanguageSwitcher";
+import { useLanguage, useTranslation } from "@/lib/i18n/LanguageContext";
 
 interface RegisterOption {
   _id: string;
@@ -94,6 +96,8 @@ interface RegisterOption {
 interface Product {
   _id: string;
   name: string;
+  nameSinhala?: string;
+  nameTamil?: string;
   barcode?: string;
   sku?: string;
   costPrice: number;
@@ -115,6 +119,8 @@ interface Category {
 interface CartItem {
   productId: string;
   name: string;
+  nameSinhala?: string;
+  nameTamil?: string;
   barcode?: string;
   unitPrice: number;
   costPrice: number;
@@ -138,25 +144,33 @@ interface BusinessSettings {
   currency: string;
   subscription?: {
     plan: string;
-    status: string;
+    status?: string;
     expiryDate?: string;
   };
-  taxSettings: {
-    enabled: boolean;
-    name: string;
-    rate: number;
-    type: "INCLUSIVE" | "EXCLUSIVE";
+  taxSettings?: {
+    enabled?: boolean;
+    name?: string;
+    rate?: number;
+    type?: "INCLUSIVE" | "EXCLUSIVE";
+    tin?: string;
+    vatNumber?: string;
+    ssclEnabled?: boolean;
+    ssclRate?: number;
+    isTaxInvoice?: boolean;
   };
-  receiptSettings: {
-    headerMessage: string;
-    footerMessage: string;
-    defaultWidth: "58mm" | "80mm";
+  receiptSettings?: {
+    headerMessage?: string;
+    footerMessage?: string;
+    defaultWidth?: "58mm" | "80mm";
+    receiptLanguage?: "en" | "si" | "ta" | "bilingual_si" | "bilingual_ta" | "trilingual";
   };
 }
 
 export default function POSPage() {
   const { data: session } = useSession();
   const businessId = (session?.user as any)?.businessId || "default";
+  const { language } = useLanguage();
+  const { t } = useTranslation();
 
   // Offline Network Resilience Hook
   const {
@@ -891,6 +905,8 @@ export default function POSPage() {
         {
           productId: product._id,
           name: product.name,
+          nameSinhala: product.nameSinhala,
+          nameTamil: product.nameTamil,
           barcode: product.barcode,
           sellingPrice: product.sellingPrice,
           wholesalePrice: product.wholesalePrice,
@@ -1372,6 +1388,8 @@ export default function POSPage() {
       items: cart.map((item) => ({
         productId: item.productId,
         name: item.name,
+        nameSinhala: item.nameSinhala,
+        nameTamil: item.nameTamil,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         discount: item.discount,
@@ -1604,6 +1622,8 @@ export default function POSPage() {
     const matchesSearch =
       !q ||
       p.name.toLowerCase().includes(q) ||
+      p.nameSinhala?.toLowerCase().includes(q) ||
+      p.nameTamil?.toLowerCase().includes(q) ||
       p.barcode?.includes(q) ||
       p.sku?.toLowerCase().includes(q);
 
@@ -1646,7 +1666,7 @@ export default function POSPage() {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search item..."
+                  placeholder={t("pos.searchPlaceholder") || "Search item..."}
                   className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -1663,7 +1683,7 @@ export default function POSPage() {
                   }`}
                   title="Standard retail pricing counter"
                 >
-                  Retail
+                  {t("pos.retailPrice") || "Retail"}
                 </button>
                 <button
                   type="button"
@@ -1676,7 +1696,7 @@ export default function POSPage() {
                   title="Wholesale B2B counter mode: applies wholesale unit prices"
                 >
                   <Building2 className="w-3 h-3" />
-                  Wholesale
+                  {t("pos.wholesalePrice") || "Wholesale"}
                 </button>
               </div>
 
@@ -1791,6 +1811,11 @@ export default function POSPage() {
                   </button>
                 )}
               </div>
+
+              {/* Language Switcher on POS Top Bar */}
+              <div className="shrink-0 pl-1 border-l border-slate-200">
+                <LanguageSwitcher />
+              </div>
             </div>
 
             {/* Category Filter Horizontal Pills */}
@@ -1803,7 +1828,7 @@ export default function POSPage() {
                     : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100"
                 }`}
               >
-                All Products
+                {t("pos.allCategories") || "All Products"}
               </button>
               {categories.map((cat) => (
                 <button
@@ -1882,8 +1907,21 @@ export default function POSPage() {
                           )}
                         </div>
                         <h4 className="font-semibold text-slate-800 text-xs sm:text-sm line-clamp-2 mt-0.5 leading-tight group-hover:text-blue-600">
-                          {p.name}
+                          {language === "si" && p.nameSinhala
+                            ? p.nameSinhala
+                            : language === "ta" && p.nameTamil
+                            ? p.nameTamil
+                            : p.name}
                         </h4>
+                        {((language === "si" && p.nameSinhala) || (language === "ta" && p.nameTamil)) ? (
+                          <span className="text-[10px] text-slate-400 block truncate font-mono">
+                            {p.name}
+                          </span>
+                        ) : (p.nameSinhala || p.nameTamil) ? (
+                          <span className="text-[10px] text-slate-400 block truncate font-sans">
+                            {[p.nameSinhala, p.nameTamil].filter(Boolean).join(" • ")}
+                          </span>
+                        ) : null}
                       </div>
 
                       <div className="mt-3 pt-2 border-t border-slate-100 flex items-end justify-between">
@@ -1925,7 +1963,7 @@ export default function POSPage() {
           <div className="p-3 sm:p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <ShoppingCart className="w-4 h-4 text-blue-600" />
-              <h2 className="font-bold text-sm text-slate-900">Active Order</h2>
+              <h2 className="font-bold text-sm text-slate-900">{t("pos.cart") || "Active Order"}</h2>
               <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold text-xs">
                 {cart.reduce((s, i) => s + i.quantity, 0)}
               </span>
@@ -1947,7 +1985,7 @@ export default function POSPage() {
                   onClick={clearCart}
                   className="text-[11px] text-rose-600 hover:text-rose-800 font-semibold flex items-center gap-1 ml-1"
                 >
-                  <Trash2 className="w-3 h-3" /> Clear
+                  <Trash2 className="w-3 h-3" /> {t("pos.clearCart") || "Clear"}
                 </button>
               )}
             </div>
@@ -2046,8 +2084,17 @@ export default function POSPage() {
                 <div key={item.productId} className="py-2.5 flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <h5 className="font-semibold text-xs text-slate-800 truncate leading-tight">
-                      {item.name}
+                      {language === "si" && item.nameSinhala
+                        ? item.nameSinhala
+                        : language === "ta" && item.nameTamil
+                        ? item.nameTamil
+                        : item.name}
                     </h5>
+                    {((language === "si" && item.nameSinhala) || (language === "ta" && item.nameTamil)) && (
+                      <span className="text-[10px] text-slate-400 block truncate font-mono">
+                        {item.name}
+                      </span>
+                    )}
                     <span className="text-[10px] text-slate-400 font-mono">
                       {formatCurrency(item.unitPrice)} / {item.unit}
                     </span>
@@ -2091,9 +2138,9 @@ export default function POSPage() {
                 <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-300">
                   <ShoppingCart className="w-6 h-6" />
                 </div>
-                <p className="font-medium text-slate-600">Your cart is empty</p>
+                <p className="font-medium text-slate-600">{t("pos.emptyCart") || "Your cart is empty"}</p>
                 <p className="text-[11px] text-slate-400">
-                  Scan a barcode or click any product on the left to start billing.
+                  {t("pos.emptyCartPrompt") || "Scan a barcode or click any product on the left to start billing."}
                 </p>
               </div>
             )}
@@ -2138,7 +2185,7 @@ export default function POSPage() {
 
             <div className="space-y-1 text-xs">
               <div className="flex justify-between text-slate-600">
-                <span>Subtotal:</span>
+                <span>{t("pos.subtotal") || "Subtotal"}:</span>
                 <span className="font-mono">{formatCurrency(subtotal)}</span>
               </div>
 
@@ -2177,7 +2224,7 @@ export default function POSPage() {
 
               {/* Manual Discount Row */}
               <div className="flex justify-between items-center text-slate-600">
-                <span>Cashier Discount (Rs.):</span>
+                <span>{t("pos.discount") || "Cashier Discount"} (Rs.):</span>
                 <input
                   type="number"
                   min="0"
@@ -2193,7 +2240,7 @@ export default function POSPage() {
               {isTaxEnabled && (
                 <div className="flex justify-between text-slate-600 text-[11px]">
                   <span>
-                    {business?.taxSettings?.name || "Tax"} ({taxRate}%
+                    {business?.taxSettings?.name || t("pos.tax") || "Tax"} ({taxRate}%
                     {isExclusive ? " excl." : " incl."}):
                   </span>
                   <span className="font-mono">{formatCurrency(taxAmount)}</span>
@@ -2204,7 +2251,7 @@ export default function POSPage() {
               {loyaltySettings.enabled && pointsEarnedOnSale > 0 && (
                 <div className="flex justify-between text-[11px] text-purple-700 pt-0.5">
                   <span className="flex items-center gap-1">
-                    <Coins className="w-3 h-3" /> Reward Points Earned:
+                    <Coins className="w-3 h-3" /> {t("pos.pointsEarned") || "Reward Points Earned"}:
                   </span>
                   <span className="font-bold">+{pointsEarnedOnSale} pts</span>
                 </div>
@@ -2212,7 +2259,7 @@ export default function POSPage() {
 
               {/* Grand Total */}
               <div className="flex justify-between text-base font-black text-slate-900 pt-2 border-t border-slate-200">
-                <span>GRAND TOTAL:</span>
+                <span>{t("pos.total") || "GRAND TOTAL"}:</span>
                 <span className="text-blue-700 font-mono text-lg">{formatCurrency(netTotal)}</span>
               </div>
 
@@ -2261,7 +2308,7 @@ export default function POSPage() {
               disabled={cart.length === 0}
               className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <span>PAY / CHECKOUT</span>
+              <span>{t("pos.checkout") || "PAY / CHECKOUT"}</span>
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>

@@ -4,6 +4,8 @@ export interface IProduct extends Document {
   businessId: Types.ObjectId;
   categoryId?: Types.ObjectId;
   name: string;
+  nameSinhala?: string;
+  nameTamil?: string;
   sku?: string;
   barcode?: string;
   costPrice: number;
@@ -33,6 +35,8 @@ const ProductSchema = new Schema<IProduct>(
       index: true,
     },
     name: { type: String, required: true, trim: true },
+    nameSinhala: { type: String, trim: true },
+    nameTamil: { type: String, trim: true },
     sku: { type: String, trim: true },
     barcode: { type: String, trim: true },
     costPrice: { type: Number, required: true, min: 0, default: 0 },

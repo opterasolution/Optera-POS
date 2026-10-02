@@ -7,6 +7,8 @@ export type SaleReturnStatus = "NONE" | "PARTIAL" | "FULLY_RETURNED";
 export interface ISaleItem {
   productId: Types.ObjectId;
   name: string;
+  nameSinhala?: string;
+  nameTamil?: string;
   barcode?: string;
   unitPrice: number;
   costPrice: number; // Snapshot of cost at sale time for accurate profit reports
@@ -108,6 +110,8 @@ const SaleItemSchema = new Schema<ISaleItem>(
   {
     productId: { type: Schema.Types.ObjectId, ref: "Product", required: true },
     name: { type: String, required: true },
+    nameSinhala: { type: String, trim: true },
+    nameTamil: { type: String, trim: true },
     barcode: { type: String },
     unitPrice: { type: Number, required: true, min: 0 },
     costPrice: { type: Number, required: true, min: 0, default: 0 },

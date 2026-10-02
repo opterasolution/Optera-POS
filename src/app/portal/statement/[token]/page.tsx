@@ -32,11 +32,15 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
+import LanguageSwitcher from "@/components/common/LanguageSwitcher";
+import { useLanguage, useTranslation } from "@/lib/i18n/LanguageContext";
 
 export default function CustomerStatementPortalPage() {
   const params = useParams();
   const router = useRouter();
   const token = params?.token as string;
+  const { language } = useLanguage();
+  const { t } = useTranslation();
 
   const [statement, setStatement] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -165,7 +169,7 @@ export default function CustomerStatementPortalPage() {
             </div>
             <div>
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                Customer Self-Service
+                {t("portal.portalTitle") || "Customer Self-Service"}
               </span>
               <span className="text-xs font-bold text-slate-800">
                 {business.name || "Sri Lanka Retail POS"}
@@ -174,12 +178,14 @@ export default function CustomerStatementPortalPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <LanguageSwitcher />
+
             <button
               onClick={handlePrint}
               className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition"
             >
               <Printer className="w-3.5 h-3.5" />
-              <span>Print Statement</span>
+              <span>{t("common.print") || "Print Statement"}</span>
             </button>
 
             <button
@@ -195,12 +201,12 @@ export default function CustomerStatementPortalPage() {
               {copied ? (
                 <>
                   <Check className="w-3.5 h-3.5 text-emerald-600" />
-                  <span className="text-emerald-700 font-bold">Copied!</span>
+                  <span className="text-emerald-700 font-bold">{t("common.copied") || "Copied!"}</span>
                 </>
               ) : (
                 <>
                   <Share2 className="w-3.5 h-3.5 text-slate-500" />
-                  <span>Share</span>
+                  <span>{t("common.copyLink") || "Share"}</span>
                 </>
               )}
             </button>
@@ -263,7 +269,7 @@ export default function CustomerStatementPortalPage() {
               }`}
             >
               <CreditCard className="w-3.5 h-3.5" />
-              <span>Naya Potha (ණය)</span>
+              <span>{t("portal.creditLedger") || "Naya Potha (ණය)"}</span>
             </button>
 
             <button
@@ -275,7 +281,7 @@ export default function CustomerStatementPortalPage() {
               }`}
             >
               <Star className="w-3.5 h-3.5 text-amber-500" />
-              <span>Loyalty Points</span>
+              <span>{t("portal.loyaltyRewards") || "Loyalty Points"}</span>
             </button>
 
             <button
@@ -287,7 +293,7 @@ export default function CustomerStatementPortalPage() {
               }`}
             >
               <Gift className="w-3.5 h-3.5 text-purple-500" />
-              <span>Gift Voucher Check</span>
+              <span>{t("portal.giftVouchers") || "Gift Voucher Check"}</span>
             </button>
           </div>
         </div>
@@ -300,7 +306,7 @@ export default function CustomerStatementPortalPage() {
               {/* Outstanding Balance */}
               <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-1">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Outstanding Debt
+                  {t("portal.outstandingDebt") || "Outstanding Debt"}
                 </span>
                 <div
                   className={`text-lg sm:text-xl font-black font-mono ${
@@ -317,7 +323,7 @@ export default function CustomerStatementPortalPage() {
               {/* Credit Limit */}
               <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-1">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Credit Limit
+                  {t("portal.creditLimit") || "Credit Limit"}
                 </span>
                 <div className="text-lg sm:text-xl font-black font-mono text-slate-900">
                   {formatCurrency(customer.creditLimit)}
@@ -328,7 +334,7 @@ export default function CustomerStatementPortalPage() {
               {/* Available Credit */}
               <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-1">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Available Credit
+                  {t("portal.availableCredit") || "Available Credit"}
                 </span>
                 <div className="text-lg sm:text-xl font-black font-mono text-blue-600">
                   {formatCurrency(customer.availableCredit)}
@@ -339,13 +345,13 @@ export default function CustomerStatementPortalPage() {
               {/* Account Status Badge */}
               <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-1">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Account Status
+                  {t("portal.accountStatus") || "Account Status"}
                 </span>
                 <div className="pt-1">
                   {customer.accountStatus === "CLEAR" && (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-100 text-emerald-800">
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>CLEAR</span>
+                      <span>{t("portal.statusClear") || "CLEAR"}</span>
                     </span>
                   )}
                   {customer.accountStatus === "ACTIVE" && (

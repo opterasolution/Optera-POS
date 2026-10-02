@@ -32,12 +32,15 @@ import {
   Calendar,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/lib/i18n/LanguageContext";
+import LanguageSwitcher from "@/components/common/LanguageSwitcher";
 
 interface AppLayoutProps {
   children: React.ReactNode;
 }
 
 export default function AppLayout({ children }: AppLayoutProps) {
+  const { t } = useTranslation();
   const pathname = usePathname();
   const { data: session } = useSession();
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
@@ -70,28 +73,28 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   const navItems = [
     ...(isSuperAdmin
-      ? [{ label: "Super Admin Portal", href: "/admin", icon: Shield, highlight: true }]
+      ? [{ label: t("nav.admin", "Super Admin Portal"), href: "/admin", icon: Shield, highlight: true }]
       : []),
-    { label: "POS Counter", href: "/pos", icon: ShoppingCart, highlight: true },
-    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, allowed: isManager || isSupervisor },
-    { label: "Products", href: "/products", icon: Package, allowed: isManager || isInventoryClerk },
-    { label: "Inventory", href: "/inventory", icon: Boxes, allowed: isManager || isInventoryClerk },
-    { label: "Batches & Expiry", href: "/batches", icon: Calendar, allowed: isManager || isInventoryClerk },
-    { label: "Barcode & Labels", href: "/labels", icon: Barcode, allowed: isManager || isInventoryClerk },
-    { label: "Purchases & Vendors", href: "/purchases", icon: FileText, allowed: isManager || isInventoryClerk },
-    { label: "Transfers & Branches", href: "/transfers", icon: Truck, allowed: isManager || isInventoryClerk },
-    { label: "Sales History", href: "/sales", icon: Receipt },
-    { label: "Invoices & B2B", href: "/invoices", icon: FileSpreadsheet, allowed: isManager || isSupervisor || isAccountant },
-    { label: "Quotations & Estimates", href: "/quotations", icon: FileText, allowed: isManager || isSupervisor || isAccountant },
-    { label: "Returns & Credit Notes", href: "/returns", icon: RotateCcw },
-    { label: "Shifts & Drawers", href: "/shifts", icon: Clock },
-    { label: "Expenses & Petty Cash", href: "/expenses", icon: Wallet, allowed: isManager || isSupervisor || isAccountant },
-    { label: "Customers", href: "/customers", icon: Users },
-    { label: "Promotions & Loyalty", href: "/promotions", icon: Tag, allowed: isManager || isSupervisor },
-    { label: "SMS & Notifications", href: "/sms", icon: MessageSquare, allowed: isOwner || isManager || isSupervisor },
-    { label: "Staff & Commissions", href: "/staff", icon: Award, allowed: isOwner || isManager || isSupervisor },
-    { label: "Reports & P&L", href: "/reports", icon: BarChart3, allowed: isOwner || isManager || isAccountant },
-    { label: "Store Settings", href: "/settings", icon: Settings, allowed: isOwner },
+    { label: t("nav.posCounter", "POS Counter"), href: "/pos", icon: ShoppingCart, highlight: true },
+    { label: t("nav.dashboard", "Dashboard"), href: "/dashboard", icon: LayoutDashboard, allowed: isManager || isSupervisor },
+    { label: t("nav.products", "Products"), href: "/products", icon: Package, allowed: isManager || isInventoryClerk },
+    { label: t("nav.inventory", "Inventory"), href: "/inventory", icon: Boxes, allowed: isManager || isInventoryClerk },
+    { label: t("nav.batches", "Batches & Expiry"), href: "/batches", icon: Calendar, allowed: isManager || isInventoryClerk },
+    { label: t("nav.labels", "Barcode & Labels"), href: "/labels", icon: Barcode, allowed: isManager || isInventoryClerk },
+    { label: t("nav.purchases", "Purchases & Vendors"), href: "/purchases", icon: FileText, allowed: isManager || isInventoryClerk },
+    { label: t("nav.transfers", "Transfers & Branches"), href: "/transfers", icon: Truck, allowed: isManager || isInventoryClerk },
+    { label: t("nav.salesHistory", "Sales History"), href: "/sales", icon: Receipt },
+    { label: t("nav.invoices", "Invoices & B2B"), href: "/invoices", icon: FileSpreadsheet, allowed: isManager || isSupervisor || isAccountant },
+    { label: t("nav.quotations", "Quotations & Estimates"), href: "/quotations", icon: FileText, allowed: isManager || isSupervisor || isAccountant },
+    { label: t("nav.returns", "Returns & Credit Notes"), href: "/returns", icon: RotateCcw },
+    { label: t("nav.shifts", "Shifts & Drawers"), href: "/shifts", icon: Clock },
+    { label: t("nav.expenses", "Expenses & Petty Cash"), href: "/expenses", icon: Wallet, allowed: isManager || isSupervisor || isAccountant },
+    { label: t("nav.customers", "Customers"), href: "/customers", icon: Users },
+    { label: t("nav.promotions", "Promotions & Loyalty"), href: "/promotions", icon: Tag, allowed: isManager || isSupervisor },
+    { label: t("nav.sms", "SMS & Notifications"), href: "/sms", icon: MessageSquare, allowed: isOwner || isManager || isSupervisor },
+    { label: t("nav.staff", "Staff & Commissions"), href: "/staff", icon: Award, allowed: isOwner || isManager || isSupervisor },
+    { label: t("nav.reports", "Reports & P&L"), href: "/reports", icon: BarChart3, allowed: isOwner || isManager || isAccountant },
+    { label: t("nav.settings", "Store Settings"), href: "/settings", icon: Settings, allowed: isOwner },
   ];
 
   const visibleNav = navItems.filter((item) => {
@@ -105,16 +108,19 @@ export default function AppLayout({ children }: AppLayoutProps) {
       <header className="md:hidden flex items-center justify-between px-4 py-3 bg-slate-900 text-white sticky top-0 z-50">
         <div className="flex items-center gap-2">
           <Store className="w-5 h-5 text-blue-400" />
-          <span className="font-bold text-sm tracking-tight truncate max-w-[180px]">
+          <span className="font-bold text-sm tracking-tight truncate max-w-[140px]">
             {session?.user?.businessName || "Sri Lanka POS"}
           </span>
         </div>
-        <button
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="p-1 text-slate-300 hover:text-white"
-        >
-          {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-        </button>
+        <div className="flex items-center gap-2">
+          <LanguageSwitcher showIcon={false} />
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="p-1 text-slate-300 hover:text-white"
+          >
+            {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
+        </div>
       </header>
 
       {/* Sidebar Navigation */}

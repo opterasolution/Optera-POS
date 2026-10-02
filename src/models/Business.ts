@@ -71,6 +71,11 @@ export interface IBusiness extends Document {
     footerMessage: string;
     showLogo: boolean;
     defaultWidth: "58mm" | "80mm";
+    receiptLanguage?: "en" | "si" | "ta" | "bilingual_si" | "bilingual_ta" | "trilingual";
+  };
+  localeSettings?: {
+    defaultLanguage: "en" | "si" | "ta";
+    supportedLanguages: Array<"en" | "si" | "ta">;
   };
   bankDetails?: {
     bankName?: string;
@@ -159,6 +164,15 @@ const BusinessSchema = new Schema<IBusiness>(
       footerMessage: { type: String, default: "Please come again" },
       showLogo: { type: Boolean, default: false },
       defaultWidth: { type: String, enum: ["58mm", "80mm"], default: "58mm" },
+      receiptLanguage: {
+        type: String,
+        enum: ["en", "si", "ta", "bilingual_si", "bilingual_ta", "trilingual"],
+        default: "en",
+      },
+    },
+    localeSettings: {
+      defaultLanguage: { type: String, enum: ["en", "si", "ta"], default: "en" },
+      supportedLanguages: [{ type: String, enum: ["en", "si", "ta"] }],
     },
     bankDetails: {
       bankName: { type: String, trim: true },

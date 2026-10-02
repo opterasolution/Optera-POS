@@ -44,6 +44,8 @@ export interface TaxInvoiceData {
   quotationNumber?: string;
   items: Array<{
     name: string;
+    nameSinhala?: string;
+    nameTamil?: string;
     barcode?: string;
     unitPrice: number;
     quantity: number;
@@ -203,8 +205,11 @@ export default function CommercialTaxInvoiceA4({
 
                 {/* Right Header: Document Title & Metadata */}
                 <div className="text-right sm:min-w-[200px]">
-                  <div className="inline-block bg-slate-900 text-white px-3 py-1 rounded text-sm font-black tracking-widest uppercase mb-2">
+                  <div className="inline-block bg-slate-900 text-white px-3 py-1 rounded text-sm font-black tracking-widest uppercase mb-1">
                     {isTaxInvoice ? "TAX INVOICE" : "COMMERCIAL INVOICE"}
+                  </div>
+                  <div className="text-[10px] font-semibold text-slate-500 tracking-wide uppercase mb-2">
+                    {isTaxInvoice ? "බදු ඉන්වොයිසිය / வரி விலைப்பட்டியல்" : "විකුණුම් ඉන්වොයිසිය / வணிக விலைப்பட்டியல்"}
                   </div>
                   <div className="text-xs space-y-1">
                     <div className="font-mono font-bold text-slate-900">
@@ -332,6 +337,11 @@ export default function CommercialTaxInvoiceA4({
                         </td>
                         <td className="py-2.5 px-3">
                           <div className="font-semibold text-slate-900">{item.name}</div>
+                          {(item.nameSinhala || item.nameTamil) && (
+                            <div className="text-[10px] text-slate-500 font-sans">
+                              {[item.nameSinhala, item.nameTamil].filter(Boolean).join(" • ")}
+                            </div>
+                          )}
                           <div className="flex flex-wrap items-center gap-x-2 text-[10px] font-mono text-slate-500">
                             {item.barcode && <span>Barcode: {item.barcode}</span>}
                             {item.batchNumber && (

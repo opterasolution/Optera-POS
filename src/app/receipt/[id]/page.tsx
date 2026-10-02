@@ -27,11 +27,15 @@ import {
 } from "lucide-react";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
 import { formatWhatsAppReceipt, buildWhatsAppUrl } from "@/lib/notifications";
+import LanguageSwitcher from "@/components/common/LanguageSwitcher";
+import { useLanguage, useTranslation } from "@/lib/i18n/LanguageContext";
 
 export default function ReceiptPrintPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { language } = useLanguage();
+  const { t } = useTranslation();
 
   const saleId = params?.id as string;
   const autoPrint = searchParams.get("autoprint") === "true";
@@ -122,13 +126,13 @@ export default function ReceiptPrintPage() {
     <div className="min-h-screen bg-slate-100 py-4 sm:py-8 print:bg-white print:py-0 font-sans">
       {/* On-Screen Action Bar (Hidden during printing via .no-print) */}
       <div className="no-print max-w-lg mx-auto mb-4 px-4 space-y-2.5">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             onClick={() => router.push("/pos")}
             className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold shadow-sm border border-slate-200 flex items-center gap-1.5 transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
-            <span>POS Counter</span>
+            <span>{t("nav.posCounter") || "POS Counter"}</span>
           </button>
 
           {/* View switcher: Digital E-Receipt vs Thermal Print */}
@@ -155,13 +159,17 @@ export default function ReceiptPrintPage() {
             </button>
           </div>
 
-          <button
-            onClick={handlePrint}
-            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm shadow-blue-600/20 flex items-center gap-1.5 transition-all"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span>Print</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <LanguageSwitcher />
+
+            <button
+              onClick={handlePrint}
+              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm shadow-blue-600/20 flex items-center gap-1.5 transition-all"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>{t("common.print") || "Print"}</span>
+            </button>
+          </div>
         </div>
 
         {/* Digital Share Row */}
@@ -180,7 +188,7 @@ export default function ReceiptPrintPage() {
             className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
           >
             <MessageSquare className="w-3.5 h-3.5" />
-            <span>Share via WhatsApp</span>
+            <span>{t("common.shareWhatsapp") || "Share via WhatsApp"}</span>
           </a>
 
           <button
@@ -197,12 +205,12 @@ export default function ReceiptPrintPage() {
             {copied ? (
               <>
                 <Check className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="text-emerald-700 font-bold">Copied!</span>
+                <span className="text-emerald-700 font-bold">{t("common.copied") || "Copied!"}</span>
               </>
             ) : (
               <>
                 <Share2 className="w-3.5 h-3.5 text-slate-500" />
-                <span>Copy Link</span>
+                <span>{t("common.copyLink") || "Copy Link"}</span>
               </>
             )}
           </button>
@@ -299,8 +307,8 @@ export default function ReceiptPrintPage() {
             {/* Itemized Goods Breakdown */}
             <div className="p-5 space-y-3">
               <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-200 pb-1.5">
-                <span>Items Purchased</span>
-                <span>Amount</span>
+                <span>{t("receipt.item") || "Items Purchased"}</span>
+                <span>{t("receipt.total") || "Amount"}</span>
               </div>
 
               <div className="divide-y divide-slate-100">
@@ -309,8 +317,15 @@ export default function ReceiptPrintPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-bold text-slate-900 truncate">
-                          {item.name}
+                          {language === "si" && item.nameSinhala
+                            ? item.nameSinhala
+                            : language === "ta" && item.nameTamil
+                            ? item.nameTamil
+                            : item.name}
                         </div>
+                        {((language === "si" && item.nameSinhala) || (language === "ta" && item.nameTamil)) && (
+                          <div className="text-[10px] text-slate-400 font-mono truncate">{item.name}</div>
+                        )}
                         <div className="text-[11px] text-slate-500 font-mono">
                           {item.quantity} {item.unit || "unit"} × {formatCurrency(item.unitPrice)}
                         </div>
@@ -518,6 +533,7 @@ export default function ReceiptPrintPage() {
               business={business || { name: "Sri Lanka POS" }}
               sale={sale}
               width={customWidth}
+              receiptLanguage={language}
               publicReceiptUrl={currentUrl}
             />
           </div>
