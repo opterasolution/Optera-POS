@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/db";
-import { Customer, generatePortalToken } from "@/models/Customer";
+import { Customer, generatePortalToken, generateReferralCode } from "@/models/Customer";
 import { AuditLog } from "@/models/AuditLog";
 import { requireAuth } from "@/lib/tenant";
 import { customerSchema } from "@/lib/validations/customer";
@@ -72,6 +72,7 @@ export async function GET(req: Request) {
           { name: { $regex: query, $options: "i" } },
           { phone: { $regex: query, $options: "i" } },
           { email: { $regex: query, $options: "i" } },
+          { referralCode: { $regex: query, $options: "i" } },
         ];
       }
 
@@ -143,7 +144,22 @@ export async function POST(req: Request) {
       );
     }
 
-    const { name, phone, email, address, notes, creditAllowed, creditLimit, nicNumber, dateOfBirth, loyaltyTier } = parsed.data;
+    const {
+      name,
+      phone,
+      email,
+      address,
+      notes,
+      creditAllowed,
+      creditLimit,
+      nicNumber,
+      dateOfBirth,
+      anniversaryDate,
+      loyaltyTier,
+      referralCode,
+      referredByCode,
+      referredBy,
+    } = parsed.data;
     const normalizedPhone = normalizeSLPhone(phone);
 
     if (Boolean(process.env.MONGODB_URI)) {
@@ -165,6 +181,22 @@ export async function POST(req: Request) {
         );
       }
 
+      // Resolve referrer if provided by referral code or phone
+      let resolvedReferrerId: any = undefined;
+      const refInput = (referredByCode || (referredBy as string))?.trim();
+      if (refInput) {
+        const referrerCustomer = await Customer.findOne({
+          businessId: context.businessId,
+          $or: [
+            { referralCode: refInput.toUpperCase() },
+            { phone: normalizeSLPhone(refInput) },
+          ],
+        });
+        if (referrerCustomer) {
+          resolvedReferrerId = referrerCustomer._id;
+        }
+      }
+
       const customer = await Customer.create({
         businessId: context.businessId,
         name,
@@ -179,8 +211,14 @@ export async function POST(req: Request) {
         currentBalance: 0,
         nicNumber: nicNumber?.trim() || undefined,
         dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
+        anniversaryDate: anniversaryDate ? new Date(anniversaryDate) : undefined,
         loyaltyTier: loyaltyTier || "REGULAR",
         portalToken: generatePortalToken(),
+        referralCode: referralCode?.trim()?.toUpperCase() || generateReferralCode(),
+        referredBy: resolvedReferrerId,
+        referralCount: 0,
+        referralPointsEarned: 0,
+        vipCardIssuedAt: new Date(),
       });
 
       await AuditLog.create({

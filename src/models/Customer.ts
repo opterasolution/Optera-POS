@@ -26,6 +26,12 @@ export interface ICustomer extends Document {
   loyaltyTier?: "REGULAR" | "SILVER" | "GOLD" | "PLATINUM";
   dateOfBirth?: Date;
   portalToken?: string;
+  referralCode?: string;
+  referredBy?: Types.ObjectId;
+  referralCount?: number;
+  referralPointsEarned?: number;
+  vipCardIssuedAt?: Date;
+  anniversaryDate?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -38,6 +44,16 @@ export function generatePortalToken(): string {
     token += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return token;
+}
+
+export function generateReferralCode(): string {
+  // Generate friendly 6-char alphanumeric referral code (e.g., REF-7K9M2P)
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "REF-";
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
 }
 
 const CustomerSchema = new Schema<ICustomer>(
@@ -76,6 +92,12 @@ const CustomerSchema = new Schema<ICustomer>(
     },
     dateOfBirth: { type: Date },
     portalToken: { type: String, trim: true, index: true, sparse: true },
+    referralCode: { type: String, trim: true, uppercase: true, index: true, sparse: true },
+    referredBy: { type: Schema.Types.ObjectId, ref: "Customer" },
+    referralCount: { type: Number, default: 0, min: 0 },
+    referralPointsEarned: { type: Number, default: 0, min: 0 },
+    vipCardIssuedAt: { type: Date },
+    anniversaryDate: { type: Date },
   },
   { timestamps: true }
 );
@@ -83,7 +105,9 @@ const CustomerSchema = new Schema<ICustomer>(
 CustomerSchema.index({ businessId: 1, phone: 1 });
 CustomerSchema.index({ businessId: 1, currentBalance: -1 });
 CustomerSchema.index({ businessId: 1, loyaltyTier: 1 });
+CustomerSchema.index({ businessId: 1, referredBy: 1 });
 CustomerSchema.index({ portalToken: 1 }, { sparse: true });
+CustomerSchema.index({ referralCode: 1 }, { sparse: true });
 
 export const Customer: Model<ICustomer> =
   mongoose.models.Customer || mongoose.model<ICustomer>("Customer", CustomerSchema);

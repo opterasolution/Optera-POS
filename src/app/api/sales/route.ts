@@ -4,7 +4,7 @@ import { connectToDatabase } from "@/lib/db";
 import { Sale, ISaleItem } from "@/models/Sale";
 import { Product } from "@/models/Product";
 import { Business } from "@/models/Business";
-import { Customer, generatePortalToken } from "@/models/Customer";
+import { Customer, generatePortalToken, generateReferralCode } from "@/models/Customer";
 import { InventoryMovement } from "@/models/InventoryMovement";
 import { AuditLog } from "@/models/AuditLog";
 import { Shift } from "@/models/Shift";
@@ -271,6 +271,9 @@ export async function POST(req: Request) {
       let isBirthdayMonth = false;
       let pointsBeforeRedeem = 0;
       let pointsAfterRedeem = 0;
+      let isFirstOrder = false;
+      let isTierUpgraded = false;
+      let oldTier = "REGULAR";
 
       if (customerPhone && customerPhone.trim() !== "") {
         customerDoc = await Customer.findOne({
@@ -279,6 +282,7 @@ export async function POST(req: Request) {
         });
 
         if (!customerDoc) {
+          isFirstOrder = true;
           customerDoc = await Customer.create({
             businessId,
             name: customerName || "Customer",
@@ -291,11 +295,23 @@ export async function POST(req: Request) {
             lifetimePointsRedeemed: 0,
             loyaltyTier: "REGULAR",
             portalToken: generatePortalToken(),
+            referralCode: generateReferralCode(),
+            vipCardIssuedAt: new Date(),
           });
         } else {
           if (!customerDoc.portalToken) {
             customerDoc.portalToken = generatePortalToken();
           }
+          if (!customerDoc.referralCode) {
+            customerDoc.referralCode = generateReferralCode();
+          }
+          if (!customerDoc.vipCardIssuedAt) {
+            customerDoc.vipCardIssuedAt = new Date();
+          }
+          if ((customerDoc.visitCount || 0) === 0 || (customerDoc.totalSpent || 0) === 0) {
+            isFirstOrder = true;
+          }
+          oldTier = customerDoc.loyaltyTier || "REGULAR";
           customerDoc.totalSpent = (customerDoc.totalSpent || 0) + netTotal;
           customerDoc.visitCount = (customerDoc.visitCount || 0) + 1;
           customerDoc.lastVisit = new Date();
@@ -320,6 +336,10 @@ export async function POST(req: Request) {
           customerDoc.loyaltyTier = "SILVER";
         } else {
           customerDoc.loyaltyTier = "REGULAR";
+        }
+
+        if (customerDoc.loyaltyTier !== oldTier && customerDoc.loyaltyTier !== "REGULAR") {
+          isTierUpgraded = true;
         }
 
         pointsBeforeRedeem = customerDoc.loyaltyPoints || 0;
@@ -829,6 +849,120 @@ export async function POST(req: Request) {
             });
           } catch (smsErr) {
             console.error("Loyalty SMS trigger failed:", smsErr);
+          }
+        }
+
+        // Record tier upgrade if achieved
+        if (isTierUpgraded) {
+          try {
+            await LoyaltyTransaction.create({
+              businessId,
+              customerId: customerDoc._id,
+              type: "TIER_UPGRADE_BONUS",
+              points: 0,
+              pointsBefore: customerDoc.loyaltyPoints || 0,
+              pointsAfter: customerDoc.loyaltyPoints || 0,
+              saleId: sale._id,
+              invoiceNumber,
+              description: `Promoted to VIP ${customerDoc.loyaltyTier} Tier! Cumulative spend reached Rs. ${(customerDoc.totalSpent || 0).toLocaleString()}`,
+              performedBy: context.userId,
+              performedByName: context.username || "System",
+            });
+          } catch (tierErr) {
+            console.error("Failed to log tier upgrade:", tierErr);
+          }
+        }
+
+        // Automatic First-Order Referral Bonus Trigger
+        if (isFirstOrder && customerDoc.referredBy) {
+          try {
+            const refSettings = business?.loyaltySettings?.referralSettings;
+            const isReferralActive = refSettings?.enabled !== false;
+            const minFirstSpend = refSettings?.minFirstOrderSpend ?? 500;
+
+            if (isReferralActive && netTotal >= minFirstSpend) {
+              const referrerPoints = refSettings?.referrerRewardPoints ?? 100;
+              const refereePoints = refSettings?.refereeRewardPoints ?? 50;
+
+              // Credit referee (the new customer making their 1st purchase)
+              const refereeBefore = customerDoc.loyaltyPoints || 0;
+              customerDoc.loyaltyPoints = refereeBefore + refereePoints;
+              customerDoc.lifetimePointsEarned = (customerDoc.lifetimePointsEarned || 0) + refereePoints;
+              customerDoc.referralPointsEarned = (customerDoc.referralPointsEarned || 0) + refereePoints;
+              await customerDoc.save();
+
+              await LoyaltyTransaction.create({
+                businessId,
+                customerId: customerDoc._id,
+                type: "REFERRAL_BONUS",
+                points: refereePoints,
+                pointsBefore: refereeBefore,
+                pointsAfter: refereeBefore + refereePoints,
+                saleId: sale._id,
+                invoiceNumber,
+                description: `Welcome Referral Reward on 1st Order (+${refereePoints} pts)`,
+                performedBy: context.userId,
+                performedByName: context.username || "System",
+              });
+
+              // Credit referrer
+              const referrerDoc = await Customer.findOne({
+                _id: customerDoc.referredBy,
+                businessId,
+              });
+
+              if (referrerDoc) {
+                const referrerBefore = referrerDoc.loyaltyPoints || 0;
+                referrerDoc.loyaltyPoints = referrerBefore + referrerPoints;
+                referrerDoc.lifetimePointsEarned = (referrerDoc.lifetimePointsEarned || 0) + referrerPoints;
+                referrerDoc.referralPointsEarned = (referrerDoc.referralPointsEarned || 0) + referrerPoints;
+                referrerDoc.referralCount = (referrerDoc.referralCount || 0) + 1;
+                await referrerDoc.save();
+
+                await LoyaltyTransaction.create({
+                  businessId,
+                  customerId: referrerDoc._id,
+                  type: "REFERRAL_BONUS",
+                  points: referrerPoints,
+                  pointsBefore: referrerBefore,
+                  pointsAfter: referrerBefore + referrerPoints,
+                  saleId: sale._id,
+                  invoiceNumber,
+                  description: `Referral Reward: ${customerDoc.name} completed 1st qualifying purchase (+${referrerPoints} pts)`,
+                  performedBy: context.userId,
+                  performedByName: context.username || "System",
+                });
+
+                if (referrerDoc.phone) {
+                  try {
+                    await dispatchSms({
+                      businessId,
+                      recipientPhone: referrerDoc.phone,
+                      recipientName: referrerDoc.name,
+                      customerId: referrerDoc._id,
+                      eventType: "LOYALTY_ACCRUAL",
+                      templateKey: "loyaltyAccrual",
+                      variables: {
+                        customerName: referrerDoc.name,
+                        points: referrerPoints.toString(),
+                        totalPoints: (referrerDoc.loyaltyPoints || 0).toString(),
+                        balance: (referrerDoc.loyaltyPoints || 0).toString(),
+                        tier: referrerDoc.loyaltyTier || "REGULAR",
+                        storeName: business?.name || "Our Store",
+                        portalUrl: referrerDoc.portalToken
+                          ? `${process.env.NEXT_PUBLIC_APP_URL || "https://pos.srilanka.lk"}/portal/statement/${referrerDoc.portalToken}`
+                          : `${process.env.NEXT_PUBLIC_APP_URL || "https://pos.srilanka.lk"}/portal`,
+                      },
+                      metadata: { refereeName: customerDoc.name, refereePhone: customerDoc.phone },
+                    });
+                  } catch (refSmsErr) {
+                    console.error("Referrer SMS notification failed:", refSmsErr);
+                  }
+                }
+              }
+            }
+          } catch (referralErr) {
+            console.error("Referral bonus trigger failed:", referralErr);
           }
         }
       }

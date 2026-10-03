@@ -124,6 +124,48 @@ export interface IBackupSettings {
   lastBackupStatus?: string;
 }
 
+export interface ILoyaltyTierRule {
+  tier: "REGULAR" | "SILVER" | "GOLD" | "PLATINUM";
+  name: string;
+  nameSi?: string;
+  nameTa?: string;
+  minSpend: number;
+  multiplier: number;
+  perks: string[];
+  color: string;
+}
+
+export interface ILoyaltyReferralSettings {
+  enabled: boolean;
+  referrerRewardPoints: number; // default 100
+  refereeRewardPoints: number; // default 50
+  minFirstOrderSpend: number; // default 500
+}
+
+export interface ILoyaltyBirthdaySettings {
+  enabled: boolean;
+  multiplier: number; // default 2.0
+  rewardPointsBonus: number; // default 50
+  smsGreetingEnabled: boolean;
+}
+
+export interface ILoyaltySettings {
+  enabled: boolean;
+  pointsPerSpend: number;
+  redemptionRate: number;
+  minPointsToRedeem: number;
+  tierMultipliers?: {
+    regular?: number;
+    silver?: number;
+    gold?: number;
+    platinum?: number;
+  };
+  birthdayMultiplier?: number;
+  tiers?: ILoyaltyTierRule[];
+  referralSettings?: ILoyaltyReferralSettings;
+  birthdaySettings?: ILoyaltyBirthdaySettings;
+}
+
 export interface IBusiness extends Document {
   name: string;
   businessType: string;
@@ -168,12 +210,7 @@ export interface IBusiness extends Document {
     defaultReminderTemplate?: string;
   };
   smsSettings?: ISmsSettings;
-  loyaltySettings?: {
-    enabled: boolean;
-    pointsPerSpend: number;
-    redemptionRate: number;
-    minPointsToRedeem: number;
-  };
+  loyaltySettings?: ILoyaltySettings;
   securityPolicy?: {
     requireSupervisorForVoid: boolean;
     requireSupervisorForDiscount: boolean;
@@ -299,6 +336,37 @@ const BusinessSchema = new Schema<IBusiness>(
       pointsPerSpend: { type: Number, default: 100, min: 1 },
       redemptionRate: { type: Number, default: 1, min: 0.01 },
       minPointsToRedeem: { type: Number, default: 50, min: 0 },
+      tierMultipliers: {
+        regular: { type: Number, default: 1.0 },
+        silver: { type: Number, default: 1.25 },
+        gold: { type: Number, default: 1.5 },
+        platinum: { type: Number, default: 2.0 },
+      },
+      birthdayMultiplier: { type: Number, default: 2.0 },
+      tiers: [
+        {
+          tier: { type: String, enum: ["REGULAR", "SILVER", "GOLD", "PLATINUM"], required: true },
+          name: { type: String, required: true },
+          nameSi: { type: String },
+          nameTa: { type: String },
+          minSpend: { type: Number, required: true, min: 0 },
+          multiplier: { type: Number, required: true, min: 1 },
+          perks: { type: [String], default: [] },
+          color: { type: String, default: "#64748B" },
+        },
+      ],
+      referralSettings: {
+        enabled: { type: Boolean, default: true },
+        referrerRewardPoints: { type: Number, default: 100, min: 0 },
+        refereeRewardPoints: { type: Number, default: 50, min: 0 },
+        minFirstOrderSpend: { type: Number, default: 500, min: 0 },
+      },
+      birthdaySettings: {
+        enabled: { type: Boolean, default: true },
+        multiplier: { type: Number, default: 2.0 },
+        rewardPointsBonus: { type: Number, default: 50, min: 0 },
+        smsGreetingEnabled: { type: Boolean, default: true },
+      },
     },
     securityPolicy: {
       requireSupervisorForVoid: { type: Boolean, default: true },

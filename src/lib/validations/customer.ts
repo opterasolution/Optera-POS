@@ -17,7 +17,11 @@ export const customerSchema = z.object({
   creditLimit: z.number().min(0, "Credit limit must be non-negative").optional(),
   nicNumber: z.string().max(20, "NIC too long").optional().or(z.literal("")),
   dateOfBirth: z.string().optional().or(z.literal("")),
+  anniversaryDate: z.string().optional().or(z.literal("")),
   loyaltyTier: z.enum(["REGULAR", "SILVER", "GOLD", "PLATINUM"]).optional(),
+  referralCode: z.string().optional().or(z.literal("")),
+  referredByCode: z.string().optional().or(z.literal("")),
+  referredBy: z.string().optional().or(z.literal("")),
 });
 
 export type CustomerInput = z.infer<typeof customerSchema>;

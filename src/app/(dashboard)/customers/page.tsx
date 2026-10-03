@@ -43,6 +43,7 @@ import {
 import { formatCurrency, formatSLDateTime, isValidSLPhone } from "@/lib/formatters";
 import CreditSettlementReceipt, { CreditSettlementData } from "@/components/receipts/CreditSettlementReceipt";
 import GiftVoucherReceipt from "@/components/receipts/GiftVoucherReceipt";
+import DigitalVipCard from "@/components/loyalty/DigitalVipCard";
 import { buildWhatsAppUrl } from "@/lib/notifications";
 
 interface CustomerRecord {
@@ -66,7 +67,13 @@ interface CustomerRecord {
   lifetimePointsEarned?: number;
   lifetimePointsRedeemed?: number;
   dateOfBirth?: string;
+  anniversaryDate?: string;
   portalToken?: string;
+  referralCode?: string;
+  referredBy?: any;
+  referralCount?: number;
+  referralPointsEarned?: number;
+  vipCardIssuedAt?: string;
 }
 
 interface SummaryData {
@@ -106,7 +113,10 @@ export default function CustomersPage() {
     creditLimit: "10000",
     nicNumber: "",
     dateOfBirth: "",
+    anniversaryDate: "",
     loyaltyTier: "REGULAR" as "REGULAR" | "SILVER" | "GOLD" | "PLATINUM",
+    referralCode: "",
+    referredByCode: "",
   });
 
   // Loyalty Management State
@@ -120,6 +130,31 @@ export default function CustomersPage() {
   const [pointsLedgerCustomer, setPointsLedgerCustomer] = useState<CustomerRecord | null>(null);
   const [pointsTransactions, setPointsTransactions] = useState<any[]>([]);
   const [loadingPointsLedger, setLoadingPointsLedger] = useState(false);
+
+  // Digital VIP Card Modal State
+  const [vipCardCustomer, setVipCardCustomer] = useState<CustomerRecord | null>(null);
+  const [isVipCardModalOpen, setIsVipCardModalOpen] = useState(false);
+
+  // Referral Rewards Engine State
+  const [referralStats, setReferralStats] = useState<any>({
+    totalReferrers: 0,
+    totalReferrals: 0,
+    totalReferralPointsAwarded: 0,
+    activeReferrersCount: 0,
+  });
+  const [topReferrers, setTopReferrers] = useState<any[]>([]);
+  const [recentReferees, setRecentReferees] = useState<any[]>([]);
+  const [loadingReferrals, setLoadingReferrals] = useState(false);
+
+  // Birthday Dispatch Center State
+  const [birthdayData, setBirthdayData] = useState<any>({
+    stats: { todayCount: 0, upcomingWeekCount: 0, monthCount: 0 },
+    birthdaysToday: [],
+    birthdaysUpcoming: [],
+    birthdaysMonth: [],
+  });
+  const [loadingBirthdays, setLoadingBirthdays] = useState(false);
+  const [sendingBirthdaySmsId, setSendingBirthdaySmsId] = useState<string | null>(null);
 
   // Gift Vouchers State
   const [vouchers, setVouchers] = useState<any[]>([]);
@@ -251,6 +286,59 @@ export default function CustomersPage() {
     }
   };
 
+  const loadReferrals = async () => {
+    try {
+      setLoadingReferrals(true);
+      const res = await fetch("/api/loyalty/referrals");
+      const data = await res.json();
+      if (data.success) {
+        if (data.stats) setReferralStats(data.stats);
+        if (data.topReferrers) setTopReferrers(data.topReferrers);
+        if (data.recentReferees) setRecentReferees(data.recentReferees);
+      }
+    } catch {
+      console.error("Failed to load referral statistics.");
+    } finally {
+      setLoadingReferrals(false);
+    }
+  };
+
+  const loadBirthdays = async () => {
+    try {
+      setLoadingBirthdays(true);
+      const res = await fetch("/api/loyalty/birthday");
+      const data = await res.json();
+      if (data.success) {
+        setBirthdayData(data);
+      }
+    } catch {
+      console.error("Failed to load birthday records.");
+    } finally {
+      setLoadingBirthdays(false);
+    }
+  };
+
+  const handleSendBirthdayGreeting = async (customerId: string, customerName: string) => {
+    try {
+      setSendingBirthdaySmsId(customerId);
+      const res = await fetch("/api/loyalty/birthday", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`Birthday greeting sent successfully to ${customerName}!`);
+      } else {
+        alert(data.error || "Failed to dispatch birthday SMS greeting.");
+      }
+    } catch {
+      alert("Network error dispatching birthday greeting.");
+    } finally {
+      setSendingBirthdaySmsId(null);
+    }
+  };
+
   useEffect(() => {
     loadCustomers();
   }, [searchQuery]);
@@ -258,8 +346,16 @@ export default function CustomersPage() {
   useEffect(() => {
     if (activeTab === "GIFT_VOUCHERS") {
       loadVouchers();
+    } else if (activeTab === "LOYALTY") {
+      loadReferrals();
+      loadBirthdays();
     }
   }, [activeTab, voucherSearch, voucherStatusFilter]);
+
+  const openVipCardModal = (c: CustomerRecord) => {
+    setVipCardCustomer(c);
+    setIsVipCardModalOpen(true);
+  };
 
   const openNewModal = () => {
     setEditingCustomer(null);
@@ -273,7 +369,10 @@ export default function CustomersPage() {
       creditLimit: "10000",
       nicNumber: "",
       dateOfBirth: "",
+      anniversaryDate: "",
       loyaltyTier: "REGULAR",
+      referralCode: "",
+      referredByCode: "",
     });
     setIsModalOpen(true);
   };
@@ -290,7 +389,10 @@ export default function CustomersPage() {
       creditLimit: (c.creditLimit || 0).toString(),
       nicNumber: c.nicNumber || "",
       dateOfBirth: c.dateOfBirth ? new Date(c.dateOfBirth).toISOString().slice(0, 10) : "",
+      anniversaryDate: c.anniversaryDate ? new Date(c.anniversaryDate).toISOString().slice(0, 10) : "",
       loyaltyTier: c.loyaltyTier || "REGULAR",
+      referralCode: c.referralCode || "",
+      referredByCode: typeof c.referredBy === "object" ? c.referredBy?.referralCode || c.referredBy?.phone || "" : (c.referredBy || ""),
     });
     setIsModalOpen(true);
   };
@@ -502,7 +604,10 @@ export default function CustomersPage() {
         creditLimit: parseFloat(formData.creditLimit) || 0,
         nicNumber: formData.nicNumber.trim() || undefined,
         dateOfBirth: formData.dateOfBirth ? formData.dateOfBirth : undefined,
+        anniversaryDate: formData.anniversaryDate ? formData.anniversaryDate : undefined,
         loyaltyTier: formData.loyaltyTier,
+        referralCode: formData.referralCode?.trim() || undefined,
+        referredByCode: formData.referredByCode?.trim() || undefined,
       };
 
       const res = await fetch(url, {
@@ -1364,6 +1469,14 @@ export default function CustomersPage() {
                             <td className="py-3 px-4 text-right">
                               <div className="flex items-center justify-end gap-1.5">
                                 <button
+                                  onClick={() => openVipCardModal(c)}
+                                  title="Digital VIP Membership Card"
+                                  className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold rounded-lg text-[10px] transition-colors flex items-center gap-1 border border-amber-300 shadow-xs"
+                                >
+                                  <Crown className="w-3 h-3 text-amber-600" />
+                                  <span>VIP Card</span>
+                                </button>
+                                <button
                                   onClick={() => openAdjustPointsModal(c)}
                                   title="Adjust Points Balance"
                                   className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-800 font-semibold rounded-lg text-[10px] transition-colors flex items-center gap-1 border border-purple-200"
@@ -1393,6 +1506,261 @@ export default function CustomersPage() {
                     )}
                   </tbody>
                 </table>
+              </div>
+            </div>
+
+            {/* ================= BIRTHDAY CELEBRATION & DISPATCH CENTER ================= */}
+            <div className="bg-gradient-to-r from-pink-50 via-rose-50 to-purple-50 rounded-2xl border border-pink-200 p-5 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-pink-100 text-pink-700 flex items-center justify-center">
+                      <Cake className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">
+                        Birthday Dispatch Center (උපන්දින සුබපැතුම් මධ්‍යස්ථානය)
+                      </h3>
+                      <p className="text-[11px] text-slate-600">
+                        Customers receive 2.0x Double Points during their birthday month. Send 1-click personalized SMS wishes!
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-1 bg-pink-200/80 text-pink-950 font-bold rounded-lg text-xs">
+                    {birthdayData?.birthdaysToday?.length || 0} Celebrating Today
+                  </span>
+                  <span className="px-2.5 py-1 bg-white/80 text-purple-900 font-semibold rounded-lg text-xs border border-pink-200">
+                    {birthdayData?.birthdaysUpcoming?.length || 0} This Week
+                  </span>
+                </div>
+              </div>
+
+              {/* Today's & Upcoming Birthday Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                {/* Today's Birthdays */}
+                <div className="bg-white/80 backdrop-blur-xs rounded-xl p-4 border border-pink-200 space-y-3">
+                  <div className="flex items-center justify-between border-b border-pink-100 pb-2">
+                    <span className="text-xs font-bold text-pink-900 uppercase tracking-wider flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-pink-600" />
+                      <span>Today&apos;s Birthdays ({birthdayData?.birthdaysToday?.length || 0})</span>
+                    </span>
+                    <span className="text-[10px] text-pink-700 font-medium">Double points active today</span>
+                  </div>
+
+                  {birthdayData?.birthdaysToday && birthdayData.birthdaysToday.length > 0 ? (
+                    <div className="space-y-2">
+                      {birthdayData.birthdaysToday.map((b: any) => (
+                        <div
+                          key={b._id}
+                          className="p-3 bg-pink-50/70 border border-pink-200 rounded-xl flex items-center justify-between gap-3 text-xs"
+                        >
+                          <div className="space-y-0.5 min-w-0">
+                            <div className="font-bold text-slate-900 truncate">{b.name}</div>
+                            <div className="text-[11px] text-slate-600 font-mono flex items-center gap-1.5">
+                              <Phone className="w-3 h-3 text-slate-400" />
+                              <span>{b.phone}</span>
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-100 text-purple-800">
+                                {b.loyaltyTier}
+                              </span>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={sendingBirthdaySmsId === b._id}
+                            onClick={() => handleSendBirthdayGreeting(b._id, b.name)}
+                            className="px-3 py-1.5 bg-pink-600 hover:bg-pink-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 transition disabled:opacity-50 shadow-xs"
+                          >
+                            <Send className="w-3 h-3" />
+                            <span>{sendingBirthdaySmsId === b._id ? "Sending..." : "Send Greeting"}</span>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-4 text-center text-xs text-slate-400 italic">
+                      No customer birthdays scheduled for today.
+                    </div>
+                  )}
+                </div>
+
+                {/* Upcoming Week Birthdays */}
+                <div className="bg-white/80 backdrop-blur-xs rounded-xl p-4 border border-pink-200 space-y-3">
+                  <div className="flex items-center justify-between border-b border-pink-100 pb-2">
+                    <span className="text-xs font-bold text-purple-900 uppercase tracking-wider flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-purple-600" />
+                      <span>Upcoming Birthdays (Next 7 Days)</span>
+                    </span>
+                    <span className="text-[10px] text-purple-700 font-medium">Ready to celebrate</span>
+                  </div>
+
+                  {birthdayData?.birthdaysUpcoming && birthdayData.birthdaysUpcoming.length > 0 ? (
+                    <div className="space-y-2">
+                      {birthdayData.birthdaysUpcoming.map((b: any) => (
+                        <div
+                          key={b._id}
+                          className="p-3 bg-purple-50/50 border border-purple-100 rounded-xl flex items-center justify-between gap-3 text-xs"
+                        >
+                          <div className="space-y-0.5 min-w-0">
+                            <div className="font-bold text-slate-900 truncate">{b.name}</div>
+                            <div className="text-[11px] text-slate-600 flex items-center gap-2">
+                              <span>Day {b.day} of this month</span>
+                              <span className="font-mono text-purple-700 font-bold">{b.loyaltyPoints} pts</span>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={sendingBirthdaySmsId === b._id}
+                            onClick={() => handleSendBirthdayGreeting(b._id, b.name)}
+                            className="px-2.5 py-1 bg-white hover:bg-purple-100 text-purple-900 border border-purple-200 rounded-lg text-xs font-bold flex items-center gap-1 shrink-0 transition disabled:opacity-50"
+                          >
+                            <Send className="w-3 h-3 text-purple-600" />
+                            <span>Early SMS</span>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-4 text-center text-xs text-slate-400 italic">
+                      No upcoming customer birthdays in the next 7 days.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* ================= REFERRAL REWARDS ENGINE & LEADERBOARD ================= */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center">
+                    <Gift className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Customer Referral Rewards Engine (යොමු කිරීමේ ප්‍රතිලාභ පද්ධතිය)
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Shoppers earn +100 bonus points for each friend referred. Referees get +50 bonus points upon their first order.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1 bg-purple-50 text-purple-900 border border-purple-200 rounded-xl text-xs font-bold font-mono">
+                    +{referralStats?.totalReferrals || 0} Total Referrals
+                  </span>
+                  <span className="px-3 py-1 bg-emerald-50 text-emerald-900 border border-emerald-200 rounded-xl text-xs font-bold font-mono">
+                    {referralStats?.totalReferralPointsAwarded || 0} pts Awarded
+                  </span>
+                </div>
+              </div>
+
+              {/* Referral Leaderboard & Recent Referees Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                {/* Top Referrers Leaderboard */}
+                <div className="space-y-3">
+                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <Crown className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Top Referrers Leaderboard (ඉහළම යොමු කරන්නන්)</span>
+                  </h4>
+
+                  {topReferrers.length > 0 ? (
+                    <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+                      {topReferrers.map((ref: any, idx: number) => (
+                        <div
+                          key={ref._id}
+                          className="p-3 hover:bg-slate-50 flex items-center justify-between gap-3 text-xs"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span
+                              className={`w-6 h-6 rounded-full flex items-center justify-center font-black text-xs ${
+                                idx === 0
+                                  ? "bg-amber-100 text-amber-900 border border-amber-300"
+                                  : idx === 1
+                                  ? "bg-slate-200 text-slate-800 border border-slate-300"
+                                  : idx === 2
+                                  ? "bg-amber-50 text-amber-800 border border-amber-200"
+                                  : "bg-slate-100 text-slate-600"
+                              }`}
+                            >
+                              {idx + 1}
+                            </span>
+                            <div>
+                              <div className="font-bold text-slate-900">{ref.name}</div>
+                              <div className="text-[11px] text-slate-500 font-mono flex items-center gap-2">
+                                <span>{ref.phone}</span>
+                                <span className="text-purple-600 font-bold">{ref.referralCode}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <span className="font-mono font-black text-purple-900 text-sm block">
+                              {ref.referralCount} referrals
+                            </span>
+                            <span className="text-[10px] text-emerald-600 font-semibold font-mono">
+                              +{ref.referralPointsEarned} pts earned
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
+                      No customer referrals recorded yet. Customers can share their referral code from the self-service portal!
+                    </div>
+                  )}
+                </div>
+
+                {/* Recent Referees List */}
+                <div className="space-y-3">
+                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Recent Referred Shoppers (මෑතකදී සම්බන්ධ වූවන්)</span>
+                  </h4>
+
+                  {recentReferees.length > 0 ? (
+                    <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden max-h-[300px] overflow-y-auto">
+                      {recentReferees.map((r: any) => (
+                        <div
+                          key={r._id}
+                          className="p-3 hover:bg-slate-50 flex items-center justify-between gap-3 text-xs"
+                        >
+                          <div>
+                            <div className="font-bold text-slate-900">{r.name}</div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              Referred by: <strong className="text-slate-800">{r.referrerName}</strong> ({r.referrerCode || "REF"})
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                r.hasCompletedOrder
+                                  ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                  : "bg-amber-100 text-amber-800 border border-amber-200"
+                              }`}
+                            >
+                              {r.hasCompletedOrder ? "Order Completed (Bonus Credited)" : "Registered (Pending Order)"}
+                            </span>
+                            <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                              Total Spent: {formatCurrency(r.totalSpent || 0)}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
+                      No shoppers referred recently.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -1753,6 +2121,39 @@ export default function CustomersPage() {
                       <option value="PLATINUM">PLATINUM (2.0x)</option>
                     </select>
                     <p className="text-[9px] text-purple-700 mt-0.5">Auto-advances based on spend</p>
+                  </div>
+                </div>
+
+                {/* Referral Rewards & Anniversary Section */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-purple-50/30 border border-purple-200/50 rounded-xl">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                      <Gift className="w-3.5 h-3.5 text-purple-600" />
+                      <span>Referred By (Code / Mobile)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.referredByCode}
+                      onChange={(e) => setFormData({ ...formData, referredByCode: e.target.value })}
+                      placeholder="e.g. REF-7K9M2P or 077..."
+                      className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg font-mono focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                    />
+                    <p className="text-[9px] text-slate-500 mt-0.5">Awards referral points on 1st order</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                      <Star className="w-3.5 h-3.5 text-amber-500" />
+                      <span>Customer Referral Code</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.referralCode}
+                      onChange={(e) => setFormData({ ...formData, referralCode: e.target.value.toUpperCase() })}
+                      placeholder="Auto-generated if blank"
+                      className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg font-mono uppercase focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                    />
+                    <p className="text-[9px] text-slate-500 mt-0.5">Unique VIP membership code</p>
                   </div>
                 </div>
 
@@ -2866,6 +3267,95 @@ export default function CustomersPage() {
             voucher={activePrintedVoucher}
             onClose={() => setActivePrintedVoucher(null)}
           />
+        )}
+
+        {/* ================= MODAL 11: DIGITAL VIP MEMBERSHIP CARD PASS ================= */}
+        {isVipCardModalOpen && vipCardCustomer && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
+            <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 my-8">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center">
+                    <Crown className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-900">Digital VIP Card Pass</h3>
+                    <p className="text-[11px] text-slate-500">Scan at counter checkout or share with customer</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsVipCardModalOpen(false);
+                    setVipCardCustomer(null);
+                  }}
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <DigitalVipCard
+                customer={{
+                  _id: vipCardCustomer._id,
+                  name: vipCardCustomer.name,
+                  phone: vipCardCustomer.phone,
+                  email: vipCardCustomer.email,
+                  portalToken: vipCardCustomer.portalToken,
+                  referralCode: vipCardCustomer.referralCode || "REF-VIP",
+                  referralCount: vipCardCustomer.referralCount || 0,
+                  referralPointsEarned: vipCardCustomer.referralPointsEarned || 0,
+                  vipCardIssuedAt: vipCardCustomer.vipCardIssuedAt,
+                }}
+                loyalty={{
+                  tier: vipCardCustomer.loyaltyTier || "REGULAR",
+                  points: vipCardCustomer.loyaltyPoints || 0,
+                  monetaryEquivalent: vipCardCustomer.loyaltyPoints || 0,
+                  lifetimeEarned: vipCardCustomer.lifetimePointsEarned || 0,
+                  totalSpent: vipCardCustomer.totalSpent || 0,
+                }}
+                progression={(() => {
+                  const totalSpent = vipCardCustomer.totalSpent || 0;
+                  const currentTier = vipCardCustomer.loyaltyTier || "REGULAR";
+                  let nextTier = "SILVER";
+                  let nextTierName = "Silver VIP";
+                  let nextTierMultiplier = 1.25;
+                  let threshold = 25000;
+                  let prevMin = 0;
+                  if (currentTier === "SILVER") {
+                    nextTier = "GOLD";
+                    nextTierName = "Gold VIP";
+                    nextTierMultiplier = 1.5;
+                    threshold = 75000;
+                    prevMin = 25000;
+                  } else if (currentTier === "GOLD") {
+                    nextTier = "PLATINUM";
+                    nextTierName = "Platinum Elite";
+                    nextTierMultiplier = 2.0;
+                    threshold = 150000;
+                    prevMin = 75000;
+                  } else if (currentTier === "PLATINUM") {
+                    nextTier = "";
+                    nextTierName = "Elite Achieved";
+                    nextTierMultiplier = 2.0;
+                    threshold = 150000;
+                    prevMin = 150000;
+                  }
+                  const amountNeeded = Math.max(0, threshold - totalSpent);
+                  const progressPercent = currentTier === "PLATINUM" ? 100 : Math.min(100, Math.max(0, Math.round(((totalSpent - prevMin) / (threshold - prevMin || 1)) * 100)));
+                  return {
+                    nextTier: currentTier === "PLATINUM" ? null : nextTier,
+                    nextTierName,
+                    nextTierMultiplier,
+                    amountNeeded,
+                    progressPercent,
+                  };
+                })()}
+                showSharing={true}
+                showPrint={true}
+              />
+            </div>
+          </div>
         )}
       </div>
     </AppLayout>

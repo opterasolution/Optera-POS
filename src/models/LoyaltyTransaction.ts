@@ -1,12 +1,19 @@
 import mongoose, { Schema, Document, Model, Types } from "mongoose";
 
-export type LoyaltyTransactionType = "EARN" | "REDEEM" | "ADJUST" | "BIRTHDAY_BONUS" | "EXPIRE";
+export type LoyaltyTransactionType =
+  | "EARN"
+  | "REDEEM"
+  | "ADJUST"
+  | "BIRTHDAY_BONUS"
+  | "EXPIRE"
+  | "REFERRAL_BONUS"
+  | "TIER_UPGRADE_BONUS";
 
 export interface ILoyaltyTransaction extends Document {
   businessId: Types.ObjectId;
   customerId: Types.ObjectId;
   type: LoyaltyTransactionType;
-  points: number; // positive for EARN/ADJUST(+)/BIRTHDAY_BONUS, negative for REDEEM/EXPIRE/ADJUST(-)
+  points: number; // positive for EARN/ADJUST(+)/BIRTHDAY_BONUS/REFERRAL_BONUS/TIER_UPGRADE_BONUS, negative for REDEEM/EXPIRE/ADJUST(-)
   pointsBefore: number;
   pointsAfter: number;
   saleId?: Types.ObjectId;
@@ -35,7 +42,7 @@ const LoyaltyTransactionSchema = new Schema<ILoyaltyTransaction>(
     },
     type: {
       type: String,
-      enum: ["EARN", "REDEEM", "ADJUST", "BIRTHDAY_BONUS", "EXPIRE"],
+      enum: ["EARN", "REDEEM", "ADJUST", "BIRTHDAY_BONUS", "EXPIRE", "REFERRAL_BONUS", "TIER_UPGRADE_BONUS"],
       required: true,
     },
     points: { type: Number, required: true },

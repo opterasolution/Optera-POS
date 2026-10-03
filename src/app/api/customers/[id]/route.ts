@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/db";
-import { Customer, generatePortalToken } from "@/models/Customer";
+import { Customer, generatePortalToken, generateReferralCode } from "@/models/Customer";
 import { Sale } from "@/models/Sale";
 import { requireAuth } from "@/lib/tenant";
 import { customerSchema } from "@/lib/validations/customer";
@@ -25,8 +25,20 @@ export async function GET(
         return NextResponse.json({ success: false, error: "Customer not found." }, { status: 404 });
       }
 
+      let shouldSave = false;
       if (!customer.portalToken) {
         customer.portalToken = generatePortalToken();
+        shouldSave = true;
+      }
+      if (!customer.referralCode) {
+        customer.referralCode = generateReferralCode();
+        shouldSave = true;
+      }
+      if (!customer.vipCardIssuedAt) {
+        customer.vipCardIssuedAt = new Date();
+        shouldSave = true;
+      }
+      if (shouldSave) {
         await customer.save();
       }
 
@@ -85,7 +97,21 @@ export async function PUT(
       );
     }
 
-    const { name, phone, email, address, notes, creditAllowed, creditLimit, nicNumber, dateOfBirth, loyaltyTier } = parsed.data;
+    const {
+      name,
+      phone,
+      email,
+      address,
+      notes,
+      creditAllowed,
+      creditLimit,
+      nicNumber,
+      dateOfBirth,
+      anniversaryDate,
+      loyaltyTier,
+      referralCode,
+      referredByCode,
+    } = parsed.data;
     const normalizedPhone = normalizeSLPhone(phone);
 
     if (Boolean(process.env.MONGODB_URI)) {
@@ -119,8 +145,27 @@ export async function PUT(
       if (dateOfBirth !== undefined) {
         updateFields.dateOfBirth = dateOfBirth ? new Date(dateOfBirth) : null;
       }
+      if (anniversaryDate !== undefined) {
+        updateFields.anniversaryDate = anniversaryDate ? new Date(anniversaryDate) : null;
+      }
       if (loyaltyTier) {
         updateFields.loyaltyTier = loyaltyTier;
+      }
+      if (referralCode) {
+        updateFields.referralCode = referralCode.trim().toUpperCase();
+      }
+      if (referredByCode) {
+        const refCust = await Customer.findOne({
+          businessId: context.businessId,
+          _id: { $ne: params.id },
+          $or: [
+            { referralCode: referredByCode.trim().toUpperCase() },
+            { phone: normalizeSLPhone(referredByCode.trim()) },
+          ],
+        });
+        if (refCust) {
+          updateFields.referredBy = refCust._id;
+        }
       }
 
       const updated = await Customer.findOneAndUpdate(

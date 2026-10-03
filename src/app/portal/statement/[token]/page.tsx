@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import QRCodeImage from "@/components/common/QRCodeImage";
+import DigitalVipCard from "@/components/loyalty/DigitalVipCard";
 import {
   Receipt,
   CreditCard,
@@ -595,51 +596,69 @@ export default function CustomerStatementPortalPage() {
         )}
 
         {/* ================= TAB 2: LOYALTY REWARDS CLUB ================= */}
-        {activeTab === "loyalty" && (
-          <div className="space-y-4">
-            {/* VIP Card Display */}
-            <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
-              <div className="absolute right-4 top-4 opacity-10">
-                <Sparkles className="w-36 h-36" />
-              </div>
+        {activeTab === "loyalty" && (() => {
+          const totalSpent = customer.totalSpent || 0;
+          const currentTier = customer.loyalty?.tier || "REGULAR";
+          let nextTier = "SILVER";
+          let nextTierName = "Silver VIP";
+          let nextTierMultiplier = 1.25;
+          let threshold = 25000;
+          let prevMin = 0;
 
-              <div className="relative z-10 space-y-6">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest block">
-                      VIP Membership Card
-                    </span>
-                    <span className="text-lg font-black tracking-tight">{business.name}</span>
-                  </div>
-                  <span className="px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-amber-400 text-slate-950 shadow-md">
-                    {customer.loyalty?.tier || "REGULAR"} MEMBER
-                  </span>
-                </div>
+          if (currentTier === "SILVER") {
+            nextTier = "GOLD";
+            nextTierName = "Gold VIP";
+            nextTierMultiplier = 1.5;
+            threshold = 75000;
+            prevMin = 25000;
+          } else if (currentTier === "GOLD") {
+            nextTier = "PLATINUM";
+            nextTierName = "Platinum Elite";
+            nextTierMultiplier = 2.0;
+            threshold = 150000;
+            prevMin = 75000;
+          } else if (currentTier === "PLATINUM") {
+            nextTier = "";
+            nextTierName = "Elite Achieved";
+            nextTierMultiplier = 2.0;
+            threshold = 150000;
+            prevMin = 150000;
+          }
 
-                <div className="pt-4 space-y-1">
-                  <span className="text-xs text-indigo-200">Current Points Balance</span>
-                  <div className="text-3xl sm:text-4xl font-black font-mono tracking-tight flex items-baseline gap-2">
-                    <span>{customer.loyalty?.points || 0}</span>
-                    <span className="text-base text-amber-300 font-sans font-semibold">PTS</span>
-                  </div>
-                </div>
+          const amountNeeded = Math.max(0, threshold - totalSpent);
+          const progressPercent = currentTier === "PLATINUM" ? 100 : Math.min(100, Math.max(0, Math.round(((totalSpent - prevMin) / (threshold - prevMin || 1)) * 100)));
 
-                <div className="pt-2 border-t border-white/10 flex flex-wrap items-center justify-between gap-4 text-xs">
-                  <div>
-                    <span className="text-slate-400 block text-[10px]">MONETARY VALUE IN LKR</span>
-                    <span className="font-bold text-emerald-400 font-mono text-sm">
-                      {formatCurrency(customer.loyalty?.monetaryEquivalent || 0)} Discount
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block text-[10px]">LIFETIME EARNED</span>
-                    <span className="font-semibold text-slate-200 font-mono">
-                      {customer.loyalty?.lifetimeEarned || 0} Points
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
+          return (
+            <div className="space-y-4">
+              <DigitalVipCard
+                customer={{
+                  name: customer.name,
+                  phone: customer.phone,
+                  email: customer.email,
+                  portalToken: token,
+                  referralCode: customer.referralCode || customer.loyalty?.referralCode || "REF-VIP",
+                  referralCount: customer.referralCount || customer.loyalty?.referralCount || 0,
+                  referralPointsEarned: customer.referralPointsEarned || customer.loyalty?.referralPointsEarned || 0,
+                  vipCardIssuedAt: customer.vipCardIssuedAt,
+                }}
+                loyalty={{
+                  tier: currentTier,
+                  points: customer.loyalty?.points || 0,
+                  monetaryEquivalent: customer.loyalty?.monetaryEquivalent || customer.loyalty?.points || 0,
+                  lifetimeEarned: customer.loyalty?.lifetimeEarned || 0,
+                  totalSpent,
+                }}
+                progression={{
+                  nextTier: currentTier === "PLATINUM" ? null : nextTier,
+                  nextTierName,
+                  nextTierMultiplier,
+                  amountNeeded,
+                  progressPercent,
+                }}
+                business={business}
+                showSharing={true}
+                showPrint={true}
+              />
 
             {/* How to Redeem & Tier Benefits Guide */}
             <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
@@ -671,8 +690,9 @@ export default function CustomerStatementPortalPage() {
                 </div>
               </div>
             </div>
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
         {/* ================= TAB 3: GIFT VOUCHER BALANCE CHECKER ================= */}
         {activeTab === "voucher" && (

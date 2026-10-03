@@ -103,6 +103,9 @@ export interface TranslationsSchema {
     loyaltyRewards: string;
     currentPoints: string;
     monetaryValue: string;
+    vipCardPass: string;
+    referralRewards: string;
+    copyReferralCode: string;
     giftVouchers: string;
     checkVoucher: string;
     enterVoucherCode: string;
@@ -234,6 +237,9 @@ export const translations: Record<Language, TranslationsSchema> = {
       loyaltyRewards: "Loyalty Rewards Club",
       currentPoints: "Points Balance",
       monetaryValue: "LKR Discount Value",
+      vipCardPass: "Digital VIP Membership Pass",
+      referralRewards: "Referral Rewards Club",
+      copyReferralCode: "Copy Referral Code",
       giftVouchers: "Gift Voucher Checker",
       checkVoucher: "Check Balance",
       enterVoucherCode: "Enter voucher code (e.g. GV-...)",
@@ -363,6 +369,9 @@ export const translations: Record<Language, TranslationsSchema> = {
       loyaltyRewards: "පාරිභෝගික ප්‍රසාද ලකුණු",
       currentPoints: "ලකුණු ශේෂය",
       monetaryValue: "රුපියල් වට්ටම් වටිනාකම",
+      vipCardPass: "ඩිජිටල් VIP සාමාජික කාඩ්පත",
+      referralRewards: "යොමු කිරීමේ ප්‍රතිලාභ සමාජය",
+      copyReferralCode: "යොමු කිරීමේ කේතය පිටපත් කරන්න",
       giftVouchers: "තෑගි වවුචර් ශේෂය",
       checkVoucher: "පරීක්ෂා කරන්න",
       enterVoucherCode: "වවුචර් කේතය ඇතුළත් කරන්න (උදා: GV-...)",
@@ -492,6 +501,9 @@ export const translations: Record<Language, TranslationsSchema> = {
       loyaltyRewards: "விசுவாச புள்ளிகள் கிளப்",
       currentPoints: "புள்ளிகள் இருப்பு",
       monetaryValue: "ரூபாய் தள்ளுபடி மதிப்பு",
+      vipCardPass: "டிஜிட்டல் விஐபி உறுப்பினர் அட்டை",
+      referralRewards: "பரிந்துரை வெகுமதி கிளப்",
+      copyReferralCode: "பரிந்துரைக் குறியீட்டை நகலெடு",
       giftVouchers: "பரிசு வவுச்சர் இருப்பு",
       checkVoucher: "இருப்பை சரிபார்க்கவும்",
       enterVoucherCode: "வவுச்சர் குறியீட்டை உள்ளிடவும் (எ.கா: GV-...)",

@@ -56,11 +56,13 @@ import {
   Bike,
   ChefHat,
   UtensilsCrossed,
+  Crown,
 } from "lucide-react";
 import QRCodeImage from "@/components/common/QRCodeImage";
 import SupervisorOverrideModal from "@/components/pos/SupervisorOverrideModal";
 import ShiftZReportReceipt, { ShiftZReportData } from "@/components/receipts/ShiftZReportReceipt";
 import CreditSettlementReceipt, { CreditSettlementData } from "@/components/receipts/CreditSettlementReceipt";
+import DigitalVipCard from "@/components/loyalty/DigitalVipCard";
 import { formatCurrency } from "@/lib/formatters";
 import {
   SUPPORTED_CURRENCY_PRESETS,
@@ -331,6 +333,7 @@ export default function POSPage() {
   const [creditSettlementNotes, setCreditSettlementNotes] = useState("");
   const [submittingCreditSettlement, setSubmittingCreditSettlement] = useState(false);
   const [activeSettlementSlip, setActiveSettlementSlip] = useState<CreditSettlementData | null>(null);
+  const [isPosVipCardOpen, setIsPosVipCardOpen] = useState(false);
 
   // Post-Sale Modal & Receipt State
   const [completedSale, setCompletedSale] = useState<any | null>(null);
@@ -556,19 +559,34 @@ export default function POSPage() {
     }
   };
 
-  // Reactive customer phone lookup to detect credit status & debt balance
+  // Reactive customer phone/code lookup to detect credit status, VIP tier & loyalty balance
   useEffect(() => {
-    const phoneTrimmed = customerPhone.trim();
-    if (phoneTrimmed.length >= 9) {
-      fetch(`/api/customers?q=${encodeURIComponent(phoneTrimmed)}`)
+    let input = customerPhone.trim();
+    if (input.startsWith("LOYALTY:")) {
+      const parts = input.split(":");
+      input = parts[1] || "";
+      setCustomerPhone(input);
+    }
+
+    if (input.length >= 6) {
+      fetch(`/api/customers?q=${encodeURIComponent(input)}`)
         .then((res) => res.json())
         .then((data) => {
           if (data.success && data.customers && data.customers.length > 0) {
-            const exact = data.customers.find((c: any) => c.phone.endsWith(phoneTrimmed.slice(-9)));
+            const exact =
+              data.customers.find((c: any) => c.phone.endsWith(input.slice(-9))) ||
+              data.customers.find(
+                (c: any) =>
+                  c.referralCode &&
+                  c.referralCode.toUpperCase() === input.toUpperCase()
+              );
             if (exact) {
               setMatchedCustomer(exact);
               if (customerName === "Walk-in Customer" || !customerName) {
                 setCustomerName(exact.name);
+              }
+              if (exact.phone && input !== exact.phone && input.startsWith("REF-")) {
+                setCustomerPhone(exact.phone);
               }
               return;
             }
@@ -2475,6 +2493,14 @@ export default function POSPage() {
                     🎂 Birthday Month (2x Bonus!)
                   </span>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setIsPosVipCardOpen(true)}
+                  className="px-2 py-0.5 rounded bg-purple-600 hover:bg-purple-700 text-white font-bold text-[10px] shrink-0 transition flex items-center gap-1 shadow-2xs ml-auto"
+                >
+                  <Crown className="w-3 h-3" />
+                  <span>VIP Pass</span>
+                </button>
               </div>
             </div>
           )}
@@ -4570,6 +4596,99 @@ export default function POSPage() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* ================= COUNTER DIGITAL VIP CARD MODAL ================= */}
+        {isPosVipCardOpen && matchedCustomer && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
+            <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 my-8">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center">
+                    <Crown className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-900">VIP Membership Card</h3>
+                    <p className="text-[11px] text-slate-500">
+                      {matchedCustomer.name} • {matchedCustomer.phone}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPosVipCardOpen(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <DigitalVipCard
+                customer={{
+                  _id: matchedCustomer._id,
+                  name: matchedCustomer.name,
+                  phone: matchedCustomer.phone,
+                  portalToken: matchedCustomer.portalToken,
+                  referralCode: matchedCustomer.referralCode || "REF-VIP",
+                  referralCount: matchedCustomer.referralCount || 0,
+                  referralPointsEarned: matchedCustomer.referralPointsEarned || 0,
+                  vipCardIssuedAt: matchedCustomer.vipCardIssuedAt,
+                }}
+                loyalty={{
+                  tier: matchedCustomer.loyaltyTier || "REGULAR",
+                  points: matchedCustomer.loyaltyPoints || 0,
+                  monetaryEquivalent: matchedCustomer.loyaltyPoints || 0,
+                  lifetimeEarned: matchedCustomer.lifetimePointsEarned || 0,
+                  totalSpent: matchedCustomer.totalSpent || 0,
+                }}
+                progression={(() => {
+                  const totalSpent = matchedCustomer.totalSpent || 0;
+                  const currentTier = matchedCustomer.loyaltyTier || "REGULAR";
+                  let nextTier = "SILVER";
+                  let nextTierName = "Silver VIP";
+                  let nextTierMultiplier = 1.25;
+                  let threshold = 25000;
+                  let prevMin = 0;
+                  if (currentTier === "SILVER") {
+                    nextTier = "GOLD";
+                    nextTierName = "Gold VIP";
+                    nextTierMultiplier = 1.5;
+                    threshold = 75000;
+                    prevMin = 25000;
+                  } else if (currentTier === "GOLD") {
+                    nextTier = "PLATINUM";
+                    nextTierName = "Platinum Elite";
+                    nextTierMultiplier = 2.0;
+                    threshold = 150000;
+                    prevMin = 75000;
+                  } else if (currentTier === "PLATINUM") {
+                    nextTier = "";
+                    nextTierName = "Elite Achieved";
+                    nextTierMultiplier = 2.0;
+                    threshold = 150000;
+                    prevMin = 150000;
+                  }
+                  const amountNeeded = Math.max(0, threshold - totalSpent);
+                  const progressPercent = currentTier === "PLATINUM" ? 100 : Math.min(100, Math.max(0, Math.round(((totalSpent - prevMin) / (threshold - prevMin || 1)) * 100)));
+                  return {
+                    nextTier: currentTier === "PLATINUM" ? null : nextTier,
+                    nextTierName,
+                    nextTierMultiplier,
+                    amountNeeded,
+                    progressPercent,
+                  };
+                })()}
+                business={{
+                  name: business?.name || "Sri Lanka POS",
+                  phone: business?.phone,
+                  address: business?.address,
+                  currency: business?.currency || "LKR",
+                }}
+                showSharing={true}
+                showPrint={true}
+              />
             </div>
           </div>
         )}
