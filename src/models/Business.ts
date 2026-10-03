@@ -113,6 +113,17 @@ export interface IRestaurantSettings {
   autoSendKdsOnTableOrder?: boolean;
 }
 
+export interface IBackupSettings {
+  enabled?: boolean;
+  schedule?: "DAILY" | "WEEKLY" | "MANUAL";
+  autoBackupTime?: string; // e.g. "02:00"
+  retentionDays?: number; // default 30
+  destination?: "CLOUD_VAULT" | "LOCAL_VAULT";
+  notifyEmail?: string;
+  lastBackupAt?: Date;
+  lastBackupStatus?: string;
+}
+
 export interface IBusiness extends Document {
   name: string;
   businessType: string;
@@ -185,6 +196,7 @@ export interface IBusiness extends Document {
   deliverySettings?: IDeliverySettings;
   kdsSettings?: IKdsSettings;
   restaurantSettings?: IRestaurantSettings;
+  backupSettings?: IBackupSettings;
   onboardingCompleted?: boolean;
   onboardingStep?: number;
   catalogPreset?: string;
@@ -383,6 +395,24 @@ const BusinessSchema = new Schema<IBusiness>(
         default: ["Main Dining Hall", "Outdoor Patio", "VIP Lounge"],
       },
       autoSendKdsOnTableOrder: { type: Boolean, default: true },
+    },
+    backupSettings: {
+      enabled: { type: Boolean, default: true },
+      schedule: {
+        type: String,
+        enum: ["DAILY", "WEEKLY", "MANUAL"],
+        default: "DAILY",
+      },
+      autoBackupTime: { type: String, default: "02:00" },
+      retentionDays: { type: Number, default: 30, min: 1 },
+      destination: {
+        type: String,
+        enum: ["CLOUD_VAULT", "LOCAL_VAULT"],
+        default: "CLOUD_VAULT",
+      },
+      notifyEmail: { type: String, trim: true },
+      lastBackupAt: { type: Date },
+      lastBackupStatus: { type: String, default: "IDLE" },
     },
     onboardingCompleted: { type: Boolean, default: false },
     onboardingStep: { type: Number, default: 1 },

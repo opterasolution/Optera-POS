@@ -24,6 +24,7 @@ export interface TranslationsSchema {
     sms: string;
     staff: string;
     reports: string;
+    backups: string;
     settings: string;
     admin: string;
     signOut: string;
@@ -153,6 +154,7 @@ export const translations: Record<Language, TranslationsSchema> = {
       sms: "SMS & Notifications",
       staff: "Staff & Commissions",
       reports: "Reports & P&L",
+      backups: "Cloud Backups",
       settings: "Store Settings",
       admin: "Super Admin",
       signOut: "Sign Out",
@@ -280,6 +282,7 @@ export const translations: Record<Language, TranslationsSchema> = {
       sms: "SMS පණිවිඩ",
       staff: "කාර්ය මණ්ඩලය",
       reports: "වාර්තා හා ලාභ/අලාභ",
+      backups: "වලාකුළු උපස්ථ (Backups)",
       settings: "වෙළඳසැල් සැකසුම්",
       admin: "ප්‍රධාන පරිපාලක",
       signOut: "පිටවීම",
@@ -407,6 +410,7 @@ export const translations: Record<Language, TranslationsSchema> = {
       sms: "எஸ்எம்எஸ் அறிவிப்புகள்",
       staff: "ஊழியர்கள் & கமிஷன்",
       reports: "அறிக்கைகள் & லாப நட்டம்",
+      backups: "கிளவுட் காப்புப்பிரதி",
       settings: "கடை அமைப்புகள்",
       admin: "நிர்வாகி",
       signOut: "வெளியேறு",

@@ -33,6 +33,7 @@ import {
   Bike,
   ChefHat,
   UtensilsCrossed,
+  Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n/LanguageContext";
@@ -100,6 +101,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { label: t("nav.sms", "SMS & Notifications"), href: "/sms", icon: MessageSquare, allowed: isOwner || isManager || isSupervisor },
     { label: t("nav.staff", "Staff & Commissions"), href: "/staff", icon: Award, allowed: isOwner || isManager || isSupervisor },
     { label: t("nav.reports", "Reports & P&L"), href: "/reports", icon: BarChart3, allowed: isOwner || isManager || isAccountant },
+    { label: t("nav.backups", "Cloud Backups"), href: "/backups", icon: Database, allowed: isOwner },
     { label: t("nav.settings", "Store Settings"), href: "/settings", icon: Settings, allowed: isOwner },
   ];
 
