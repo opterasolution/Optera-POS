@@ -27,8 +27,10 @@ import {
   Play,
   RotateCw,
   Sparkles,
+  Tag,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/formatters";
+import CampaignManager from "@/components/campaigns/CampaignManager";
 
 interface ISmsLogItem {
   _id: string;
@@ -87,7 +89,7 @@ const DEFAULT_TEMPLATES = {
 };
 
 export default function SmsManagementPage() {
-  const [activeTab, setActiveTab] = useState<"logs" | "settings" | "triggers" | "broadcast">("logs");
+  const [activeTab, setActiveTab] = useState<"logs" | "settings" | "triggers" | "broadcast" | "campaigns">("logs");
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -541,7 +543,22 @@ export default function SmsManagementPage() {
               }`}
             >
               <Users className="w-4 h-4" />
-              Bulk Campaigns & Debt Collection
+              Bulk Debt Reminders
+            </button>
+
+            <button
+              onClick={() => setActiveTab("campaigns")}
+              className={`py-3 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors ${
+                activeTab === "campaigns"
+                  ? "border-indigo-600 text-indigo-600 font-bold"
+                  : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+              }`}
+            >
+              <Tag className="w-4 h-4" />
+              RFM Promotional Campaigns & Coupons
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                PROMO
+              </span>
             </button>
           </nav>
         </div>
@@ -1498,6 +1515,11 @@ export default function SmsManagementPage() {
               </button>
             </div>
           </div>
+        )}
+
+        {/* TAB 5: RFM PROMOTIONAL CAMPAIGNS & COUPONS */}
+        {activeTab === "campaigns" && (
+          <CampaignManager />
         )}
 
         {/* Modal: View Message Log Details */}

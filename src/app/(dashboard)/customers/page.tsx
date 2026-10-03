@@ -44,6 +44,7 @@ import { formatCurrency, formatSLDateTime, isValidSLPhone } from "@/lib/formatte
 import CreditSettlementReceipt, { CreditSettlementData } from "@/components/receipts/CreditSettlementReceipt";
 import GiftVoucherReceipt from "@/components/receipts/GiftVoucherReceipt";
 import DigitalVipCard from "@/components/loyalty/DigitalVipCard";
+import CampaignManager from "@/components/campaigns/CampaignManager";
 import { buildWhatsAppUrl } from "@/lib/notifications";
 
 interface CustomerRecord {
@@ -97,7 +98,7 @@ export default function CustomersPage() {
   });
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<"DIRECTORY" | "NAYA_POTHA" | "LOYALTY" | "GIFT_VOUCHERS">("DIRECTORY");
+  const [activeTab, setActiveTab] = useState<"DIRECTORY" | "NAYA_POTHA" | "LOYALTY" | "GIFT_VOUCHERS" | "CAMPAIGNS">("DIRECTORY");
   const [creditFilter, setCreditFilter] = useState<"ALL" | "DEBTORS_ONLY" | "NEAR_LIMIT">("ALL");
 
   // Modals State
@@ -721,6 +722,8 @@ export default function CustomersPage() {
                   <Crown className="w-6 h-6 text-purple-600" />
                 ) : activeTab === "GIFT_VOUCHERS" ? (
                   <Gift className="w-6 h-6 text-emerald-600" />
+                ) : activeTab === "CAMPAIGNS" ? (
+                  <Sparkles className="w-6 h-6 text-indigo-600" />
                 ) : (
                   <Users className="w-6 h-6 text-blue-600" />
                 )}
@@ -730,6 +733,8 @@ export default function CustomersPage() {
                   ? "Loyalty Rewards & VIP Tiers"
                   : activeTab === "GIFT_VOUCHERS"
                   ? "Digital Gift Vouchers Hub"
+                  : activeTab === "CAMPAIGNS"
+                  ? "RFM Customer Segments & Promotional Campaigns"
                   : "Customer Directory"}
               </h1>
               {activeTab === "NAYA_POTHA" && (
@@ -742,6 +747,11 @@ export default function CustomersPage() {
                   Nexus / Cargills Style
                 </span>
               )}
+              {activeTab === "CAMPAIGNS" && (
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-900 border border-indigo-300">
+                  Automated SMS & Coupons
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 mt-1">
               {activeTab === "NAYA_POTHA"
@@ -750,6 +760,8 @@ export default function CustomersPage() {
                 ? "Track customer reward points, tiered spend multipliers (Regular, Silver, Gold, Platinum), and Birthday bonuses."
                 : activeTab === "GIFT_VOUCHERS"
                 ? "Issue and manage digital gift vouchers (GV-YYYYMMDD-XXXX), track balances, reprint slips, and manage counter redemptions."
+                : activeTab === "CAMPAIGNS"
+                ? "Data-driven RFM customer segmentation (Champions, Loyal, At-Risk, Hibernating) & targeted SMS marketing campaigns with unique POS promo coupons."
                 : "Manage Sri Lankan customer contact details, purchase frequency, and loyalty records."}
             </p>
           </div>
@@ -825,6 +837,27 @@ export default function CustomersPage() {
                   </span>
                 )}
               </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("CAMPAIGNS")}
+                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition ${
+                  activeTab === "CAMPAIGNS"
+                    ? "bg-indigo-600 text-white shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>RFM Segments & Campaigns</span>
+                <span
+                  className={`ml-1 px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
+                    activeTab === "CAMPAIGNS"
+                      ? "bg-indigo-800 text-indigo-100"
+                      : "bg-indigo-100 text-indigo-800"
+                  }`}
+                >
+                  NEW
+                </span>
+              </button>
             </div>
 
             {activeTab === "GIFT_VOUCHERS" ? (
@@ -835,7 +868,7 @@ export default function CustomersPage() {
                 <Plus className="w-4 h-4" />
                 <span>Issue Gift Voucher</span>
               </button>
-            ) : (
+            ) : activeTab === "CAMPAIGNS" ? null : (
               <button
                 onClick={openNewModal}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold transition-all shadow-sm flex items-center gap-1.5 shrink-0"
@@ -2005,6 +2038,11 @@ export default function CustomersPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* ================= TAB 5: RFM CUSTOMER SEGMENTS & PROMOTIONAL CAMPAIGNS ================= */}
+        {activeTab === "CAMPAIGNS" && (
+          <CampaignManager />
         )}
 
         {/* ================= MODAL 1: ADD / EDIT CUSTOMER PROFILE ================= */}

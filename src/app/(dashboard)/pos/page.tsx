@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import AppLayout from "@/components/layout/AppLayout";
@@ -254,6 +254,19 @@ export default function POSPage() {
   });
   const [couponCode, setCouponCode] = useState("");
   const [couponInput, setCouponInput] = useState("");
+  const [campaignCoupon, setCampaignCoupon] = useState<{
+    campaignId?: string;
+    campaignNumber?: string;
+    campaignName?: string;
+    couponCode: string;
+    discountType: "PERCENTAGE" | "FIXED_AMOUNT";
+    discountValue: number;
+    minSpend: number;
+    discountAmount: number;
+    recipientName?: string;
+  } | null>(null);
+  const [campaignCouponError, setCampaignCouponError] = useState<string | null>(null);
+  const [validatingCampaignCoupon, setValidatingCampaignCoupon] = useState(false);
   const [redeemLoyaltyPoints, setRedeemLoyaltyPoints] = useState(false);
   const [pointsToRedeemInput, setPointsToRedeemInput] = useState<number>(0);
 
@@ -1234,9 +1247,19 @@ export default function POSPage() {
     couponCode || undefined
   );
 
+  // Evaluate promotional campaign coupon discount if applied
+  const campaignDiscount = useMemo(() => {
+    if (!campaignCoupon || subtotal <= 0) return 0;
+    if (subtotal < (campaignCoupon.minSpend || 0)) return 0;
+    if (campaignCoupon.discountType === "PERCENTAGE") {
+      return Math.round(((subtotal * campaignCoupon.discountValue) / 100) * 100) / 100;
+    }
+    return Math.min(subtotal, campaignCoupon.discountValue);
+  }, [campaignCoupon, subtotal]);
+
   // Evaluate loyalty points redemption
   const customerAvailablePoints = matchedCustomer?.loyaltyPoints || 0;
-  const billAfterPromo = Math.max(0, subtotal - promoResult.totalPromoDiscount - orderDiscount);
+  const billAfterPromo = Math.max(0, subtotal - promoResult.totalPromoDiscount - campaignDiscount - orderDiscount);
   const maxUsablePoints = Math.min(
     customerAvailablePoints,
     Math.floor(billAfterPromo / (loyaltySettings.redemptionRate || 1))
@@ -1254,7 +1277,7 @@ export default function POSPage() {
     loyaltySettings
   );
 
-  const totalDiscount = Math.round((orderDiscount + promoResult.totalPromoDiscount + (redeemLoyaltyPoints ? loyaltyResult.discountAmount : 0)) * 100) / 100;
+  const totalDiscount = Math.round((orderDiscount + promoResult.totalPromoDiscount + campaignDiscount + (redeemLoyaltyPoints ? loyaltyResult.discountAmount : 0)) * 100) / 100;
 
   // Sri Lanka Tax Calculation
   const isTaxEnabled = business?.taxSettings?.enabled || false;
@@ -1717,6 +1740,14 @@ export default function POSPage() {
       pointsRedeemed: redeemLoyaltyPoints ? pointsToRedeem : 0,
       loyaltyDiscount: redeemLoyaltyPoints ? loyaltyResult.discountAmount : 0,
       appliedPromotions: promoResult.appliedPromotions,
+      campaignCouponRedeemed: campaignCoupon
+        ? {
+            campaignId: campaignCoupon.campaignId,
+            campaignNumber: campaignCoupon.campaignNumber,
+            code: campaignCoupon.couponCode,
+            discountAmount: campaignDiscount,
+          }
+        : undefined,
     };
 
     // Fallback: Record sale locally in offline queue and update local counter stock
@@ -1851,6 +1882,8 @@ export default function POSPage() {
       setOrderDiscount(0);
       setCouponCode("");
       setCouponInput("");
+      setCampaignCoupon(null);
+      setCampaignCouponError(null);
       setRedeemLoyaltyPoints(false);
       setPointsToRedeemInput(0);
       setValidatedGiftVoucher(null);
@@ -1916,6 +1949,8 @@ export default function POSPage() {
         setOrderDiscount(0);
         setCouponCode("");
         setCouponInput("");
+        setCampaignCoupon(null);
+        setCampaignCouponError(null);
         setRedeemLoyaltyPoints(false);
         setPointsToRedeemInput(0);
         setValidatedGiftVoucher(null);
@@ -2613,6 +2648,8 @@ export default function POSPage() {
                   onClick={() => {
                     setCouponCode("");
                     setCouponInput("");
+                    setCampaignCoupon(null);
+                    setCampaignCouponError(null);
                   }}
                   className="px-2 py-1 text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-lg"
                 >
@@ -2621,14 +2658,80 @@ export default function POSPage() {
               ) : (
                 <button
                   type="button"
-                  onClick={() => setCouponCode(couponInput.trim().toUpperCase())}
-                  disabled={!couponInput.trim()}
+                  onClick={async () => {
+                    const code = couponInput.trim().toUpperCase();
+                    if (!code) return;
+                    setCampaignCouponError(null);
+
+                    // 1. Check standard promotions
+                    const hasStandardPromo = promotions.some(
+                      (p) => p.code && p.code.trim().toUpperCase() === code
+                    );
+                    if (hasStandardPromo) {
+                      setCouponCode(code);
+                      setCampaignCoupon(null);
+                      return;
+                    }
+
+                    // 2. Validate against promotional campaign coupons
+                    try {
+                      setValidatingCampaignCoupon(true);
+                      const res = await fetch(
+                        `/api/campaigns/coupon/validate?code=${encodeURIComponent(code)}&subtotal=${subtotal}`
+                      );
+                      const data = await res.json();
+                      if (res.ok && data.valid) {
+                        setCampaignCoupon(data);
+                        setCouponCode(code);
+                        setCampaignCouponError(null);
+                      } else {
+                        setCampaignCouponError(data.error || "Invalid coupon code");
+                        setCouponCode("");
+                        setCampaignCoupon(null);
+                      }
+                    } catch (err) {
+                      setCampaignCouponError("Failed to validate coupon");
+                    } finally {
+                      setValidatingCampaignCoupon(false);
+                    }
+                  }}
+                  disabled={!couponInput.trim() || validatingCampaignCoupon}
                   className="px-2.5 py-1 text-xs font-semibold bg-slate-800 text-white hover:bg-slate-900 rounded-lg disabled:opacity-40"
                 >
-                  Apply
+                  {validatingCampaignCoupon ? "..." : "Apply"}
                 </button>
               )}
             </div>
+
+            {campaignCouponError && (
+              <div className="text-[10px] text-rose-600 bg-rose-50 px-2 py-1 rounded border border-rose-100 flex items-center justify-between">
+                <span>{campaignCouponError}</span>
+                <button
+                  type="button"
+                  onClick={() => setCampaignCouponError(null)}
+                  className="font-bold text-rose-500 hover:text-rose-700 ml-1"
+                >
+                  ×
+                </button>
+              </div>
+            )}
+
+            {campaignCoupon && (
+              <div className="text-[11px] text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 flex items-center justify-between font-medium">
+                <span className="truncate pr-1 flex items-center gap-1">
+                  <Tag className="w-3 h-3 text-emerald-600 shrink-0" />
+                  <span>
+                    {campaignCoupon.campaignName || "Promo"}:{" "}
+                    {campaignCoupon.discountType === "PERCENTAGE"
+                      ? `${campaignCoupon.discountValue}% OFF`
+                      : `Rs. ${campaignCoupon.discountValue} OFF`}
+                  </span>
+                </span>
+                <span className="font-bold text-emerald-700 shrink-0 font-mono">
+                  -{formatCurrency(campaignDiscount)}
+                </span>
+              </div>
+            )}
 
             <div className="space-y-1 text-xs">
               <div className="flex justify-between text-slate-600">

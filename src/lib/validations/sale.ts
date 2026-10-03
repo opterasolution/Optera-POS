@@ -36,6 +36,14 @@ export const createSaleSchema = z.object({
       })
     )
     .optional(),
+  campaignCouponRedeemed: z
+    .object({
+      campaignId: z.string().optional().or(z.literal("")),
+      campaignNumber: z.string().optional(),
+      code: z.string(),
+      discountAmount: z.number().min(0),
+    })
+    .optional(),
   billingType: z.enum(["RETAIL", "WHOLESALE"]).default("RETAIL").optional(),
   isTaxInvoice: z.boolean().default(false).optional(),
   buyerDetails: z

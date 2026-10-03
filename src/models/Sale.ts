@@ -56,6 +56,12 @@ export interface ISale extends Document {
     code?: string;
     discountAmount: number;
   }>;
+  campaignCouponRedeemed?: {
+    campaignId?: Types.ObjectId;
+    campaignNumber?: string;
+    code: string;
+    discountAmount: number;
+  };
   returnedTotal?: number;
   returnStatus?: SaleReturnStatus;
   creditNoteRedeemed?: {
@@ -177,6 +183,12 @@ const SaleSchema = new Schema<ISale>(
         discountAmount: { type: Number, default: 0 },
       },
     ],
+    campaignCouponRedeemed: {
+      campaignId: { type: Schema.Types.ObjectId, ref: "PromotionalCampaign" },
+      campaignNumber: { type: String, trim: true },
+      code: { type: String, trim: true },
+      discountAmount: { type: Number, default: 0 },
+    },
     returnedTotal: { type: Number, default: 0, min: 0 },
     returnStatus: {
       type: String,

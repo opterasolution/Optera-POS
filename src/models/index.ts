@@ -36,4 +36,22 @@ export {
   type GrnInspectionStatus,
   type GrnRejectionReason,
 } from "./GoodsReceivedNote";
+export {
+  RequestForQuotation,
+  type IRequestForQuotation,
+  type IRfqItem,
+  type ISupplierBid,
+  type ISupplierBidItem,
+} from "./RequestForQuotation";
+export {
+  PromotionalCampaign,
+  type IPromotionalCampaign,
+  type CampaignStatus,
+  type CampaignSegment,
+  type CampaignLanguage,
+  type ICampaignCouponConfig,
+  type ICampaignStats,
+  type ICampaignRecipient,
+} from "./PromotionalCampaign";
+
 

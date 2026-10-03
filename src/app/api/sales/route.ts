@@ -17,6 +17,7 @@ import { User } from "@/models/User";
 import { CommissionRule } from "@/models/CommissionRule";
 import { SalesTarget } from "@/models/SalesTarget";
 import { Batch } from "@/models/Batch";
+import { PromotionalCampaign } from "@/models/PromotionalCampaign";
 import { calculateSaleCommission } from "@/lib/commission";
 import { requireAuth, verifyActiveSubscription } from "@/lib/tenant";
 import { createSaleSchema } from "@/lib/validations/sale";
@@ -54,6 +55,7 @@ export async function POST(req: Request) {
       pointsRedeemed,
       loyaltyDiscount,
       appliedPromotions,
+      campaignCouponRedeemed,
       billingType,
       isTaxInvoice,
       buyerDetails,
@@ -671,6 +673,17 @@ export async function POST(req: Request) {
           code: ap.code,
           discountAmount: ap.discountAmount,
         })),
+        campaignCouponRedeemed: campaignCouponRedeemed
+          ? {
+              campaignId:
+                campaignCouponRedeemed.campaignId && Types.ObjectId.isValid(campaignCouponRedeemed.campaignId)
+                  ? new Types.ObjectId(campaignCouponRedeemed.campaignId)
+                  : undefined,
+              campaignNumber: campaignCouponRedeemed.campaignNumber,
+              code: campaignCouponRedeemed.code,
+              discountAmount: campaignCouponRedeemed.discountAmount,
+            }
+          : undefined,
         creditNoteRedeemed:
           paymentMethod === "CREDIT_NOTE" && creditNoteDoc
             ? {
@@ -967,6 +980,51 @@ export async function POST(req: Request) {
         }
       }
 
+      // Attribute and redeem promotional campaign coupon if used
+      if (campaignCouponRedeemed && campaignCouponRedeemed.code) {
+        try {
+          const promoCodeUpper = campaignCouponRedeemed.code.trim().toUpperCase();
+          const campaignDoc = await PromotionalCampaign.findOne({
+            businessId,
+            status: { $ne: "CANCELLED" },
+            "recipients.couponCode": promoCodeUpper,
+          });
+
+          if (campaignDoc) {
+            const recipient = campaignDoc.recipients.find(
+              (r) => r.couponCode && r.couponCode.toUpperCase() === promoCodeUpper
+            );
+
+            if (recipient && !recipient.redeemed) {
+              recipient.redeemed = true;
+              recipient.redeemedAt = new Date();
+              recipient.saleId = sale._id;
+              recipient.invoiceNumber = invoiceNumber;
+              recipient.saleAmount = netTotal;
+              recipient.discountAmount = campaignCouponRedeemed.discountAmount || 0;
+
+              campaignDoc.stats.couponsRedeemed = (campaignDoc.stats.couponsRedeemed || 0) + 1;
+              campaignDoc.stats.revenueGenerated =
+                (campaignDoc.stats.revenueGenerated || 0) + netTotal;
+              campaignDoc.stats.discountGiven =
+                (campaignDoc.stats.discountGiven || 0) + (campaignCouponRedeemed.discountAmount || 0);
+
+              const totalInv =
+                (campaignDoc.stats.smsCost || 0) + (campaignDoc.stats.discountGiven || 0);
+              if (totalInv > 0) {
+                campaignDoc.stats.roiPercent = Math.round(
+                  ((campaignDoc.stats.revenueGenerated - totalInv) / totalInv) * 100
+                );
+              }
+
+              await campaignDoc.save();
+            }
+          }
+        } catch (campaignErr) {
+          console.error("Failed to attribute campaign coupon redemption:", campaignErr);
+        }
+      }
+
       // If credit sale, record in CreditTransaction passbook
       if (paymentMethod === "CREDIT" && customerDoc) {
         const count = await CreditTransaction.countDocuments({ businessId });
@@ -1163,6 +1221,7 @@ export async function POST(req: Request) {
       pointsRedeemed: pointsRedeemed || 0,
       loyaltyDiscount: loyaltyDiscount || 0,
       appliedPromotions: appliedPromotions || [],
+      campaignCouponRedeemed: campaignCouponRedeemed || undefined,
       status: "COMPLETED",
       createdAt: new Date().toISOString(),
     };
