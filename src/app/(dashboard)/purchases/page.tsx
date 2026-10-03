@@ -34,10 +34,14 @@ import {
   FileCheck,
   Truck,
   ShieldCheck,
+  Sparkles,
+  Globe,
 } from "lucide-react";
 import PurchaseOrderReceipt, { PurchaseOrderData } from "@/components/receipts/PurchaseOrderReceipt";
 import SupplierPaymentReceipt, { SupplierPaymentData } from "@/components/receipts/SupplierPaymentReceipt";
 import GoodsReceivedNoteReceipt, { GoodsReceivedNoteData } from "@/components/receipts/GoodsReceivedNoteReceipt";
+import RfqBiddingManager from "@/components/purchases/RfqBiddingManager";
+import VendorPortalShareModal from "@/components/purchases/VendorPortalShareModal";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
 
 interface Supplier {
@@ -52,6 +56,7 @@ interface Supplier {
   paymentTermsDays: number;
   creditLimit: number;
   currentBalance: number;
+  portalToken?: string;
   isActive: boolean;
 }
 
@@ -129,7 +134,7 @@ export interface DockInspectionItemInput {
 }
 
 export default function PurchasesPage() {
-  const [activeTab, setActiveTab] = useState<"ORDERS" | "GRN" | "SUPPLIERS" | "VOUCHERS">("ORDERS");
+  const [activeTab, setActiveTab] = useState<"ORDERS" | "GRN" | "RFQ" | "SUPPLIERS" | "VOUCHERS">("ORDERS");
 
   // Data
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -251,6 +256,9 @@ export default function PurchasesPage() {
   const [activePrintPO, setActivePrintPO] = useState<PurchaseOrder | null>(null);
   const [activePrintPayment, setActivePrintPayment] = useState<SupplierPaymentData | null>(null);
 
+  // Vendor Portal Share Modal State
+  const [sharingSupplierPortal, setSharingSupplierPortal] = useState<Supplier | null>(null);
+
   // Load Data
   const loadData = async () => {
     try {
@@ -356,7 +364,7 @@ export default function PurchasesPage() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       const urlTab = new URLSearchParams(window.location.search).get("tab");
-      if (urlTab === "GRN" || urlTab === "SUPPLIERS" || urlTab === "VOUCHERS" || urlTab === "ORDERS") {
+      if (urlTab === "GRN" || urlTab === "RFQ" || urlTab === "SUPPLIERS" || urlTab === "VOUCHERS" || urlTab === "ORDERS") {
         setActiveTab(urlTab as any);
       }
     }
@@ -928,6 +936,19 @@ export default function PurchasesPage() {
 
           <button
             type="button"
+            onClick={() => setActiveTab("RFQ")}
+            className={`pb-3 text-xs font-bold flex items-center gap-2 border-b-2 transition ${
+              activeTab === "RFQ"
+                ? "border-purple-600 text-purple-600"
+                : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <Sparkles className="w-4 h-4 text-purple-600" />
+            <span>e-Bidding & RFQs</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab("SUPPLIERS")}
             className={`pb-3 text-xs font-bold flex items-center gap-2 border-b-2 transition ${
               activeTab === "SUPPLIERS"
@@ -1421,6 +1442,17 @@ export default function PurchasesPage() {
           </div>
         )}
 
+        {/* ================= TAB: E-BIDDING & RFQS ================= */}
+        {activeTab === "RFQ" && (
+          <RfqBiddingManager
+            products={products}
+            suppliers={suppliers}
+            branches={branches}
+            onPoCreated={loadData}
+            setStatusMessage={setStatusMessage}
+          />
+        )}
+
         {/* ================= TAB 2: SUPPLIERS & ACCOUNTS PAYABLE ================= */}
         {activeTab === "SUPPLIERS" && (
           <div className="space-y-4">
@@ -1656,6 +1688,17 @@ export default function PurchasesPage() {
                                     <Wallet className="w-3 h-3" /> Pay Debt
                                   </button>
                                 )}
+
+                                {/* Vendor Portal Link */}
+                                <button
+                                  type="button"
+                                  onClick={() => setSharingSupplierPortal(s)}
+                                  title="Vendor Self-Service Portal Access Link"
+                                  className="px-2 py-1 rounded-lg border border-indigo-200 bg-indigo-50/50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition flex items-center gap-1 shadow-2xs"
+                                >
+                                  <Globe className="w-3 h-3 text-indigo-600" />
+                                  <span>Portal</span>
+                                </button>
 
                                 {/* Statement / Ledger */}
                                 <button
@@ -3208,6 +3251,15 @@ export default function PurchasesPage() {
             }
             grn={viewingGrnReceipt}
             onClose={() => setViewingGrnReceipt(null)}
+          />
+        )}
+
+        {/* ================= MODAL: VENDOR PORTAL SHARE ================= */}
+        {sharingSupplierPortal && (
+          <VendorPortalShareModal
+            supplier={sharingSupplierPortal}
+            storeName={business?.name || "Our Store"}
+            onClose={() => setSharingSupplierPortal(null)}
           />
         )}
       </div>

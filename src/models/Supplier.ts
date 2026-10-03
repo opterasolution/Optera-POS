@@ -12,10 +12,20 @@ export interface ISupplier extends Document {
   paymentTermsDays: number; // e.g. 0 for Cash On Delivery (COD), 7, 14, 30, 60
   creditLimit: number;
   currentBalance: number; // outstanding accounts payable debt owed in LKR
+  portalToken?: string; // secure access token for Supplier Self-Service Portal
   notes?: string;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export function generateVendorPortalToken(): string {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let token = "vnd_";
+  for (let i = 0; i < 32; i++) {
+    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return token;
 }
 
 const SupplierSchema = new Schema<ISupplier>(
@@ -72,6 +82,10 @@ const SupplierSchema = new Schema<ISupplier>(
       type: Number,
       default: 0,
     },
+    portalToken: {
+      type: String,
+      trim: true,
+    },
     notes: {
       type: String,
       trim: true,
@@ -88,6 +102,7 @@ const SupplierSchema = new Schema<ISupplier>(
 SupplierSchema.index({ businessId: 1, name: 1 });
 SupplierSchema.index({ businessId: 1, currentBalance: -1 });
 SupplierSchema.index({ businessId: 1, isActive: 1 });
+SupplierSchema.index({ portalToken: 1 }, { sparse: true, unique: true });
 
 export const Supplier: Model<ISupplier> =
   mongoose.models.Supplier || mongoose.model<ISupplier>("Supplier", SupplierSchema);

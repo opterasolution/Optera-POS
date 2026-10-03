@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/db";
-import { Supplier } from "@/models/Supplier";
+import { Supplier, generateVendorPortalToken } from "@/models/Supplier";
 import { PurchaseOrder } from "@/models/PurchaseOrder";
 import { AuditLog } from "@/models/AuditLog";
 import { requireAuth, requireRole } from "@/lib/tenant";
@@ -34,7 +34,7 @@ export async function GET(req: Request) {
         query.currentBalance = { $gt: 0 };
       }
 
-      const [suppliers, metrics, receivedPOs] = await Promise.all([
+      const [rawSuppliers, metrics, receivedPOs] = await Promise.all([
         Supplier.find(query).sort({ currentBalance: -1, name: 1 }).lean(),
         Supplier.aggregate([
           { $match: { businessId, isActive: true } },
@@ -71,6 +71,17 @@ export async function GET(req: Request) {
           .select("supplierId netTotal receivedAt")
           .lean(),
       ]);
+
+      const suppliers = await Promise.all(
+        rawSuppliers.map(async (sup) => {
+          if (!sup.portalToken) {
+            const token = generateVendorPortalToken();
+            await Supplier.updateOne({ _id: sup._id }, { $set: { portalToken: token } });
+            return { ...sup, portalToken: token };
+          }
+          return sup;
+        })
+      );
 
       const summary = metrics[0] || {
         totalPayableBalance: 0,
@@ -152,6 +163,7 @@ export async function GET(req: Request) {
           paymentTermsDays: 30,
           creditLimit: 500000,
           currentBalance: 84500,
+          portalToken: "vnd_demo_unilever",
           isActive: true,
         },
         {
@@ -163,6 +175,7 @@ export async function GET(req: Request) {
           paymentTermsDays: 14,
           creditLimit: 250000,
           currentBalance: 42000,
+          portalToken: "vnd_demo_cbl",
           isActive: true,
         },
       ],
@@ -229,6 +242,7 @@ export async function POST(req: Request) {
         paymentTermsDays: Number(paymentTermsDays) || 30,
         creditLimit: Number(creditLimit) || 0,
         currentBalance: 0,
+        portalToken: generateVendorPortalToken(),
         notes: notes?.trim() || undefined,
         isActive: true,
       });

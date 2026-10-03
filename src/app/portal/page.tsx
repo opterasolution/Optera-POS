@@ -28,7 +28,9 @@ export default function CustomerPortalLandingPage() {
       return;
     }
 
-    if (clean.toUpperCase().startsWith("INV-")) {
+    if (clean.toLowerCase().startsWith("vnd_") || clean.toLowerCase().startsWith("bid_")) {
+      router.push(`/portal/vendor/${encodeURIComponent(clean)}`);
+    } else if (clean.toUpperCase().startsWith("INV-")) {
       router.push(`/receipt/${encodeURIComponent(clean)}`);
     } else {
       router.push(`/portal/statement/${encodeURIComponent(clean)}`);
@@ -98,8 +100,17 @@ export default function CustomerPortalLandingPage() {
               className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              <span>Launch Demo Naya Potha Statement →</span>
+              <span>Launch Demo Customer Statement →</span>
             </Link>
+            <div className="pt-2">
+              <span className="text-[11px] text-slate-400 block">Registered supplier / distributor?</span>
+              <Link
+                href="/portal/vendor/vnd_demo_unilever"
+                className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800"
+              >
+                <span>Launch Demo Vendor Portal & Bidding →</span>
+              </Link>
+            </div>
           </div>
         </div>
 

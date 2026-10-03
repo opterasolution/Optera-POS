@@ -31,6 +31,17 @@ export interface IPurchaseOrder extends Document {
   netTotal: number;
   expectedDeliveryDate?: Date;
   supplierInvoiceNumber?: string; // Bill number from supplier delivery invoice
+  rfqId?: Types.ObjectId;
+  rfqNumber?: string;
+  vendorAcknowledgement?: {
+    status: "PENDING" | "ACKNOWLEDGED" | "REJECTED";
+    acknowledgedAt?: Date;
+    estimatedDeliveryDate?: Date;
+    dispatchInvoiceNumber?: string;
+    driverName?: string;
+    driverPhone?: string;
+    notes?: string;
+  };
   receivedAt?: Date;
   receivedBy?: string;
   cancelledAt?: Date;
@@ -167,6 +178,28 @@ const PurchaseOrderSchema = new Schema<IPurchaseOrder>(
     supplierInvoiceNumber: {
       type: String,
       trim: true,
+    },
+    rfqId: {
+      type: Schema.Types.ObjectId,
+      ref: "RequestForQuotation",
+      index: true,
+    },
+    rfqNumber: {
+      type: String,
+      trim: true,
+    },
+    vendorAcknowledgement: {
+      status: {
+        type: String,
+        enum: ["PENDING", "ACKNOWLEDGED", "REJECTED"],
+        default: "PENDING",
+      },
+      acknowledgedAt: { type: Date },
+      estimatedDeliveryDate: { type: Date },
+      dispatchInvoiceNumber: { type: String, trim: true },
+      driverName: { type: String, trim: true },
+      driverPhone: { type: String, trim: true },
+      notes: { type: String, trim: true },
     },
     receivedAt: {
       type: Date,
