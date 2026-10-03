@@ -31,9 +31,13 @@ import {
   DollarSign,
   ArrowDownLeft,
   ArrowUpRight,
+  FileCheck,
+  Truck,
+  ShieldCheck,
 } from "lucide-react";
 import PurchaseOrderReceipt, { PurchaseOrderData } from "@/components/receipts/PurchaseOrderReceipt";
 import SupplierPaymentReceipt, { SupplierPaymentData } from "@/components/receipts/SupplierPaymentReceipt";
+import GoodsReceivedNoteReceipt, { GoodsReceivedNoteData } from "@/components/receipts/GoodsReceivedNoteReceipt";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
 
 interface Supplier {
@@ -104,8 +108,28 @@ interface ProductOption {
   stockQuantity: number;
 }
 
+export interface DockInspectionItemInput {
+  productId: string;
+  name: string;
+  sku?: string;
+  unit: string;
+  orderedQuantity: number;
+  alreadyReceived: number;
+  receivedQuantity: number;
+  rejectedQuantity: number;
+  rejectionReason: string;
+  rejectionNotes: string;
+  unitCost: number;
+  batchNumber: string;
+  manufacturingDate: string;
+  expiryDate: string;
+  mrp: string;
+  sellingPrice: string;
+  qcInspectionNotes: string;
+}
+
 export default function PurchasesPage() {
-  const [activeTab, setActiveTab] = useState<"ORDERS" | "SUPPLIERS" | "VOUCHERS">("ORDERS");
+  const [activeTab, setActiveTab] = useState<"ORDERS" | "GRN" | "SUPPLIERS" | "VOUCHERS">("ORDERS");
 
   // Data
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -175,10 +199,20 @@ export default function PurchasesPage() {
   // PO Details View Modal
   const [viewingPO, setViewingPO] = useState<PurchaseOrder | null>(null);
 
+  // GRN & Dock Inspection State
+  const [grns, setGrns] = useState<GoodsReceivedNoteData[]>([]);
+  const [loadingGrns, setLoadingGrns] = useState(false);
+  const [grnStatusFilter, setGrnStatusFilter] = useState("ALL");
+  const [grnInspectionFilter, setGrnInspectionFilter] = useState("ALL");
+  const [grnSearchQuery, setGrnSearchQuery] = useState("");
+  const [viewingGrnReceipt, setViewingGrnReceipt] = useState<GoodsReceivedNoteData | null>(null);
+
   // Receive GRN Modal State
   const [receivingPO, setReceivingPO] = useState<PurchaseOrder | null>(null);
-  const [receivedQtyMap, setReceivedQtyMap] = useState<Record<string, number>>({});
+  const [dockItems, setDockItems] = useState<DockInspectionItemInput[]>([]);
   const [supplierBillNumber, setSupplierBillNumber] = useState("");
+  const [supplierInvoiceDate, setSupplierInvoiceDate] = useState("");
+  const [dockInspectionNotes, setDockInspectionNotes] = useState("");
   const [submittingReceive, setSubmittingReceive] = useState(false);
 
   // Supplier Add / Edit Modal State
@@ -298,6 +332,36 @@ export default function PurchasesPage() {
     }
   };
 
+  // Load Goods Received Notes (GRN)
+  const loadGrns = async () => {
+    try {
+      setLoadingGrns(true);
+      const params = new URLSearchParams();
+      if (grnStatusFilter && grnStatusFilter !== "ALL") params.append("status", grnStatusFilter);
+      if (grnInspectionFilter && grnInspectionFilter !== "ALL") params.append("inspectionStatus", grnInspectionFilter);
+      if (grnSearchQuery) params.append("search", grnSearchQuery);
+
+      const res = await fetch(`/api/grn?${params.toString()}`);
+      const data = await res.json();
+      if (data.success) {
+        setGrns(data.grns || []);
+      }
+    } catch (err) {
+      console.error("Failed to load Goods Received Notes:", err);
+    } finally {
+      setLoadingGrns(false);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const urlTab = new URLSearchParams(window.location.search).get("tab");
+      if (urlTab === "GRN" || urlTab === "SUPPLIERS" || urlTab === "VOUCHERS" || urlTab === "ORDERS") {
+        setActiveTab(urlTab as any);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     loadData();
   }, [statusFilter, supplierFilter, searchQuery]);
@@ -307,6 +371,12 @@ export default function PurchasesPage() {
       loadVouchers();
     }
   }, [activeTab, voucherMethodFilter, voucherSearchQuery]);
+
+  useEffect(() => {
+    if (activeTab === "GRN" || activeTab === "ORDERS") {
+      loadGrns();
+    }
+  }, [activeTab, grnStatusFilter, grnInspectionFilter, grnSearchQuery]);
 
   // Load Supplier Passbook Statement
   const handleOpenStatement = async (supplier: Supplier) => {
@@ -413,35 +483,89 @@ export default function PurchasesPage() {
     }
   };
 
-  // Open Receive GRN Modal
+  // Open Dock Inspection / Receive GRN Modal
   const handleOpenReceiveModal = (po: PurchaseOrder) => {
     setReceivingPO(po);
     setSupplierBillNumber(po.supplierInvoiceNumber || "");
-    const initialMap: Record<string, number> = {};
-    po.items.forEach((item) => {
-      initialMap[item.productId] = item.quantityOrdered;
+    setSupplierInvoiceDate(new Date().toISOString().slice(0, 10));
+    setDockInspectionNotes("");
+
+    const initialItems: DockInspectionItemInput[] = po.items.map((item, idx) => {
+      const alreadyRec = item.quantityReceived || 0;
+      const remaining = Math.max(0, item.quantityOrdered - alreadyRec);
+      const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const nextYearDate = new Date();
+      nextYearDate.setFullYear(nextYearDate.getFullYear() + 1);
+
+      return {
+        productId: item.productId,
+        name: item.name,
+        sku: item.sku || "",
+        unit: item.unit || "pcs",
+        orderedQuantity: item.quantityOrdered,
+        alreadyReceived: alreadyRec,
+        receivedQuantity: remaining,
+        rejectedQuantity: 0,
+        rejectionReason: "DAMAGED_PACKAGING",
+        rejectionNotes: "",
+        unitCost: item.unitCost,
+        batchNumber: `LOT-${todayStr}-${(idx + 1).toString().padStart(2, "0")}`,
+        manufacturingDate: new Date().toISOString().slice(0, 10),
+        expiryDate: nextYearDate.toISOString().slice(0, 10),
+        mrp: Math.round(item.unitCost * 1.3).toString(),
+        sellingPrice: Math.round(item.unitCost * 1.3).toString(),
+        qcInspectionNotes: "Outer seal intact, packaging inspected clean.",
+      };
     });
-    setReceivedQtyMap(initialMap);
+
+    setDockItems(initialItems);
   };
 
-  // Confirm GRN Inward Stock Receipt
-  const handleConfirmReceiveGRN = async () => {
+  // Confirm or Draft GRN Inward Stock Receipt
+  const handleConfirmReceiveGRN = async (confirmImmediately: boolean = true) => {
     if (!receivingPO) return;
+    if (!supplierBillNumber.trim()) {
+      alert("Please enter the Supplier Delivery / Invoice Bill number.");
+      return;
+    }
 
     setSubmittingReceive(true);
     try {
-      const receivedItems = receivingPO.items.map((i) => ({
-        productId: i.productId,
-        quantityReceived: receivedQtyMap[i.productId] ?? i.quantityOrdered,
-      }));
+      const payloadItems = dockItems.map((item) => {
+        const recQty = Math.max(0, Number(item.receivedQuantity) || 0);
+        const rejQty = Math.max(0, Number(item.rejectedQuantity) || 0);
+        const accQty = Math.max(0, recQty - rejQty);
+        return {
+          productId: item.productId,
+          name: item.name,
+          sku: item.sku,
+          unit: item.unit,
+          orderedQuantity: item.orderedQuantity,
+          receivedQuantity: recQty,
+          acceptedQuantity: accQty,
+          rejectedQuantity: rejQty,
+          rejectionReason: rejQty > 0 ? item.rejectionReason : undefined,
+          rejectionNotes: rejQty > 0 ? item.rejectionNotes.trim() : undefined,
+          unitCost: item.unitCost,
+          batchNumber: item.batchNumber.trim() || undefined,
+          manufacturingDate: item.manufacturingDate || undefined,
+          expiryDate: item.expiryDate || undefined,
+          mrp: item.mrp ? parseFloat(item.mrp) : undefined,
+          sellingPrice: item.sellingPrice ? parseFloat(item.sellingPrice) : undefined,
+          qcInspectionNotes: item.qcInspectionNotes.trim() || undefined,
+        };
+      });
 
-      const res = await fetch(`/api/purchases/${receivingPO._id}`, {
-        method: "PATCH",
+      const res = await fetch("/api/grn", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "RECEIVE_GRN",
-          supplierInvoiceNumber: supplierBillNumber.trim() || undefined,
-          receivedItems,
+          purchaseOrderId: receivingPO._id,
+          supplierInvoiceNumber: supplierBillNumber.trim(),
+          supplierInvoiceDate: supplierInvoiceDate || new Date().toISOString(),
+          notes: dockInspectionNotes.trim() || undefined,
+          confirmImmediately,
+          items: payloadItems,
         }),
       });
 
@@ -453,6 +577,10 @@ export default function PurchasesPage() {
           text: data.message || "Goods received and vendor credit updated.",
         });
         loadData();
+        loadGrns();
+        if (data.grn) {
+          setViewingGrnReceipt(data.grn);
+        }
       } else {
         alert(data.error || "Failed to receive goods.");
       }
@@ -460,6 +588,46 @@ export default function PurchasesPage() {
       alert(err.message || "Error receiving goods.");
     } finally {
       setSubmittingReceive(false);
+    }
+  };
+
+  // Confirm Draft GRN
+  const handleConfirmDraftGrn = async (grnId: string) => {
+    if (!confirm("Are you sure you want to confirm this GRN and post items to inventory & vendor AP balance?")) return;
+    try {
+      const res = await fetch(`/api/grn/${grnId}/confirm`, { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({ type: "success", text: data.message || "GRN confirmed successfully." });
+        loadGrns();
+        loadData();
+      } else {
+        alert(data.error || "Failed to confirm GRN.");
+      }
+    } catch (err: any) {
+      alert(err.message || "Network error.");
+    }
+  };
+
+  // Cancel Draft GRN
+  const handleCancelDraftGrn = async (grnId: string) => {
+    const reason = prompt("Enter a reason for cancelling this draft GRN:");
+    if (!reason || !reason.trim()) return;
+    try {
+      const res = await fetch(`/api/grn/${grnId}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cancellationReason: reason.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({ type: "success", text: data.message || "GRN cancelled." });
+        loadGrns();
+      } else {
+        alert(data.error || "Failed to cancel GRN.");
+      }
+    } catch (err: any) {
+      alert(err.message || "Network error.");
     }
   };
 
@@ -736,9 +904,25 @@ export default function PurchasesPage() {
             }`}
           >
             <FileText className="w-4 h-4" />
-            <span>Purchase Orders & Inward Receiving (GRN)</span>
+            <span>Purchase Orders</span>
             <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 font-mono text-slate-700">
               {metrics.totalCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("GRN")}
+            className={`pb-3 text-xs font-bold flex items-center gap-2 border-b-2 transition ${
+              activeTab === "GRN"
+                ? "border-emerald-600 text-emerald-600"
+                : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <FileCheck className="w-4 h-4" />
+            <span>GRN & Dock Receiving</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-100 font-mono text-emerald-800 font-bold">
+              {grns.length}
             </span>
           </button>
 
@@ -752,7 +936,7 @@ export default function PurchasesPage() {
             }`}
           >
             <Building2 className="w-4 h-4" />
-            <span>Suppliers & Accounts Payable (AP) Ledger</span>
+            <span>Suppliers & Accounts Payable (AP)</span>
             <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 font-mono text-slate-700">
               {suppliers.length}
             </span>
@@ -998,6 +1182,241 @@ export default function PurchasesPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= TAB: GRN & DOCK RECEIVING ================= */}
+        {activeTab === "GRN" && (
+          <div className="space-y-4">
+            {/* GRN Metrics Banner */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="p-3.5 bg-white rounded-2xl border border-slate-200 shadow-2xs flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Total Inward GRNs</span>
+                  <div className="text-xl font-black text-slate-900 font-mono mt-0.5">{grns.length}</div>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 border border-blue-200 flex items-center justify-center">
+                  <FileCheck className="w-5 h-5" />
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-white rounded-2xl border border-slate-200 shadow-2xs flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider block">100% Accepted Clean</span>
+                  <div className="text-xl font-black text-emerald-800 font-mono mt-0.5">
+                    {grns.filter((g) => g.inspectionStatus === "PASSED").length}
+                  </div>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-white rounded-2xl border border-slate-200 shadow-2xs flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold text-amber-700 uppercase tracking-wider block">Variances / Quarantined</span>
+                  <div className="text-xl font-black text-amber-800 font-mono mt-0.5">
+                    {grns.filter((g) => g.inspectionStatus === "PARTIALLY_ACCEPTED" || g.inspectionStatus === "REJECTED").length}
+                  </div>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-white rounded-2xl border border-slate-200 shadow-2xs flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Total Intake Credited (AP)</span>
+                  <div className="text-xl font-black text-slate-900 font-mono mt-0.5">
+                    {formatCurrency(
+                      grns.reduce((sum, g) => sum + (g.status === "CONFIRMED" ? g.totalAcceptedCost : 0), 0)
+                    )}
+                  </div>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 border border-purple-200 flex items-center justify-center">
+                  <Truck className="w-5 h-5" />
+                </div>
+              </div>
+            </div>
+
+            {/* Filter and Search Bar */}
+            <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={grnSearchQuery}
+                    onChange={(e) => setGrnSearchQuery(e.target.value)}
+                    placeholder="Search GRN #, PO #, Vendor, Invoice..."
+                    className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs w-64 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <select
+                  value={grnStatusFilter}
+                  onChange={(e) => setGrnStatusFilter(e.target.value)}
+                  className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none"
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="CONFIRMED">Confirmed</option>
+                  <option value="DRAFT">Draft</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </select>
+
+                <select
+                  value={grnInspectionFilter}
+                  onChange={(e) => setGrnInspectionFilter(e.target.value)}
+                  className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none"
+                >
+                  <option value="ALL">All Inspection Results</option>
+                  <option value="PASSED">100% Passed</option>
+                  <option value="PARTIALLY_ACCEPTED">Partially Accepted</option>
+                  <option value="REJECTED">Rejected at Dock</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => loadGrns()}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-700 transition"
+                >
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("ORDERS")}
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Receive PO at Dock</span>
+                </button>
+              </div>
+            </div>
+
+            {/* GRN Table */}
+            <div className="overflow-hidden border border-slate-200 rounded-2xl bg-white shadow-2xs">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-[10px] uppercase font-bold text-slate-600 border-b border-slate-200">
+                  <tr>
+                    <th className="py-3 px-3.5">GRN # & Date</th>
+                    <th className="py-3 px-3.5">Purchase Order</th>
+                    <th className="py-3 px-3.5">Vendor / Supplier</th>
+                    <th className="py-3 px-3.5">Vendor Bill #</th>
+                    <th className="py-3 px-3.5 text-center">Inspection Outcome</th>
+                    <th className="py-3 px-3.5 text-right">Net Accepted Value</th>
+                    <th className="py-3 px-3.5 text-right">Rejected Value</th>
+                    <th className="py-3 px-3.5 text-center">Status</th>
+                    <th className="py-3 px-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loadingGrns ? (
+                    <tr>
+                      <td colSpan={9} className="py-12 text-center text-slate-400">Loading Goods Received Notes...</td>
+                    </tr>
+                  ) : grns.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="py-12 text-center text-slate-400">
+                        <FileCheck className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                        <div className="font-bold text-slate-600">No Goods Received Notes found</div>
+                        <p className="text-xs text-slate-400 mt-1">Receive stock against an open Purchase Order to generate official GRNs.</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    grns.map((grn) => {
+                      const isDraft = grn.status === "DRAFT";
+                      return (
+                        <tr key={grn._id} className="hover:bg-slate-50/70 transition">
+                          <td className="py-3 px-3.5">
+                            <div className="font-mono font-bold text-slate-900">{grn.grnNumber}</div>
+                            <div className="text-[10px] text-slate-400">{formatSLDateTime(grn.createdAt)}</div>
+                          </td>
+                          <td className="py-3 px-3.5 font-mono text-slate-700 font-semibold">
+                            {grn.poNumber}
+                          </td>
+                          <td className="py-3 px-3.5">
+                            <span className="font-bold text-slate-900 block">{grn.supplierName}</span>
+                            <span className="text-[10px] text-slate-500">{grn.branchName || "Central Warehouse"}</span>
+                          </td>
+                          <td className="py-3 px-3.5 font-mono text-slate-600">
+                            {grn.supplierInvoiceNumber || "—"}
+                          </td>
+                          <td className="py-3 px-3.5 text-center">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                grn.inspectionStatus === "PASSED"
+                                  ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                  : grn.inspectionStatus === "PARTIALLY_ACCEPTED"
+                                  ? "bg-amber-50 text-amber-800 border-amber-200"
+                                  : "bg-red-50 text-red-800 border-red-200"
+                              }`}
+                            >
+                              {grn.inspectionStatus === "PASSED"
+                                ? "100% Passed"
+                                : grn.inspectionStatus === "PARTIALLY_ACCEPTED"
+                                ? "Partially Accepted"
+                                : "Rejected"}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3.5 text-right font-mono font-bold text-emerald-700">
+                            {formatCurrency(grn.totalAcceptedCost)}
+                          </td>
+                          <td className="py-3 px-3.5 text-right font-mono text-red-600">
+                            {grn.totalRejectedCost > 0 ? `- ${formatCurrency(grn.totalRejectedCost)}` : "—"}
+                          </td>
+                          <td className="py-3 px-3.5 text-center">
+                            <span
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                                grn.status === "CONFIRMED"
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : grn.status === "DRAFT"
+                                  ? "bg-amber-100 text-amber-800"
+                                  : "bg-slate-100 text-slate-600"
+                              }`}
+                            >
+                              {grn.status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3.5 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setViewingGrnReceipt(grn)}
+                                className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 transition"
+                                title="Print Official GRN Slip"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                              </button>
+                              {isDraft && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleConfirmDraftGrn(grn._id)}
+                                    className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold transition"
+                                  >
+                                    Confirm
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCancelDraftGrn(grn._id)}
+                                    className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition"
+                                    title="Cancel Draft GRN"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
@@ -1794,26 +2213,32 @@ export default function PurchasesPage() {
           </div>
         )}
 
-        {/* ================= MODAL: RECEIVE GRN ================= */}
+        {/* ================= MODAL: ENHANCED DOCK INSPECTION & GRN ================= */}
         {receivingPO && (() => {
-          const batchReceivingValue = receivingPO.items.reduce((sum, item) => {
-            const recVal = receivedQtyMap[item.productId] ?? item.quantityOrdered;
-            const prevRec = item.quantityReceived || 0;
-            const delta = Math.max(0, recVal - prevRec);
-            return sum + delta * item.unitCost;
+          const totalOrderedVal = dockItems.reduce((sum, it) => sum + it.orderedQuantity * it.unitCost, 0);
+          const totalAcceptedVal = dockItems.reduce((sum, it) => {
+            const rec = Math.max(0, Number(it.receivedQuantity) || 0);
+            const rej = Math.max(0, Number(it.rejectedQuantity) || 0);
+            return sum + Math.max(0, rec - rej) * it.unitCost;
+          }, 0);
+          const totalRejectedVal = dockItems.reduce((sum, it) => {
+            const rej = Math.max(0, Number(it.rejectedQuantity) || 0);
+            return sum + rej * it.unitCost;
           }, 0);
 
           return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
-              <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[95vh] overflow-y-auto">
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
+              <div className="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 my-8 max-h-[92vh] overflow-y-auto">
                 <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                      <Check className="w-4 h-4" />
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                      <FileCheck className="w-5 h-5" />
                     </div>
                     <div>
-                      <h3 className="font-bold text-slate-900 text-sm">Goods Receiving Note (GRN Intake)</h3>
-                      <p className="text-[11px] text-slate-500 font-mono">{receivingPO.poNumber}</p>
+                      <h3 className="font-black text-slate-900 text-sm">Goods Received Note (GRN) Dock Inspection</h3>
+                      <p className="text-[11px] text-slate-500 font-mono">
+                        PO Reference: {receivingPO.poNumber} • Vendor: {receivingPO.supplierName}
+                      </p>
                     </div>
                   </div>
                   <button
@@ -1825,155 +2250,346 @@ export default function PurchasesPage() {
                   </button>
                 </div>
 
-                {/* Supplier & Bill Banner */}
-                <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs space-y-2">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <span className="text-slate-500 block text-[10px]">Vendor:</span>
-                      <span className="font-bold text-slate-900">{receivingPO.supplierName}</span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-slate-500 block text-[10px]">Receiving To:</span>
-                      <span className="font-semibold text-slate-800">{receivingPO.branchName || "Main Central Warehouse"}</span>
-                    </div>
-                  </div>
+                {/* Delivery Challan & Vendor Bill Header */}
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                      Supplier Invoice / Delivery Bill Number *
+                    <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                      Supplier Invoice / Challan # *
                     </label>
                     <input
                       type="text"
                       required
                       value={supplierBillNumber}
                       onChange={(e) => setSupplierBillNumber(e.target.value)}
-                      placeholder="Enter bill # on supplier paper receipt (e.g. INV-10928)"
-                      className="w-full px-3 py-1.5 bg-white border border-blue-300 rounded-lg text-xs font-mono font-bold focus:outline-none"
+                      placeholder="e.g. INV-CBL-99120"
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono font-bold focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                      Supplier Invoice Date
+                    </label>
+                    <input
+                      type="date"
+                      value={supplierInvoiceDate}
+                      onChange={(e) => setSupplierInvoiceDate(e.target.value)}
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                      Receiving Dock / Warehouse
+                    </label>
+                    <div className="px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 truncate">
+                      {receivingPO.branchName || "Main Central Warehouse"}
+                    </div>
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                      Dock QC Inspection Observation / Transit Notes
+                    </label>
+                    <input
+                      type="text"
+                      value={dockInspectionNotes}
+                      onChange={(e) => setDockInspectionNotes(e.target.value)}
+                      placeholder="e.g. Outer truck seals checked, temp 22°C, pallet wrap intact."
+                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
                     />
                   </div>
                 </div>
 
                 {/* Items Verification Table */}
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-800">Verify Delivered Quantities:</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-slate-900">Line Items Dock Inspection:</span>
+                      <span className="text-[11px] text-slate-500 font-mono">({dockItems.length} lines)</span>
+                    </div>
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
                         onClick={() => {
-                          const fullMap: Record<string, number> = {};
-                          receivingPO.items.forEach((it) => {
-                            fullMap[it.productId] = it.quantityOrdered;
-                          });
-                          setReceivedQtyMap(fullMap);
+                          setDockItems((prev) =>
+                            prev.map((it) => ({
+                              ...it,
+                              receivedQuantity: Math.max(0, it.orderedQuantity - it.alreadyReceived),
+                              rejectedQuantity: 0,
+                            }))
+                          );
                         }}
-                        className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
                       >
-                        All Ordered
+                        Accept All Remaining
                       </button>
                       <button
                         type="button"
                         onClick={() => {
-                          const zeroMap: Record<string, number> = {};
-                          receivingPO.items.forEach((it) => {
-                            zeroMap[it.productId] = 0;
-                          });
-                          setReceivedQtyMap(zeroMap);
+                          setDockItems((prev) =>
+                            prev.map((it) => ({
+                              ...it,
+                              receivedQuantity: 0,
+                              rejectedQuantity: 0,
+                            }))
+                          );
                         }}
-                        className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
                       >
-                        Clear All
+                        Zero All
                       </button>
                     </div>
                   </div>
 
-                  <div className="overflow-hidden border border-slate-200 rounded-xl">
-                    <table className="w-full text-xs text-left">
-                      <thead className="bg-slate-100 text-[10px] font-bold text-slate-600 uppercase">
-                        <tr>
-                          <th className="py-2.5 px-3">Product Name</th>
-                          <th className="py-2.5 px-3 text-center">Ordered</th>
-                          <th className="py-2.5 px-3 text-center">Delivered Qty</th>
-                          <th className="py-2.5 px-3 text-right">Cost</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 font-mono text-xs">
-                        {receivingPO.items.map((it) => {
-                          const recVal = receivedQtyMap[it.productId] ?? it.quantityOrdered;
-                          const isShort = recVal < it.quantityOrdered;
+                  <div className="space-y-3">
+                    {dockItems.map((item, index) => {
+                      const recQty = Math.max(0, Number(item.receivedQuantity) || 0);
+                      const rejQty = Math.max(0, Number(item.rejectedQuantity) || 0);
+                      const accQty = Math.max(0, recQty - rejQty);
+                      const isShort = recQty < (item.orderedQuantity - item.alreadyReceived);
+                      const hasRejections = rejQty > 0;
 
-                          return (
-                            <tr key={it.productId} className="hover:bg-slate-50">
-                              <td className="py-2 px-3 font-sans">
-                                <span className="font-semibold text-slate-800 block">{it.name}</span>
-                                {isShort && (
-                                  <span className="text-[10px] text-amber-700 font-bold block">
-                                    ⚠️ Short by {it.quantityOrdered - recVal} {it.unit} (Partial)
+                      return (
+                        <div
+                          key={item.productId}
+                          className={`p-3.5 rounded-xl border transition text-xs space-y-2.5 ${
+                            hasRejections
+                              ? "bg-rose-50/40 border-rose-200"
+                              : isShort
+                              ? "bg-amber-50/40 border-amber-200"
+                              : "bg-white border-slate-200 hover:border-slate-300"
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                            <div>
+                              <span className="font-bold text-slate-900 text-xs">{item.name}</span>
+                              <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500 font-mono">
+                                {item.sku && <span>SKU: {item.sku}</span>}
+                                <span>Unit: {item.unit}</span>
+                                <span>PO Ordered: {item.orderedQuantity}</span>
+                                {item.alreadyReceived > 0 && (
+                                  <span className="text-blue-600 font-semibold">
+                                    Already Inward: {item.alreadyReceived}
                                   </span>
                                 )}
-                              </td>
-                              <td className="py-2 px-3 text-center text-slate-700">
-                                {it.quantityOrdered} {it.unit}
-                              </td>
-                              <td className="py-2 px-3 text-center">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={recVal}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] text-slate-400 block uppercase font-bold">Line Accepted Value</span>
+                              <span className="font-mono font-bold text-slate-900 text-xs">
+                                {formatCurrency(accQty * item.unitCost)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 pt-1">
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-600 uppercase mb-0.5">
+                                Delivered Qty
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                value={item.receivedQuantity}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  setDockItems((prev) =>
+                                    prev.map((it, idx) => (idx === index ? { ...it, receivedQuantity: val } : it))
+                                  );
+                                }}
+                                className="w-full px-2 py-1 text-center font-mono font-bold border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-bold text-rose-700 uppercase mb-0.5">
+                                Rejected Qty
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                max={recQty}
+                                value={item.rejectedQuantity}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  setDockItems((prev) =>
+                                    prev.map((it, idx) => (idx === index ? { ...it, rejectedQuantity: val } : it))
+                                  );
+                                }}
+                                className="w-full px-2 py-1 text-center font-mono font-bold border border-rose-300 text-rose-800 bg-rose-50 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-rose-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-bold text-emerald-700 uppercase mb-0.5">
+                                Accepted Net
+                              </label>
+                              <div className="px-2 py-1 text-center font-mono font-black text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg text-xs">
+                                {accQty} {item.unit}
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-600 uppercase mb-0.5">
+                                Batch / Lot #
+                              </label>
+                              <input
+                                type="text"
+                                value={item.batchNumber}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setDockItems((prev) =>
+                                    prev.map((it, idx) => (idx === index ? { ...it, batchNumber: val } : it))
+                                  );
+                                }}
+                                placeholder="BN-XXXX"
+                                className="w-full px-2 py-1 font-mono text-center border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-600 uppercase mb-0.5">
+                                Expiry Date
+                              </label>
+                              <input
+                                type="date"
+                                value={item.expiryDate}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setDockItems((prev) =>
+                                    prev.map((it, idx) => (idx === index ? { ...it, expiryDate: val } : it))
+                                  );
+                                }}
+                                className="w-full px-2 py-1 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-600 uppercase mb-0.5">
+                                MRP (Rs.)
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                value={item.mrp}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setDockItems((prev) =>
+                                    prev.map((it, idx) => (idx === index ? { ...it, mrp: val } : it))
+                                  );
+                                }}
+                                placeholder="Retail MRP"
+                                className="w-full px-2 py-1 font-mono text-center border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Rejection Details if rejected > 0 */}
+                          {hasRejections && (
+                            <div className="p-2.5 rounded-lg bg-rose-100/60 border border-rose-200 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                              <div>
+                                <label className="block text-[10px] font-bold text-rose-800 uppercase mb-0.5">
+                                  Rejection Failure Reason *
+                                </label>
+                                <select
+                                  value={item.rejectionReason}
                                   onChange={(e) => {
-                                    const val = parseFloat(e.target.value) || 0;
-                                    setReceivedQtyMap({
-                                      ...receivedQtyMap,
-                                      [it.productId]: val,
-                                    });
+                                    const val = e.target.value;
+                                    setDockItems((prev) =>
+                                      prev.map((it, idx) => (idx === index ? { ...it, rejectionReason: val } : it))
+                                    );
                                   }}
-                                  className={`w-16 px-1.5 py-1 text-center font-bold font-mono border rounded text-xs ${
-                                    isShort ? "border-amber-400 bg-amber-50 text-amber-800" : "border-slate-300"
-                                  }`}
-                                />{" "}
-                                <span className="text-[10px] text-slate-500 font-sans">{it.unit}</span>
-                              </td>
-                              <td className="py-2 px-3 text-right text-slate-700">
-                                {formatCurrency(it.unitCost)}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                                  className="w-full px-2 py-1 bg-white border border-rose-300 rounded-lg text-xs font-semibold text-rose-900 focus:outline-none"
+                                >
+                                  <option value="DAMAGED_PACKAGING">Damaged / Torn Packaging</option>
+                                  <option value="EXPIRED_SHORT_DATE">Expired / Short Dated (&lt;90 days)</option>
+                                  <option value="WRONG_ITEM">Wrong Spec / Item Discrepancy</option>
+                                  <option value="QUALITY_DEFECT">Quality / Manufacturing Defect</option>
+                                  <option value="TEMPERATURE_EXCURSION">Temperature Excursion (Cold Chain Broken)</option>
+                                  <option value="OTHER">Other Quarantine Reason</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-rose-800 uppercase mb-0.5">
+                                  Rejection Notes (For Vendor Debit Note)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.rejectionNotes}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setDockItems((prev) =>
+                                      prev.map((it, idx) => (idx === index ? { ...it, rejectionNotes: val } : it))
+                                    );
+                                  }}
+                                  placeholder="e.g. 2 bottles broken and leaking in carton"
+                                  className="w-full px-2 py-1 bg-white border border-rose-300 rounded-lg text-xs focus:outline-none"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* Batch Net Credit Banner */}
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
+                {/* Batch Reconciliation Financial Summary */}
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                   <div>
-                    <span className="text-emerald-800 font-bold block">Estimated Inward Stock Value:</span>
-                    <span className="text-[10px] text-emerald-600">
-                      Will be credited to {receivingPO.supplierName}&apos;s Accounts Payable balance
+                    <span className="text-[10px] text-slate-500 font-bold uppercase block">PO Ordered Value</span>
+                    <span className="font-mono text-sm font-semibold text-slate-700">
+                      {formatCurrency(totalOrderedVal)}
                     </span>
                   </div>
-                  <div className="text-right font-mono font-black text-emerald-900 text-sm">
-                    {formatCurrency(batchReceivingValue)}
+
+                  <div>
+                    <span className="text-[10px] text-rose-600 font-bold uppercase block">Quarantined / Rejected</span>
+                    <span className="font-mono text-sm font-bold text-rose-700">
+                      {totalRejectedVal > 0 ? `- ${formatCurrency(totalRejectedVal)}` : "None (0.00)"}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] text-emerald-700 font-bold uppercase block">Net Accepted Vendor AP</span>
+                    <span className="font-mono text-base font-black text-emerald-800 block">
+                      {formatCurrency(totalAcceptedVal)}
+                    </span>
+                    <span className="text-[10px] text-slate-400">Credited to Accounts Payable ledger</span>
                   </div>
                 </div>
 
-                {/* Actions */}
-                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                {/* Modal Footer Controls */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
                   <button
                     type="button"
                     onClick={() => setReceivingPO(null)}
-                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition"
                   >
                     Cancel
                   </button>
-                  <button
-                    type="button"
-                    disabled={submittingReceive}
-                    onClick={handleConfirmReceiveGRN}
-                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/25 transition disabled:opacity-50 flex items-center gap-1.5"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>{submittingReceive ? "Receiving Stock..." : "Confirm GRN & Post to Inventory"}</span>
-                  </button>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={submittingReceive}
+                      onClick={() => handleConfirmReceiveGRN(false)}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition disabled:opacity-50"
+                    >
+                      Save as Draft GRN
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={submittingReceive}
+                      onClick={() => handleConfirmReceiveGRN(true)}
+                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/25 transition disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>{submittingReceive ? "Processing Dock Intake..." : "Confirm GRN & Post to Inventory"}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2578,6 +3194,20 @@ export default function PurchasesPage() {
             }
             payment={activePrintPayment}
             onClose={() => setActivePrintPayment(null)}
+          />
+        )}
+
+        {/* ================= MODAL: PRINTABLE GRN ================= */}
+        {viewingGrnReceipt && (
+          <GoodsReceivedNoteReceipt
+            business={
+              business || {
+                name: "Sri Lanka Commercial Store",
+                address: "Procurement & Receiving Dock Division",
+              }
+            }
+            grn={viewingGrnReceipt}
+            onClose={() => setViewingGrnReceipt(null)}
           />
         )}
       </div>

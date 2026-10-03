@@ -12,6 +12,7 @@ export interface TranslationsSchema {
     batches: string;
     labels: string;
     purchases: string;
+    grn: string;
     transfers: string;
     salesHistory: string;
     invoices: string;
@@ -142,6 +143,7 @@ export const translations: Record<Language, TranslationsSchema> = {
       batches: "Batches & Expiry",
       labels: "Barcode & Labels",
       purchases: "Purchases & Vendors",
+      grn: "Goods Received (GRN)",
       transfers: "Transfers & Branches",
       salesHistory: "Sales History",
       invoices: "Invoices & B2B",
@@ -270,6 +272,7 @@ export const translations: Record<Language, TranslationsSchema> = {
       batches: "කාණ්ඩ හා කල්ඉකුත්වීම්",
       labels: "බාර්කෝඩ් ලේබල්",
       purchases: "මිලදී ගැනීම් හා සැපයුම්",
+      grn: "භාණ්ඩ ලැබීමේ සටහන් (GRN)",
       transfers: "ශාඛා හා මාරු කිරීම්",
       salesHistory: "විකුණුම් ඉතිහාසය",
       invoices: "බදු ඉන්වොයිසි",
@@ -398,6 +401,7 @@ export const translations: Record<Language, TranslationsSchema> = {
       batches: "தொகுதிகள் மற்றும் காலாவதி",
       labels: "பார்கோடு லேபிள்கள்",
       purchases: "கொள்முதல் மற்றும் விற்பனையாளர்கள்",
+      grn: "பொருட்கள் பெறுதல் (GRN)",
       transfers: "கிளை இடமாற்றங்கள்",
       salesHistory: "விற்பனை வரலாறு",
       invoices: "வரி விலைப்பட்டியல்",

@@ -28,4 +28,12 @@ export { CommissionRule, type ICommissionRule, type CommissionSchemeType, type I
 export { SalesTarget, type ISalesTarget, type TargetPeriod, type TargetStatus } from "./SalesTarget";
 export { CommissionPayout, type ICommissionPayout, type CommissionPayoutStatus, type PayoutPaymentMethod, type IPayoutSaleItem } from "./CommissionPayout";
 export { Batch, type IBatch, type BatchStatus } from "./Batch";
+export {
+  GoodsReceivedNote,
+  type IGoodsReceivedNote,
+  type IGrnItem,
+  type GrnStatus,
+  type GrnInspectionStatus,
+  type GrnRejectionReason,
+} from "./GoodsReceivedNote";
 
