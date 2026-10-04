@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import AppLayout from "@/components/layout/AppLayout";
 import {
   Users,
@@ -39,6 +40,12 @@ import {
   Cake,
   Tag,
   ExternalLink,
+  Building,
+  Truck,
+  Landmark,
+  CheckCheck,
+  Upload,
+  ShoppingBag,
 } from "lucide-react";
 import { formatCurrency, formatSLDateTime, isValidSLPhone } from "@/lib/formatters";
 import CreditSettlementReceipt, { CreditSettlementData } from "@/components/receipts/CreditSettlementReceipt";
@@ -75,6 +82,15 @@ interface CustomerRecord {
   referralCount?: number;
   referralPointsEarned?: number;
   vipCardIssuedAt?: string;
+  customerType?: "RETAIL" | "WHOLESALE" | "CORPORATE";
+  companyName?: string;
+  tin?: string;
+  vatNumber?: string;
+  paymentTermsDays?: number;
+  wholesaleTier?: string;
+  creditStatus?: "ACTIVE" | "ON_HOLD" | "SUSPENDED";
+  contactPerson?: string;
+  deliveryAddress?: string;
 }
 
 interface SummaryData {
@@ -98,8 +114,23 @@ export default function CustomersPage() {
   });
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<"DIRECTORY" | "NAYA_POTHA" | "LOYALTY" | "GIFT_VOUCHERS" | "CAMPAIGNS">("DIRECTORY");
+  const [activeTab, setActiveTab] = useState<"DIRECTORY" | "NAYA_POTHA" | "B2B_PORTAL" | "LOYALTY" | "GIFT_VOUCHERS" | "CAMPAIGNS">("DIRECTORY");
   const [creditFilter, setCreditFilter] = useState<"ALL" | "DEBTORS_ONLY" | "NEAR_LIMIT">("ALL");
+
+  // B2B Wholesale Portal Management State
+  const [b2bOrders, setB2bOrders] = useState<any[]>([]);
+  const [loadingB2bOrders, setLoadingB2bOrders] = useState(false);
+  const [b2bSlips, setB2bSlips] = useState<any[]>([]);
+  const [loadingB2bSlips, setLoadingB2bSlips] = useState(false);
+  const [b2bOrderStatusFilter, setB2bOrderStatusFilter] = useState("ALL");
+  const [b2bSlipStatusFilter, setB2bSlipStatusFilter] = useState("ALL");
+  const [selectedB2bOrder, setSelectedB2bOrder] = useState<any | null>(null);
+  const [selectedB2bSlip, setSelectedB2bSlip] = useState<any | null>(null);
+  const [isB2bOrderModalOpen, setIsB2bOrderModalOpen] = useState(false);
+  const [isB2bSlipModalOpen, setIsB2bSlipModalOpen] = useState(false);
+  const [processingB2bAction, setProcessingB2bAction] = useState(false);
+  const [rejectReasonInput, setRejectReasonInput] = useState("");
+  const [copiedPortalId, setCopiedPortalId] = useState<string | null>(null);
 
   // Modals State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -118,6 +149,14 @@ export default function CustomersPage() {
     loyaltyTier: "REGULAR" as "REGULAR" | "SILVER" | "GOLD" | "PLATINUM",
     referralCode: "",
     referredByCode: "",
+    customerType: "RETAIL" as "RETAIL" | "WHOLESALE" | "CORPORATE",
+    companyName: "",
+    tin: "",
+    vatNumber: "",
+    paymentTermsDays: "30",
+    wholesaleTier: "TIER_1",
+    contactPerson: "",
+    deliveryAddress: "",
   });
 
   // Loyalty Management State
@@ -340,8 +379,135 @@ export default function CustomersPage() {
     }
   };
 
+  async function loadB2BData() {
+    try {
+      setLoadingB2bOrders(true);
+      setLoadingB2bSlips(true);
+      const [ordersRes, slipsRes] = await Promise.all([
+        fetch("/api/customers/b2b-orders"),
+        fetch("/api/customers/payment-slips"),
+      ]);
+      const [ordersData, slipsData] = await Promise.all([
+        ordersRes.json(),
+        slipsRes.json(),
+      ]);
+      if (ordersData.success && ordersData.orders) {
+        setB2bOrders(ordersData.orders);
+      }
+      if (slipsData.success && slipsData.slips) {
+        setB2bSlips(slipsData.slips);
+      }
+    } catch (err) {
+      console.error("Failed to load B2B data", err);
+    } finally {
+      setLoadingB2bOrders(false);
+      setLoadingB2bSlips(false);
+    }
+  }
+
+  const handleConvertOrderToSale = async (orderId: string) => {
+    if (!confirm("Convert this B2B Order into an official POS Sales Invoice? Stock will be automatically deducted and customer credit ledger updated.")) return;
+    try {
+      setProcessingB2bAction(true);
+      const res = await fetch("/api/customers/b2b-orders", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId, action: "CONVERT_TO_SALE" }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({ type: "success", text: data.message || "Order converted to Sale Invoice successfully!" });
+        setIsB2bOrderModalOpen(false);
+        loadB2BData();
+        loadCustomers();
+      } else {
+        alert(data.error || "Failed to convert order.");
+      }
+    } catch {
+      alert("Network error converting order.");
+    } finally {
+      setProcessingB2bAction(false);
+    }
+  };
+
+  const handleUpdateOrderStatus = async (orderId: string, status: string) => {
+    try {
+      setProcessingB2bAction(true);
+      const res = await fetch("/api/customers/b2b-orders", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId, status }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({ type: "success", text: data.message || "Order status updated!" });
+        loadB2BData();
+      } else {
+        alert(data.error || "Failed to update order status.");
+      }
+    } catch {
+      alert("Network error updating order status.");
+    } finally {
+      setProcessingB2bAction(false);
+    }
+  };
+
+  const handleApproveSlip = async (slipId: string) => {
+    if (!confirm("Approve and credit this payment slip? Customer ledger balance will be credited immediately.")) return;
+    try {
+      setProcessingB2bAction(true);
+      const res = await fetch("/api/customers/payment-slips", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slipId, action: "APPROVE" }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({ type: "success", text: data.message || "Payment slip approved and customer credited!" });
+        setIsB2bSlipModalOpen(false);
+        loadB2BData();
+        loadCustomers();
+      } else {
+        alert(data.error || "Failed to approve payment slip.");
+      }
+    } catch {
+      alert("Network error approving payment slip.");
+    } finally {
+      setProcessingB2bAction(false);
+    }
+  };
+
+  const handleRejectSlip = async (slipId: string) => {
+    if (!rejectReasonInput.trim()) {
+      alert("Please provide a rejection reason for the customer.");
+      return;
+    }
+    try {
+      setProcessingB2bAction(true);
+      const res = await fetch("/api/customers/payment-slips", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slipId, action: "REJECT", rejectionReason: rejectReasonInput.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({ type: "success", text: data.message || "Payment slip rejected." });
+        setIsB2bSlipModalOpen(false);
+        setRejectReasonInput("");
+        loadB2BData();
+      } else {
+        alert(data.error || "Failed to reject payment slip.");
+      }
+    } catch {
+      alert("Network error rejecting payment slip.");
+    } finally {
+      setProcessingB2bAction(false);
+    }
+  };
+
   useEffect(() => {
     loadCustomers();
+    loadB2BData();
   }, [searchQuery]);
 
   useEffect(() => {
@@ -350,6 +516,8 @@ export default function CustomersPage() {
     } else if (activeTab === "LOYALTY") {
       loadReferrals();
       loadBirthdays();
+    } else if (activeTab === "B2B_PORTAL") {
+      loadB2BData();
     }
   }, [activeTab, voucherSearch, voucherStatusFilter]);
 
@@ -374,6 +542,14 @@ export default function CustomersPage() {
       loyaltyTier: "REGULAR",
       referralCode: "",
       referredByCode: "",
+      customerType: "RETAIL",
+      companyName: "",
+      tin: "",
+      vatNumber: "",
+      paymentTermsDays: "30",
+      wholesaleTier: "TIER_1",
+      contactPerson: "",
+      deliveryAddress: "",
     });
     setIsModalOpen(true);
   };
@@ -394,6 +570,14 @@ export default function CustomersPage() {
       loyaltyTier: c.loyaltyTier || "REGULAR",
       referralCode: c.referralCode || "",
       referredByCode: typeof c.referredBy === "object" ? c.referredBy?.referralCode || c.referredBy?.phone || "" : (c.referredBy || ""),
+      customerType: c.customerType || "RETAIL",
+      companyName: c.companyName || "",
+      tin: c.tin || "",
+      vatNumber: c.vatNumber || "",
+      paymentTermsDays: (c.paymentTermsDays || 30).toString(),
+      wholesaleTier: c.wholesaleTier || "TIER_1",
+      contactPerson: c.contactPerson || "",
+      deliveryAddress: c.deliveryAddress || "",
     });
     setIsModalOpen(true);
   };
@@ -609,6 +793,14 @@ export default function CustomersPage() {
         loyaltyTier: formData.loyaltyTier,
         referralCode: formData.referralCode?.trim() || undefined,
         referredByCode: formData.referredByCode?.trim() || undefined,
+        customerType: formData.customerType,
+        companyName: formData.companyName.trim() || undefined,
+        tin: formData.tin.trim() || undefined,
+        vatNumber: formData.vatNumber.trim() || undefined,
+        paymentTermsDays: parseInt(formData.paymentTermsDays, 10) || 30,
+        wholesaleTier: formData.wholesaleTier || "TIER_1",
+        contactPerson: formData.contactPerson.trim() || undefined,
+        deliveryAddress: formData.deliveryAddress.trim() || undefined,
       };
 
       const res = await fetch(url, {
@@ -799,6 +991,34 @@ export default function CustomersPage() {
                     }`}
                   >
                     Rs. {Math.round((summary.totalOutstandingCredit || 0) / 1000)}k
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab("B2B_PORTAL");
+                  loadB2BData();
+                }}
+                className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition ${
+                  activeTab === "B2B_PORTAL"
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <Building className="w-3.5 h-3.5" />
+                <span>B2B Wholesale & Orders</span>
+                {(b2bOrders.filter((o) => o.status === "PENDING").length > 0 ||
+                  b2bSlips.filter((s) => s.status === "PENDING").length > 0) && (
+                  <span
+                    className={`ml-1 px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold ${
+                      activeTab === "B2B_PORTAL"
+                        ? "bg-blue-800 text-blue-100"
+                        : "bg-amber-100 text-amber-800"
+                    }`}
+                  >
+                    {b2bOrders.filter((o) => o.status === "PENDING").length +
+                      b2bSlips.filter((s) => s.status === "PENDING").length}
                   </span>
                 )}
               </button>
@@ -1264,6 +1484,496 @@ export default function CustomersPage() {
                         </td>
                       </tr>
                     )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= TAB: B2B WHOLESALE & CORPORATE PORTAL ================= */}
+        {activeTab === "B2B_PORTAL" && (
+          <div className="space-y-6 animate-in fade-in duration-150">
+            {/* 4 Metric Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+                <span className="text-slate-500 text-xs font-medium block">Corporate Accounts</span>
+                <div className="text-2xl font-black text-slate-900 font-mono">
+                  {customers.filter((c) => c.customerType === "CORPORATE" || c.customerType === "WHOLESALE" || c.companyName).length}
+                </div>
+                <p className="text-[11px] text-slate-400">Institutional, hotel & grocery buyers</p>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 text-xs font-medium block">Pending B2B Orders</span>
+                  <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                    <ShoppingBag className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl font-black text-blue-700 font-mono">
+                  {b2bOrders.filter((o) => o.status === "PENDING").length}
+                </div>
+                <p className="text-[11px] text-blue-600 font-mono">
+                  {formatCurrency(b2bOrders.filter((o) => o.status === "PENDING").reduce((s, o) => s + (o.netTotal || 0), 0))} awaiting fulfillment
+                </p>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 text-xs font-medium block">Unverified Payment Slips</span>
+                  <div className="w-8 h-8 rounded-xl bg-teal-100 text-teal-700 flex items-center justify-center font-bold">
+                    <Landmark className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl font-black text-teal-700 font-mono">
+                  {b2bSlips.filter((s) => s.status === "PENDING").length}
+                </div>
+                <p className="text-[11px] text-teal-600 font-mono">
+                  {formatCurrency(b2bSlips.filter((s) => s.status === "PENDING").reduce((s, sl) => s + (sl.amount || 0), 0))} submitted bank proofs
+                </p>
+              </div>
+
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+                <span className="text-slate-500 text-xs font-medium block">B2B Credit Receivables</span>
+                <div className="text-2xl font-black text-rose-700 font-mono">
+                  {formatCurrency(
+                    customers
+                      .filter((c) => c.customerType === "CORPORATE" || c.customerType === "WHOLESALE")
+                      .reduce((s, c) => s + (c.currentBalance || 0), 0)
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400">Total owed by wholesale accounts</p>
+              </div>
+            </div>
+
+            {/* Pending Slips Alert Banner */}
+            {b2bSlips.filter((s) => s.status === "PENDING").length > 0 && (
+              <div className="p-4 bg-teal-50 border border-teal-200 rounded-2xl flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-teal-600 text-white flex items-center justify-center shrink-0">
+                    <Landmark className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-teal-950">
+                      {b2bSlips.filter((s) => s.status === "PENDING").length} Direct Bank Transfer Payment Slips Awaiting Review
+                    </h4>
+                    <p className="text-[11px] text-teal-700">
+                      Totaling {formatCurrency(b2bSlips.filter((s) => s.status === "PENDING").reduce((s, sl) => s + (sl.amount || 0), 0))}. Verify bank account credit and approve to settle customer Naya Potha balance.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const firstPending = b2bSlips.find((s) => s.status === "PENDING");
+                    if (firstPending) {
+                      setSelectedB2bSlip(firstPending);
+                      setIsB2bSlipModalOpen(true);
+                    }
+                  }}
+                  className="px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition shadow-xs whitespace-nowrap"
+                >
+                  Review First Slip &rarr;
+                </button>
+              </div>
+            )}
+
+            {/* Section 1: Incoming B2B Purchase Orders */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden space-y-3 p-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                    <ShoppingBag className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Corporate Wholesale Purchase Orders ({b2bOrders.length})
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Orders placed online by wholesale clients. Convert to POS Sale invoices with 1-click.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    value={b2bOrderStatusFilter}
+                    onChange={(e) => setB2bOrderStatusFilter(e.target.value)}
+                    className="px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none"
+                  >
+                    <option value="ALL">All Order Statuses</option>
+                    <option value="PENDING">Pending Approval</option>
+                    <option value="APPROVED">Approved</option>
+                    <option value="PROCESSING">Processing</option>
+                    <option value="DISPATCHED">Dispatched</option>
+                    <option value="DELIVERED">Delivered & Invoiced</option>
+                    <option value="CANCELLED">Cancelled</option>
+                  </select>
+                </div>
+              </div>
+
+              {b2bOrders.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
+                  No online wholesale purchase orders received yet.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 bg-slate-50 text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                        <th className="py-2.5 px-3">Order #</th>
+                        <th className="py-2.5 px-3">Customer / Company</th>
+                        <th className="py-2.5 px-3">Client PO #</th>
+                        <th className="py-2.5 px-3 text-center">Items</th>
+                        <th className="py-2.5 px-3 text-right">Order Net (LKR)</th>
+                        <th className="py-2.5 px-3">Target Date</th>
+                        <th className="py-2.5 px-3">Status</th>
+                        <th className="py-2.5 px-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-mono">
+                      {b2bOrders
+                        .filter((o) => b2bOrderStatusFilter === "ALL" || o.status === b2bOrderStatusFilter)
+                        .map((ord: any) => {
+                          const statusColors: Record<string, string> = {
+                            PENDING: "bg-amber-100 text-amber-800",
+                            APPROVED: "bg-blue-100 text-blue-800",
+                            PROCESSING: "bg-purple-100 text-purple-800",
+                            DISPATCHED: "bg-indigo-100 text-indigo-800",
+                            DELIVERED: "bg-emerald-100 text-emerald-800",
+                            CANCELLED: "bg-rose-100 text-rose-800",
+                          };
+                          return (
+                            <tr key={ord._id} className="hover:bg-slate-50 transition">
+                              <td className="py-2.5 px-3 font-bold text-slate-900 whitespace-nowrap">
+                                {ord.orderNumber}
+                              </td>
+                              <td className="py-2.5 px-3 font-sans">
+                                <span className="font-bold text-slate-900 block truncate max-w-[180px]">
+                                  {ord.companyName || ord.customerName}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-mono">{ord.customerPhone}</span>
+                              </td>
+                              <td className="py-2.5 px-3 font-semibold text-slate-700 whitespace-nowrap">
+                                {ord.customerPoNumber || "—"}
+                              </td>
+                              <td className="py-2.5 px-3 text-center text-slate-800 font-bold">
+                                {ord.items?.length || 0}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-black text-emerald-700 whitespace-nowrap">
+                                {formatCurrency(ord.netTotal)}
+                              </td>
+                              <td className="py-2.5 px-3 text-slate-600 whitespace-nowrap font-sans text-[11px]">
+                                {ord.requestedDeliveryDate
+                                  ? new Date(ord.requestedDeliveryDate).toLocaleDateString("en-GB")
+                                  : "Standard"}
+                              </td>
+                              <td className="py-2.5 px-3 whitespace-nowrap font-sans">
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                    statusColors[ord.status] || "bg-slate-100 text-slate-700"
+                                  }`}
+                                >
+                                  {ord.status}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-sans whitespace-nowrap">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedB2bOrder(ord);
+                                      setIsB2bOrderModalOpen(true);
+                                    }}
+                                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition"
+                                  >
+                                    View
+                                  </button>
+                                  {ord.status !== "DELIVERED" && ord.status !== "CANCELLED" && (
+                                    <button
+                                      type="button"
+                                      disabled={processingB2bAction}
+                                      onClick={() => handleConvertOrderToSale(ord._id)}
+                                      className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-[10px] font-bold transition shadow-2xs"
+                                    >
+                                      Convert to Invoice
+                                    </button>
+                                  )}
+                                  {ord.convertedInvoiceNumber && (
+                                    <Link
+                                      href={`/receipt/${ord.convertedInvoiceNumber}`}
+                                      className="px-2 py-1 bg-emerald-50 text-emerald-800 rounded-lg text-[10px] font-bold border border-emerald-200"
+                                    >
+                                      {ord.convertedInvoiceNumber}
+                                    </Link>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Section 2: Bank Deposit Payment Slips */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden space-y-3 p-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-teal-100 text-teal-700 flex items-center justify-center font-bold">
+                    <Landmark className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Bank Transfer Payment Slips ({b2bSlips.length})
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Direct CEFT, LankaPay, and Cheque payment proofs submitted by customers
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    value={b2bSlipStatusFilter}
+                    onChange={(e) => setB2bSlipStatusFilter(e.target.value)}
+                    className="px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none"
+                  >
+                    <option value="ALL">All Slip Statuses</option>
+                    <option value="PENDING">Pending Review</option>
+                    <option value="APPROVED">Verified & Credited</option>
+                    <option value="REJECTED">Rejected</option>
+                  </select>
+                </div>
+              </div>
+
+              {b2bSlips.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
+                  No payment slips submitted by customers.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 bg-slate-50 text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                        <th className="py-2.5 px-3">Slip #</th>
+                        <th className="py-2.5 px-3">Customer</th>
+                        <th className="py-2.5 px-3 text-right">Amount (LKR)</th>
+                        <th className="py-2.5 px-3">Deposit Bank</th>
+                        <th className="py-2.5 px-3">Reference / Cheque</th>
+                        <th className="py-2.5 px-3">Date</th>
+                        <th className="py-2.5 px-3">Status</th>
+                        <th className="py-2.5 px-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-mono">
+                      {b2bSlips
+                        .filter((s) => b2bSlipStatusFilter === "ALL" || s.status === b2bSlipStatusFilter)
+                        .map((slip: any) => (
+                          <tr key={slip._id} className="hover:bg-slate-50 transition">
+                            <td className="py-2.5 px-3 font-bold text-slate-900 whitespace-nowrap">
+                              {slip.slipNumber}
+                            </td>
+                            <td className="py-2.5 px-3 font-sans">
+                              <span className="font-bold text-slate-900 block truncate max-w-[180px]">
+                                {slip.customerName}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-mono">{slip.customerPhone}</span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-black text-emerald-700 whitespace-nowrap">
+                              {formatCurrency(slip.amount)}
+                            </td>
+                            <td className="py-2.5 px-3 font-sans text-slate-700 text-[11px] whitespace-nowrap">
+                              {slip.depositBank}
+                            </td>
+                            <td className="py-2.5 px-3 font-semibold text-slate-800 whitespace-nowrap">
+                              {slip.transactionReference}
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-600 whitespace-nowrap font-sans text-[11px]">
+                              {new Date(slip.paymentDate).toLocaleDateString("en-GB")}
+                            </td>
+                            <td className="py-2.5 px-3 whitespace-nowrap font-sans">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                  slip.status === "APPROVED"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : slip.status === "PENDING"
+                                    ? "bg-amber-100 text-amber-800"
+                                    : "bg-rose-100 text-rose-800"
+                                }`}
+                              >
+                                {slip.status === "APPROVED"
+                                  ? "CREDITED"
+                                  : slip.status === "PENDING"
+                                  ? "PENDING"
+                                  : "REJECTED"}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-sans whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1.5">
+                                {slip.status === "PENDING" ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      disabled={processingB2bAction}
+                                      onClick={() => handleApproveSlip(slip._id)}
+                                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold transition shadow-2xs"
+                                    >
+                                      Approve & Credit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedB2bSlip(slip);
+                                        setIsB2bSlipModalOpen(true);
+                                      }}
+                                      className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-[10px] font-semibold transition"
+                                    >
+                                      Reject
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedB2bSlip(slip);
+                                      setIsB2bSlipModalOpen(true);
+                                    }}
+                                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition"
+                                  >
+                                    View Proof
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Section 3: B2B Corporate Clients Directory & Magic Portal Links */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden space-y-3 p-5">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+                    <Building className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Corporate Customer Accounts & Portal Links
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Share portal links with institutional and wholesale buyers to view statement aging and place orders
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-100 bg-slate-50 text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                      <th className="py-2.5 px-3">Company / Customer</th>
+                      <th className="py-2.5 px-3">Phone</th>
+                      <th className="py-2.5 px-3">Terms & Tier</th>
+                      <th className="py-2.5 px-3 text-right">Credit Limit</th>
+                      <th className="py-2.5 px-3 text-right">Current Balance</th>
+                      <th className="py-2.5 px-3 text-right">Portal Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {customers
+                      .filter((c) => c.customerType === "CORPORATE" || c.customerType === "WHOLESALE" || c.companyName || c.creditAllowed)
+                      .map((c) => {
+                        const portalUrl = typeof window !== "undefined"
+                          ? `${window.location.origin}/portal/statement/${c.portalToken || c._id}`
+                          : `/portal/statement/${c.portalToken || c._id}`;
+                        const waMsg = `Dear ${c.name}, here is your account statement & wholesale ordering portal: ${portalUrl}`;
+                        const waUrl = buildWhatsAppUrl(c.phone, waMsg);
+
+                        return (
+                          <tr key={c._id} className="hover:bg-slate-50 transition">
+                            <td className="py-2.5 px-3">
+                              <span className="font-bold text-slate-900 block">
+                                {c.companyName || c.name}
+                              </span>
+                              {c.companyName && (
+                                <span className="text-[10px] text-slate-500">Attn: {c.contactPerson || c.name}</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-700">
+                              {c.phone}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <div className="flex items-center gap-1">
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-50 text-amber-900 border border-amber-200">
+                                  Net {c.paymentTermsDays || 30}d
+                                </span>
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-900 border border-emerald-200">
+                                  {c.wholesaleTier || "TIER_1"}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                              {formatCurrency(c.creditLimit || 0)}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono font-black text-rose-600">
+                              {formatCurrency(c.currentBalance || 0)}
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(portalUrl);
+                                    setCopiedPortalId(c._id);
+                                    setTimeout(() => setCopiedPortalId(null), 2000);
+                                  }}
+                                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-semibold transition flex items-center gap-1"
+                                >
+                                  {copiedPortalId === c._id ? (
+                                    <>
+                                      <Check className="w-3 h-3 text-emerald-600" />
+                                      <span className="text-emerald-700 font-bold">Copied</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3 h-3 text-slate-500" />
+                                      <span>Copy Link</span>
+                                    </>
+                                  )}
+                                </button>
+                                {waUrl && (
+                                  <a
+                                    href={waUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-[10px] font-bold transition flex items-center gap-1 border border-emerald-200"
+                                  >
+                                    <MessageSquare className="w-3 h-3 text-emerald-600" />
+                                    <span>WhatsApp</span>
+                                  </a>
+                                )}
+                                <a
+                                  href={`/portal/statement/${c.portalToken || c._id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="p-1 text-slate-400 hover:text-blue-600 rounded-lg transition"
+                                  title="Open Portal in New Tab"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                </a>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                   </tbody>
                 </table>
               </div>
@@ -2125,6 +2835,140 @@ export default function CustomersPage() {
                     placeholder="e.g. Peradeniya Road, Kandy"
                     className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   />
+                </div>
+
+                {/* B2B Wholesale & Corporate Account Section */}
+                <div className="p-3.5 bg-blue-50/60 border border-blue-200/80 rounded-xl space-y-3">
+                  <div>
+                    <span className="text-xs font-bold text-blue-950 flex items-center gap-1.5">
+                      <Building className="w-3.5 h-3.5 text-blue-700" />
+                      Account Classification & B2B Tier
+                    </span>
+                    <span className="text-[10px] text-blue-800">
+                      Enable wholesale pricing, corporate invoicing, and credit terms
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    {(["RETAIL", "WHOLESALE", "CORPORATE"] as const).map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, customerType: type })}
+                        className={`py-1.5 px-2 rounded-lg text-xs font-bold border transition text-center ${
+                          formData.customerType === type
+                            ? "bg-blue-600 text-white border-blue-600 shadow-2xs"
+                            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        {type === "RETAIL" ? "Retail" : type === "WHOLESALE" ? "Wholesale" : "Corporate"}
+                      </button>
+                    ))}
+                  </div>
+
+                  {formData.customerType !== "RETAIL" && (
+                    <div className="space-y-2.5 pt-2 border-t border-blue-200/70">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                            Company / Registered Business Name
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.companyName}
+                            onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
+                            placeholder="e.g. ABC Lanka Traders Pvt Ltd"
+                            className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                            Contact Person / Attention
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.contactPerson}
+                            onChange={(e) => setFormData({ ...formData, contactPerson: e.target.value })}
+                            placeholder="e.g. Mr. K. Perera (Procurement)"
+                            className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                            Wholesale Pricing Tier
+                          </label>
+                          <select
+                            value={formData.wholesaleTier}
+                            onChange={(e) => setFormData({ ...formData, wholesaleTier: e.target.value as any })}
+                            className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          >
+                            <option value="TIER_1">Tier 1 — Standard Wholesale (~10% off)</option>
+                            <option value="TIER_2">Tier 2 — Bulk / Distributor (~20% off)</option>
+                            <option value="TIER_3">Tier 3 — VIP Key Account (~30% off)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                            Credit Payment Terms (Days)
+                          </label>
+                          <select
+                            value={formData.paymentTermsDays}
+                            onChange={(e) => setFormData({ ...formData, paymentTermsDays: e.target.value })}
+                            className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          >
+                            <option value="7">Net 7 Days</option>
+                            <option value="14">Net 14 Days</option>
+                            <option value="30">Net 30 Days (Standard)</option>
+                            <option value="60">Net 60 Days</option>
+                            <option value="90">Net 90 Days</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                            TIN (Tax Identification Number)
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.tin}
+                            onChange={(e) => setFormData({ ...formData, tin: e.target.value })}
+                            placeholder="e.g. 109823450"
+                            className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                            VAT Reg Number (If registered)
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.vatNumber}
+                            onChange={(e) => setFormData({ ...formData, vatNumber: e.target.value })}
+                            placeholder="e.g. 109823450-7000"
+                            className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                          Delivery / Dispatch Address (Wholesale Orders)
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.deliveryAddress}
+                          onChange={(e) => setFormData({ ...formData, deliveryAddress: e.target.value })}
+                          placeholder="e.g. Warehouse 4B, Industrial Zone, Ekala, Ja-Ela"
+                          className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Loyalty Tier & Birthday Month */}
@@ -3392,6 +4236,358 @@ export default function CustomersPage() {
                 showSharing={true}
                 showPrint={true}
               />
+            </div>
+          </div>
+        )}
+
+        {/* ================= MODAL: B2B ORDER DETAILS & INVOICE CONVERSION ================= */}
+        {isB2bOrderModalOpen && selectedB2bOrder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                    <ShoppingBag className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-black text-slate-900 text-lg">
+                        Order #{selectedB2bOrder.orderNumber}
+                      </h3>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          selectedB2bOrder.status === "DELIVERED"
+                            ? "bg-emerald-100 text-emerald-800"
+                            : selectedB2bOrder.status === "CANCELLED"
+                            ? "bg-rose-100 text-rose-800"
+                            : "bg-blue-100 text-blue-800"
+                        }`}
+                      >
+                        {selectedB2bOrder.status}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Placed on {formatSLDateTime(selectedB2bOrder.createdAt)}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsB2bOrderModalOpen(false)}
+                  className="text-slate-400 hover:text-slate-700"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Order Meta Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200/80 text-xs">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                    Customer & Company
+                  </span>
+                  <div className="font-bold text-slate-900 mt-0.5">{selectedB2bOrder.customerName}</div>
+                  <div className="text-slate-500 font-mono text-[11px]">{selectedB2bOrder.customerPhone}</div>
+                  {selectedB2bOrder.companyName && (
+                    <div className="text-slate-600 font-medium text-[11px] mt-0.5">
+                      {selectedB2bOrder.companyName}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                    PO & Delivery Info
+                  </span>
+                  <div className="font-medium text-slate-800 mt-0.5">
+                    PO Number: <span className="font-mono font-bold">{selectedB2bOrder.clientPoNumber || "N/A"}</span>
+                  </div>
+                  {selectedB2bOrder.requestedDeliveryDate && (
+                    <div className="text-slate-600 text-[11px] mt-0.5">
+                      Req. Delivery: {new Date(selectedB2bOrder.requestedDeliveryDate).toLocaleDateString()}
+                    </div>
+                  )}
+                  {selectedB2bOrder.deliveryAddress && (
+                    <div className="text-slate-500 text-[11px] mt-0.5 line-clamp-1">
+                      {selectedB2bOrder.deliveryAddress}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Line Items Table */}
+              <div className="rounded-xl border border-slate-200 overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100 text-slate-600 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="py-2.5 px-3">Item Description</th>
+                      <th className="py-2.5 px-3 text-center">Qty</th>
+                      <th className="py-2.5 px-3 text-right">Wholesale Price</th>
+                      <th className="py-2.5 px-3 text-right">Line Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {selectedB2bOrder.items?.map((it: any, idx: number) => (
+                      <tr key={idx} className="hover:bg-slate-50/50">
+                        <td className="py-2.5 px-3">
+                          <div className="font-medium text-slate-900">{it.productName}</div>
+                          {it.barcode && (
+                            <div className="text-[10px] font-mono text-slate-400">{it.barcode}</div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-800">
+                          {it.quantity}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono text-slate-600">
+                          {formatCurrency(it.unitPrice)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                          {formatCurrency(it.totalPrice)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-slate-50 border-t border-slate-200">
+                    <tr>
+                      <td colSpan={3} className="py-2 px-3 text-right font-semibold text-slate-600">
+                        Subtotal:
+                      </td>
+                      <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
+                        {formatCurrency(selectedB2bOrder.subtotal)}
+                      </td>
+                    </tr>
+                    {selectedB2bOrder.totalDiscount > 0 && (
+                      <tr>
+                        <td colSpan={3} className="py-1 px-3 text-right text-emerald-600 font-medium">
+                          Discount:
+                        </td>
+                        <td className="py-1 px-3 text-right font-mono font-bold text-emerald-700">
+                          -{formatCurrency(selectedB2bOrder.totalDiscount)}
+                        </td>
+                      </tr>
+                    )}
+                    <tr className="border-t border-slate-200">
+                      <td colSpan={3} className="py-2.5 px-3 text-right font-bold text-slate-900">
+                        Grand Total:
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono font-black text-blue-950 text-sm">
+                        {formatCurrency(selectedB2bOrder.totalAmount)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              {selectedB2bOrder.notes && (
+                <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl text-xs text-amber-900">
+                  <span className="font-bold">Customer Notes: </span>
+                  <span>{selectedB2bOrder.notes}</span>
+                </div>
+              )}
+
+              {/* Status Update & Conversion Actions */}
+              <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-600">Status:</span>
+                  <select
+                    value={selectedB2bOrder.status}
+                    disabled={processingB2bAction}
+                    onChange={(e) => {
+                      handleUpdateOrderStatus(selectedB2bOrder._id, e.target.value);
+                      setSelectedB2bOrder({ ...selectedB2bOrder, status: e.target.value });
+                    }}
+                    className="px-2.5 py-1 text-xs border border-slate-200 rounded-lg font-bold text-slate-800 bg-white"
+                  >
+                    <option value="PENDING">PENDING</option>
+                    <option value="CONFIRMED">CONFIRMED</option>
+                    <option value="PROCESSING">PROCESSING</option>
+                    <option value="SHIPPED">SHIPPED</option>
+                    <option value="DELIVERED">DELIVERED</option>
+                    <option value="CANCELLED">CANCELLED</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setIsB2bOrderModalOpen(false)}
+                    className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-xl"
+                  >
+                    Close
+                  </button>
+
+                  {selectedB2bOrder.convertedInvoiceNumber ? (
+                    <div className="px-3 py-1.5 bg-emerald-50 text-emerald-800 font-bold text-xs rounded-xl border border-emerald-200 flex items-center gap-1.5">
+                      <CheckCheck className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Invoice: {selectedB2bOrder.convertedInvoiceNumber}</span>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={processingB2bAction || selectedB2bOrder.status === "CANCELLED"}
+                      onClick={() => handleConvertOrderToSale(selectedB2bOrder._id)}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                    >
+                      <CheckCheck className="w-3.5 h-3.5" />
+                      <span>Convert to POS Sales Invoice & Debit Ledger</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= MODAL: BANK PAYMENT SLIP REVIEW & APPROVAL ================= */}
+        {isB2bSlipModalOpen && selectedB2bSlip && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                    <Landmark className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-slate-900 text-base">
+                      Bank Deposit Payment Slip
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Submitted by {selectedB2bSlip.customerName} ({selectedB2bSlip.customerPhone})
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsB2bSlipModalOpen(false)}
+                  className="text-slate-400 hover:text-slate-700"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Deposit Meta */}
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Deposited Bank:</span>
+                  <span className="font-bold text-slate-900 font-mono">
+                    {selectedB2bSlip.depositedBank?.replace("_", " ")}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Bank Reference / Txn No:</span>
+                  <span className="font-bold font-mono text-slate-900">
+                    {selectedB2bSlip.bankReference || "N/A"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Deposit Date:</span>
+                  <span className="font-medium text-slate-800">
+                    {new Date(selectedB2bSlip.depositDate).toLocaleDateString()}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+                  <span className="font-bold text-slate-800">Deposit Amount:</span>
+                  <span className="text-base font-black font-mono text-emerald-700">
+                    {formatCurrency(selectedB2bSlip.depositAmount)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Slip Image Proof */}
+              {selectedB2bSlip.slipImageUrl ? (
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-bold text-slate-600 block">Uploaded Deposit Slip Proof:</span>
+                  <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-950 flex items-center justify-center max-h-64">
+                    <img
+                      src={selectedB2bSlip.slipImageUrl}
+                      alt="Deposit Slip"
+                      className="object-contain max-h-64 w-auto"
+                    />
+                  </div>
+                  <div className="text-right">
+                    <a
+                      href={selectedB2bSlip.slipImageUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-blue-600 hover:underline flex items-center gap-1 justify-end font-medium"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Open image in full window</span>
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 text-center">
+                  No image proof attached. Verification based on bank reference number.
+                </div>
+              )}
+
+              {/* Status & Rejection details */}
+              {selectedB2bSlip.status === "APPROVED" && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-medium flex items-center gap-2">
+                  <CheckCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Approved & credited to customer ledger on {formatSLDateTime(selectedB2bSlip.reviewedAt)}</span>
+                </div>
+              )}
+
+              {selectedB2bSlip.status === "REJECTED" && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 space-y-1">
+                  <div className="font-bold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Payment Slip Rejected</span>
+                  </div>
+                  <p className="text-[11px] text-rose-700">Reason: {selectedB2bSlip.rejectionReason}</p>
+                </div>
+              )}
+
+              {selectedB2bSlip.status === "PENDING" && (
+                <div className="space-y-3 pt-2 border-t border-slate-100">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Rejection Reason (Required if rejecting):
+                    </label>
+                    <input
+                      type="text"
+                      value={rejectReasonInput}
+                      onChange={(e) => setRejectReasonInput(e.target.value)}
+                      placeholder="e.g. Deposit not received in account / invalid slip image"
+                      className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 justify-end">
+                    <button
+                      type="button"
+                      disabled={processingB2bAction}
+                      onClick={() => handleRejectSlip(selectedB2bSlip._id)}
+                      className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold transition border border-rose-200"
+                    >
+                      Reject Slip
+                    </button>
+                    <button
+                      type="button"
+                      disabled={processingB2bAction}
+                      onClick={() => handleApproveSlip(selectedB2bSlip._id)}
+                      className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                    >
+                      <CheckCheck className="w-3.5 h-3.5" />
+                      <span>Approve & Credit Balance</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {selectedB2bSlip.status !== "PENDING" && (
+                <div className="pt-2 border-t border-slate-100 text-right">
+                  <button
+                    type="button"
+                    onClick={() => setIsB2bSlipModalOpen(false)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold"
+                  >
+                    Close
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}

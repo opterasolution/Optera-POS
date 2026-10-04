@@ -17,6 +17,11 @@ export interface ICustomer extends Document {
   creditAllowed: boolean;
   creditLimit: number;
   currentBalance: number;
+  paymentTermsDays?: number;
+  creditStatus?: "ACTIVE" | "ON_HOLD" | "SUSPENDED";
+  wholesaleTier?: "TIER_1" | "TIER_2" | "TIER_3";
+  contactPerson?: string;
+  deliveryAddress?: string;
   nicNumber?: string;
   lastReminderSentAt?: Date;
   reminderCount?: number;
@@ -79,6 +84,19 @@ const CustomerSchema = new Schema<ICustomer>(
     creditAllowed: { type: Boolean, default: false },
     creditLimit: { type: Number, default: 0, min: 0 },
     currentBalance: { type: Number, default: 0, min: 0 },
+    paymentTermsDays: { type: Number, default: 30, min: 0 },
+    creditStatus: {
+      type: String,
+      enum: ["ACTIVE", "ON_HOLD", "SUSPENDED"],
+      default: "ACTIVE",
+    },
+    wholesaleTier: {
+      type: String,
+      enum: ["TIER_1", "TIER_2", "TIER_3"],
+      default: "TIER_1",
+    },
+    contactPerson: { type: String, trim: true },
+    deliveryAddress: { type: String, trim: true },
     nicNumber: { type: String, trim: true },
     lastReminderSentAt: { type: Date },
     reminderCount: { type: Number, default: 0 },
