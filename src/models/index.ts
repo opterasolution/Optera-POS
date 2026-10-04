@@ -118,6 +118,13 @@ export {
   type IDeliveryTripStop,
   type DeliveryTripStatus,
 } from "./DeliveryTrip";
+export {
+  VanSaleSession,
+  type IVanSaleSession,
+  type IVanLoadedStockItem,
+  type IVanSaleTransactionRef,
+  type VanSaleSessionStatus,
+} from "./VanSaleSession";
 
 
 

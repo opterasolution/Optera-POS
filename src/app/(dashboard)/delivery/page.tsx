@@ -46,6 +46,7 @@ import {
 import { formatCurrency } from "@/lib/formatters";
 import DeliveryDispatchSlip, { DeliveryDispatchSlipData } from "@/components/receipts/DeliveryDispatchSlip";
 import DeliveryRunsheetSlip, { DeliveryRunsheetSlipData } from "@/components/receipts/DeliveryRunsheetSlip";
+import VanLoadingSheetSlip, { VanLoadingSheetSlipData } from "@/components/receipts/VanLoadingSheetSlip";
 import { playDeliveryOrderChime, startRepeatingDeliveryAlert, stopRepeatingDeliveryAlert } from "@/lib/delivery/sound-alert";
 import { buildWhatsAppUrl } from "@/lib/notifications";
 
@@ -205,11 +206,48 @@ export default function DeliveryHubPage() {
     | "TRIP_RUNSHEETS"
     | "COD_RECONCILIATION"
     | "RECONCILIATION"
+    | "VAN_SALES"
   >("PENDING_ACCEPT");
   const [platformFilter, setPlatformFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [businessName, setBusinessName] = useState("Corner Store POS");
+
+  // Van Sales Sessions State
+  const [vanSessions, setVanSessions] = useState<any[]>([]);
+  const [loadingVanSessions, setLoadingVanSessions] = useState(false);
+  const [isLoadVanModalOpen, setIsLoadVanModalOpen] = useState(false);
+  const [newVanDriverId, setNewVanDriverId] = useState("");
+  const [newVanRouteZone, setNewVanRouteZone] = useState("");
+  const [newVanNotes, setNewVanNotes] = useState("");
+  const [newVanItems, setNewVanItems] = useState<
+    Array<{
+      productId: string;
+      productName: string;
+      unit: string;
+      costPrice: number;
+      unitPrice: number;
+      wholesalePrice?: number;
+      loadedQty: number;
+      maxStock: number;
+    }>
+  >([]);
+  const [storeProducts, setStoreProducts] = useState<any[]>([]);
+  const [loadingStoreProducts, setLoadingStoreProducts] = useState(false);
+  const [storeProductSearch, setStoreProductSearch] = useState("");
+  const [submittingVanLoad, setSubmittingVanLoad] = useState(false);
+
+  // Van Stock & Cash Reconciliation Modal State
+  const [reconcilingVanSession, setReconcilingVanSession] = useState<any | null>(null);
+  const [vanPhysicalCashSubmitted, setVanPhysicalCashSubmitted] = useState("");
+  const [vanReturnItemsState, setVanReturnItemsState] = useState<{
+    [productId: string]: { returnedQty: number; damagedQty: number };
+  }>({});
+  const [vanReconciliationNotes, setVanReconciliationNotes] = useState("");
+  const [submittingVanReconciliation, setSubmittingVanReconciliation] = useState(false);
+
+  // Van Loading Slip Modal State
+  const [selectedVanSlipSession, setSelectedVanSlipSession] = useState<any | null>(null);
 
   // Modals state
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
@@ -363,14 +401,223 @@ export default function DeliveryHubPage() {
     }
   };
 
+  const fetchVanSessions = async () => {
+    try {
+      setLoadingVanSessions(true);
+      const res = await fetch("/api/van-sales/sessions");
+      const data = await res.json();
+      if (data.success && Array.isArray(data.sessions)) {
+        setVanSessions(data.sessions);
+      }
+    } catch (err) {
+      console.error("Failed to load van sessions:", err);
+    } finally {
+      setLoadingVanSessions(false);
+    }
+  };
+
+  const fetchStoreProducts = async () => {
+    try {
+      setLoadingStoreProducts(true);
+      const res = await fetch("/api/products");
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        setStoreProducts(data.data);
+      }
+    } catch (err) {
+      console.error("Failed to load store products:", err);
+    } finally {
+      setLoadingStoreProducts(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === "FLEET_DRIVERS") {
       fetchDrivers();
     } else if (activeTab === "TRIP_RUNSHEETS" || activeTab === "COD_RECONCILIATION") {
       fetchTrips();
       fetchDrivers();
+    } else if (activeTab === "VAN_SALES") {
+      fetchVanSessions();
+      fetchDrivers();
     }
   }, [activeTab]);
+
+  const handleOpenLoadVanModal = () => {
+    setIsLoadVanModalOpen(true);
+    fetchDrivers();
+    fetchStoreProducts();
+    setNewVanDriverId("");
+    setNewVanRouteZone("");
+    setNewVanNotes("");
+    setNewVanItems([]);
+    setStoreProductSearch("");
+  };
+
+  const handleAddProductToVan = (prod: any) => {
+    setNewVanItems((prev) => {
+      const existing = prev.find((i) => i.productId === prod._id);
+      if (existing) {
+        if (existing.loadedQty >= prod.stockQuantity) return prev;
+        return prev.map((i) =>
+          i.productId === prod._id ? { ...i, loadedQty: i.loadedQty + 1 } : i
+        );
+      }
+      return [
+        ...prev,
+        {
+          productId: prod._id,
+          productName: prod.name,
+          unit: prod.unit || "unit",
+          costPrice: prod.costPrice || 0,
+          unitPrice: prod.sellingPrice || 0,
+          wholesalePrice: prod.wholesalePrice || (prod.sellingPrice * 0.9),
+          loadedQty: 1,
+          maxStock: prod.stockQuantity || 0,
+        },
+      ];
+    });
+  };
+
+  const handleUpdateVanItemQty = (productId: string, qty: number) => {
+    setNewVanItems((prev) =>
+      prev.map((i) => {
+        if (i.productId === productId) {
+          const clamped = Math.max(0.1, Math.min(qty, i.maxStock));
+          return { ...i, loadedQty: clamped };
+        }
+        return i;
+      })
+    );
+  };
+
+  const handleRemoveVanItem = (productId: string) => {
+    setNewVanItems((prev) => prev.filter((i) => i.productId !== productId));
+  };
+
+  const handleCreateVanSession = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newVanDriverId) {
+      alert("Please select a driver for this van loading.");
+      return;
+    }
+    if (newVanItems.length === 0) {
+      alert("Please select at least one product to load into the van.");
+      return;
+    }
+    for (const item of newVanItems) {
+      if (item.loadedQty > item.maxStock) {
+        alert(`Cannot load ${item.loadedQty} of ${item.productName}. Store stock is only ${item.maxStock}.`);
+        return;
+      }
+    }
+    try {
+      setSubmittingVanLoad(true);
+      const res = await fetch("/api/van-sales/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          driverId: newVanDriverId,
+          routeZone: newVanRouteZone.trim() || undefined,
+          notes: newVanNotes.trim() || undefined,
+          items: newVanItems.map((i) => ({
+            productId: i.productId,
+            loadedQty: i.loadedQty,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedbackMessage({
+          type: "success",
+          text: `Van Loading Sheet #${data.session?.sessionNumber} generated! Store stock decremented.`,
+        });
+        setIsLoadVanModalOpen(false);
+        fetchVanSessions();
+      } else {
+        alert(data.error || "Failed to create van session.");
+      }
+    } catch {
+      alert("Network error loading van.");
+    } finally {
+      setSubmittingVanLoad(false);
+    }
+  };
+
+  const handleUpdateVanSessionStatus = async (sessionId: string, action: "START_ROUTE" | "COMPLETE_ROUTE") => {
+    try {
+      const res = await fetch(`/api/van-sales/sessions/${sessionId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedbackMessage({
+          type: "success",
+          text: `Van session status updated to ${data.session?.status}.`,
+        });
+        fetchVanSessions();
+      } else {
+        alert(data.error || "Failed to update van status.");
+      }
+    } catch {
+      alert("Network error updating van status.");
+    }
+  };
+
+  const handleOpenVanReconcileModal = (session: any) => {
+    setReconcilingVanSession(session);
+    setVanPhysicalCashSubmitted((session.salesSummary?.cashCollected || 0).toString());
+    const initialReturns: { [productId: string]: { returnedQty: number; damagedQty: number } } = {};
+    for (const item of session.items || []) {
+      initialReturns[item.productId.toString()] = {
+        returnedQty: item.remainingQty || 0,
+        damagedQty: 0,
+      };
+    }
+    setVanReturnItemsState(initialReturns);
+    setVanReconciliationNotes("");
+  };
+
+  const handleSubmitVanReconciliation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reconcilingVanSession) return;
+    try {
+      setSubmittingVanReconciliation(true);
+      const returnedItemsPayload = Object.entries(vanReturnItemsState).map(([productId, val]) => ({
+        productId,
+        returnedQty: Number(val.returnedQty) || 0,
+        damagedQty: Number(val.damagedQty) || 0,
+      }));
+
+      const res = await fetch(`/api/van-sales/sessions/${reconcilingVanSession._id}/reconcile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          physicalCashSubmitted: parseFloat(vanPhysicalCashSubmitted) || 0,
+          returnedItems: returnedItemsPayload,
+          notes: vanReconciliationNotes.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setFeedbackMessage({
+          type: "success",
+          text: `Van Session #${reconcilingVanSession.sessionNumber} reconciled! Returned stock restored to store.`,
+        });
+        setReconcilingVanSession(null);
+        fetchVanSessions();
+      } else {
+        alert(data.error || "Failed to reconcile van session.");
+      }
+    } catch {
+      alert("Network error reconciling van session.");
+    } finally {
+      setSubmittingVanReconciliation(false);
+    }
+  };
 
   const handleSendTrackingSms = async (orderId?: string, tripId?: string) => {
     try {
@@ -1041,6 +1288,26 @@ export default function DeliveryHubPage() {
               }`}
             >
               <span>📊 Aggregator Payout</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveTab("VAN_SALES");
+                fetchVanSessions();
+              }}
+              className={`px-3.5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition shrink-0 ${
+                activeTab === "VAN_SALES"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              <Truck className="w-4 h-4" />
+              <span>🚐 Van Sales & In-Transit ({vanSessions.length})</span>
+              {vanSessions.filter((s) => s.status === "LOADED" || s.status === "ON_ROUTE").length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-emerald-400 text-slate-900">
+                  {vanSessions.filter((s) => s.status === "LOADED" || s.status === "ON_ROUTE").length} Active
+                </span>
+              )}
             </button>
           </div>
 
@@ -2121,6 +2388,323 @@ export default function DeliveryHubPage() {
                   </table>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ================= TAB 10: VAN SALES & IN-TRANSIT FLEET ================= */}
+          {activeTab === "VAN_SALES" && (
+            <div className="space-y-6 max-w-6xl mx-auto">
+              {/* Header with KPI cards */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                    <Truck className="w-5 h-5 text-blue-600" />
+                    <span>Van Spot Sales & In-Transit Fleet Logistics</span>
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Allocate store stock to delivery vehicles, record spot sales on route, and reconcile end-of-shift returns & cash
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleOpenLoadVanModal}
+                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Load New Van (Stock Allocation)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={fetchVanSessions}
+                    className="p-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 shadow-2xs"
+                    title="Refresh Van Sessions"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${loadingVanSessions ? "animate-spin" : ""}`} />
+                  </button>
+                </div>
+              </div>
+
+              {/* KPI Cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-2xs">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
+                    Active Vans On Route
+                  </span>
+                  <div className="text-2xl font-black text-slate-900 mt-1 flex items-center gap-2">
+                    <span>
+                      {vanSessions.filter((s) => s.status === "LOADED" || s.status === "ON_ROUTE").length}
+                    </span>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                      Fleet Active
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 mt-0.5 block">
+                    {vanSessions.filter((s) => s.status === "RECONCILED").length} settled shifts
+                  </span>
+                </div>
+
+                <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-2xs">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
+                    Total Van Spot Sales
+                  </span>
+                  <div className="text-2xl font-black font-mono text-slate-900 mt-1">
+                    {formatCurrency(
+                      vanSessions.reduce((acc, s) => acc + (s.salesSummary?.netSalesTotal || 0), 0)
+                    )}
+                  </div>
+                  <span className="text-[11px] text-slate-400 mt-0.5 block">
+                    {vanSessions.reduce((acc, s) => acc + (s.salesSummary?.totalSalesCount || 0), 0)} spot transactions
+                  </span>
+                </div>
+
+                <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-2xs">
+                  <span className="text-xs font-semibold text-emerald-700 uppercase tracking-wider block">
+                    Physical Cash Collected
+                  </span>
+                  <div className="text-2xl font-black font-mono text-emerald-600 mt-1">
+                    {formatCurrency(
+                      vanSessions.reduce((acc, s) => acc + (s.salesSummary?.cashCollected || 0), 0)
+                    )}
+                  </div>
+                  <span className="text-[11px] text-slate-400 mt-0.5 block">To be settled at cash counter</span>
+                </div>
+
+                <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-2xs">
+                  <span className="text-xs font-semibold text-indigo-700 uppercase tracking-wider block">
+                    In-Transit Inventory
+                  </span>
+                  <div className="text-2xl font-black font-mono text-indigo-600 mt-1">
+                    {vanSessions
+                      .filter((s) => s.status === "LOADED" || s.status === "ON_ROUTE")
+                      .reduce(
+                        (acc, s) =>
+                          acc + (s.items?.reduce((ia: number, i: any) => ia + (i.remainingQty || 0), 0) || 0),
+                        0
+                      )
+                      .toFixed(0)}{" "}
+                    <span className="text-xs font-bold text-slate-500 font-sans">units</span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 mt-0.5 block">Currently inside vehicles</span>
+                </div>
+              </div>
+
+              {/* Sessions List */}
+              {loadingVanSessions ? (
+                <div className="py-16 text-center text-slate-500">
+                  <RefreshCw className="w-8 h-8 animate-spin mx-auto text-blue-500 mb-2" />
+                  <p className="text-sm font-semibold">Loading van sessions...</p>
+                </div>
+              ) : vanSessions.length === 0 ? (
+                <div className="bg-white border border-dashed border-slate-300 rounded-3xl p-12 text-center max-w-lg mx-auto">
+                  <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Truck className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900 mb-1">No Van Sales Sessions Yet</h3>
+                  <p className="text-xs text-slate-500 mb-6">
+                    Start by loading a delivery van with store products. Drivers can sell items directly off the vehicle, print thermal receipts, accept LankaQR, and return unsold stock at the end of the shift.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleOpenLoadVanModal}
+                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 mx-auto shadow-sm"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Load First Van</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4">
+                  {vanSessions.map((session) => {
+                    const sessionDriver = drivers.find(
+                      (d) =>
+                        d._id === session.driverId?.toString() ||
+                        d._id === (session.driverId?._id || session.driverId)?.toString()
+                    );
+                    const driverToken = sessionDriver?.driverToken;
+
+                    const totalLoaded = session.items?.reduce((a: number, i: any) => a + (i.loadedQty || 0), 0) || 0;
+                    const totalSold = session.items?.reduce((a: number, i: any) => a + (i.soldQty || 0), 0) || 0;
+                    const totalRemaining = session.items?.reduce((a: number, i: any) => a + (i.remainingQty || 0), 0) || 0;
+
+                    return (
+                      <div
+                        key={session._id}
+                        className="bg-white border border-slate-200 rounded-2xl p-5 shadow-2xs hover:shadow-xs transition space-y-4"
+                      >
+                        {/* Top row */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                              <Truck className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h3 className="font-bold text-slate-900 text-sm">{session.sessionNumber}</h3>
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                                    session.status === "RECONCILED"
+                                      ? "bg-emerald-100 text-emerald-800"
+                                      : session.status === "ON_ROUTE"
+                                      ? "bg-blue-100 text-blue-800 animate-pulse"
+                                      : session.status === "COMPLETED"
+                                      ? "bg-amber-100 text-amber-800"
+                                      : "bg-slate-100 text-slate-700"
+                                  }`}
+                                >
+                                  {session.status}
+                                </span>
+                              </div>
+                              <span className="text-[11px] text-slate-400">
+                                Loaded {new Date(session.loadedAt).toLocaleString("en-LK")}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {/* Manifest Slip print button */}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedVanSlipSession(session)}
+                              className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition flex items-center gap-1.5"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              <span>Loading Sheet & Manifest</span>
+                            </button>
+
+                            {/* Driver mobile link */}
+                            {driverToken && (
+                              <a
+                                href={`/delivery/driver/${driverToken}/van-pos`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold transition flex items-center gap-1.5"
+                                title="Open Driver Mobile Van POS"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                                <span>Driver POS</span>
+                              </a>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Driver & Route Info */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3 rounded-xl text-xs">
+                          <div>
+                            <span className="text-slate-400 text-[10px] uppercase font-bold block">Driver</span>
+                            <span className="font-bold text-slate-900">{session.driverName}</span>
+                            <span className="text-slate-500 text-[11px] block">{session.driverPhone}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 text-[10px] uppercase font-bold block">Vehicle</span>
+                            <span className="font-bold text-slate-900">{session.vehicleNumber}</span>
+                            <span className="text-slate-500 text-[11px] block">{session.vehicleType}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 text-[10px] uppercase font-bold block">Route Zone</span>
+                            <span className="font-bold text-slate-900">{session.routeZone || "General Route"}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 text-[10px] uppercase font-bold block">In-Transit Units</span>
+                            <span className="font-bold text-indigo-700">
+                              {totalRemaining.toFixed(0)} / {totalLoaded.toFixed(0)} units
+                            </span>
+                            <span className="text-[10px] text-emerald-600 block">{totalSold.toFixed(0)} units sold</span>
+                          </div>
+                        </div>
+
+                        {/* Financial Snapshot */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                          <div className="bg-emerald-50/60 p-2.5 rounded-xl border border-emerald-100">
+                            <span className="text-emerald-700 text-[10px] font-bold uppercase block">Net Spot Sales</span>
+                            <span className="font-mono font-bold text-emerald-900 text-sm">
+                              {formatCurrency(session.salesSummary?.netSalesTotal || 0)}
+                            </span>
+                            <span className="text-[10px] text-emerald-700 block">
+                              {session.salesSummary?.totalSalesCount || 0} invoices
+                            </span>
+                          </div>
+                          <div className="bg-blue-50/60 p-2.5 rounded-xl border border-blue-100">
+                            <span className="text-blue-700 text-[10px] font-bold uppercase block">Cash Collected</span>
+                            <span className="font-mono font-bold text-blue-900 text-sm">
+                              {formatCurrency(session.salesSummary?.cashCollected || 0)}
+                            </span>
+                          </div>
+                          <div className="bg-teal-50/60 p-2.5 rounded-xl border border-teal-100">
+                            <span className="text-teal-700 text-[10px] font-bold uppercase block">LankaQR</span>
+                            <span className="font-mono font-bold text-teal-900 text-sm">
+                              {formatCurrency(session.salesSummary?.lankaQrCollected || 0)}
+                            </span>
+                          </div>
+                          <div className="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100">
+                            <span className="text-purple-700 text-[10px] font-bold uppercase block">Credit Book</span>
+                            <span className="font-mono font-bold text-purple-900 text-sm">
+                              {formatCurrency(session.salesSummary?.creditCollected || 0)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Reconciliation Alert Banner if already reconciled */}
+                        {session.status === "RECONCILED" && session.cashierReconciliation && (
+                          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                              <div>
+                                <span className="font-bold text-emerald-900">
+                                  Shift Audited by {session.cashierReconciliation.reconciledBy || "Cashier"}
+                                </span>
+                                <span className="text-emerald-700 text-[11px] block">
+                                  Physical cash submitted: {formatCurrency(session.cashierReconciliation.physicalCashSubmitted || 0)} &bull;{" "}
+                                  Variance: {formatCurrency(session.cashierReconciliation.cashShortageOrOverage || 0)}
+                                </span>
+                              </div>
+                            </div>
+                            <span className="text-[10px] font-bold text-emerald-800 bg-emerald-200/60 px-2 py-0.5 rounded">
+                              RECONCILED
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Action buttons */}
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                          {session.status === "LOADED" && (
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateVanSessionStatus(session._id, "START_ROUTE")}
+                              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                            >
+                              <Navigation className="w-3.5 h-3.5" />
+                              <span>Dispatch & Start Route</span>
+                            </button>
+                          )}
+
+                          {session.status === "ON_ROUTE" && (
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateVanSessionStatus(session._id, "COMPLETE_ROUTE")}
+                              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>End Route / Return to Store</span>
+                            </button>
+                          )}
+
+                          {(session.status === "ON_ROUTE" || session.status === "COMPLETED") && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenVanReconcileModal(session)}
+                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                            >
+                              <Wallet className="w-3.5 h-3.5" />
+                              <span>Reconcile Stock Returns & Cash</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </main>
@@ -3355,6 +3939,544 @@ export default function DeliveryHubPage() {
                   Close Route Itinerary
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= MODAL: LOAD NEW VAN & ALLOCATE STOCK ================= */}
+        {isLoadVanModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 my-8 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center text-blue-700 font-bold">
+                    <Truck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">Load New Van & Allocate Stock</h3>
+                    <p className="text-xs text-slate-500">
+                      Allocate store inventory to delivery vehicle. Store stock will be deducted immediately.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsLoadVanModalOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateVanSession} className="py-4 space-y-4">
+                {/* Driver & Route Info */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      Assigned Driver & Vehicle <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={newVanDriverId}
+                      onChange={(e) => setNewVanDriverId(e.target.value)}
+                      required
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 font-medium focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="">-- Select Driver --</option>
+                      {drivers.map((d) => (
+                        <option key={d._id} value={d._id}>
+                          {d.name} &bull; {d.vehicleNumber} ({d.vehicleType})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Route / Sales Zone</label>
+                    <input
+                      type="text"
+                      value={newVanRouteZone}
+                      onChange={(e) => setNewVanRouteZone(e.target.value)}
+                      placeholder="e.g. Colombo 03, Kollupitiya, Bambalapitiya"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">Shift Notes / Route Memo</label>
+                  <input
+                    type="text"
+                    value={newVanNotes}
+                    onChange={(e) => setNewVanNotes(e.target.value)}
+                    placeholder="e.g. Wholesale dairy and snack distribution route"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Product Catalog Picker */}
+                <div className="border border-slate-200 rounded-2xl p-3 bg-slate-50/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Select Products from Store Inventory</span>
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      {storeProducts.length} store items available
+                    </span>
+                  </div>
+
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={storeProductSearch}
+                      onChange={(e) => setStoreProductSearch(e.target.value)}
+                      placeholder="Search product name or barcode..."
+                      className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  {/* Filtered products chips */}
+                  <div className="max-h-36 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 p-1">
+                    {storeProducts
+                      .filter((p) => {
+                        if (!storeProductSearch.trim()) return true;
+                        const q = storeProductSearch.toLowerCase();
+                        return (
+                          p.name.toLowerCase().includes(q) ||
+                          (p.barcode && p.barcode.includes(q))
+                        );
+                      })
+                      .slice(0, 10)
+                      .map((prod) => (
+                        <div
+                          key={prod._id}
+                          className="bg-white p-2 rounded-xl border border-slate-200 flex items-center justify-between gap-2 hover:border-blue-400 transition"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <span className="font-bold text-xs text-slate-900 truncate block">
+                              {prod.name}
+                            </span>
+                            <div className="text-[10px] text-slate-500 flex items-center gap-2">
+                              <span>Stock: {prod.stockQuantity} {prod.unit || "unit"}</span>
+                              <span>&bull;</span>
+                              <span className="text-emerald-700 font-semibold">
+                                Rs. {(prod.sellingPrice || 0).toFixed(2)}
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleAddProductToVan(prod)}
+                            disabled={prod.stockQuantity <= 0}
+                            className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 disabled:opacity-30 text-blue-700 rounded-lg text-xs font-bold transition shrink-0"
+                          >
+                            + Add
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+
+                {/* Selected Van Items Table */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                      Van Loading Manifest ({newVanItems.length} items)
+                    </span>
+                    <span className="text-xs font-bold text-slate-700">
+                      Total Valuation: Rs.{" "}
+                      {newVanItems
+                        .reduce((sum, it) => sum + it.unitPrice * it.loadedQty, 0)
+                        .toLocaleString("en-LK", { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+
+                  {newVanItems.length === 0 ? (
+                    <div className="py-8 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl">
+                      No products added yet. Click &ldquo;+ Add&rdquo; from the store catalog above.
+                    </div>
+                  ) : (
+                    <div className="border border-slate-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 text-[10px] uppercase">
+                          <tr>
+                            <th className="py-2 px-3">Product</th>
+                            <th className="py-2 px-2 text-right">Store Stock</th>
+                            <th className="py-2 px-2 text-right">Loaded Qty</th>
+                            <th className="py-2 px-2 text-right">Unit Price</th>
+                            <th className="py-2 px-2 text-right">Total (Rs.)</th>
+                            <th className="py-2 px-2 text-center">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {newVanItems.map((item) => (
+                            <tr key={item.productId} className="hover:bg-slate-50/50">
+                              <td className="py-2 px-3 font-semibold text-slate-900">
+                                {item.productName}
+                              </td>
+                              <td className="py-2 px-2 text-right text-slate-500">
+                                {item.maxStock} {item.unit}
+                              </td>
+                              <td className="py-2 px-2 text-right">
+                                <input
+                                  type="number"
+                                  min="0.1"
+                                  max={item.maxStock}
+                                  step="any"
+                                  value={item.loadedQty}
+                                  onChange={(e) =>
+                                    handleUpdateVanItemQty(
+                                      item.productId,
+                                      parseFloat(e.target.value) || 1
+                                    )
+                                  }
+                                  className="w-16 bg-white border border-slate-200 rounded p-1 text-right font-bold text-xs text-slate-900"
+                                />
+                              </td>
+                              <td className="py-2 px-2 text-right font-mono text-slate-600">
+                                Rs. {item.unitPrice.toFixed(2)}
+                              </td>
+                              <td className="py-2 px-2 text-right font-mono font-bold text-slate-900">
+                                Rs. {(item.unitPrice * item.loadedQty).toFixed(2)}
+                              </td>
+                              <td className="py-2 px-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveVanItem(item.productId)}
+                                  className="text-rose-500 hover:text-rose-700 p-1 rounded"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsLoadVanModalOpen(false)}
+                    className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingVanLoad || newVanItems.length === 0}
+                    className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-sm"
+                  >
+                    {submittingVanLoad ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Deducting Stock & Dispatching...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Confirm Loading & Deduct Store Stock</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ================= MODAL: VAN RECONCILIATION & RETURN ================= */}
+        {reconcilingVanSession && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 my-8 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold">
+                    <Wallet className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">
+                      Van Shift Stock Audit & Cash Settlement
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Session #{reconcilingVanSession.sessionNumber} &bull; {reconcilingVanSession.driverName} ({reconcilingVanSession.vehicleNumber})
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReconcilingVanSession(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmitVanReconciliation} className="py-4 space-y-4">
+                {/* Product Return & Damage Table */}
+                <div className="space-y-2">
+                  <span className="text-xs font-bold text-slate-900 uppercase tracking-wider block">
+                    1. Stock Count & Unsold Goods Return
+                  </span>
+                  <div className="border border-slate-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 text-[10px] uppercase">
+                        <tr>
+                          <th className="py-2 px-3">Product</th>
+                          <th className="py-2 px-2 text-right">Loaded</th>
+                          <th className="py-2 px-2 text-right">Sold</th>
+                          <th className="py-2 px-2 text-right">Remaining</th>
+                          <th className="py-2 px-2 text-right">Returned Qty</th>
+                          <th className="py-2 px-2 text-right">Damaged Qty</th>
+                          <th className="py-2 px-2 text-center">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-[11px]">
+                        {reconcilingVanSession.items.map((it: any) => {
+                          const state = vanReturnItemsState[it.productId.toString()] || {
+                            returnedQty: it.remainingQty,
+                            damagedQty: 0,
+                          };
+                          const accounted = it.soldQty + Number(state.returnedQty) + Number(state.damagedQty);
+                          const discrepancy = Number((it.loadedQty - accounted).toFixed(3));
+
+                          return (
+                            <tr key={it.productId} className="hover:bg-slate-50/50">
+                              <td className="py-2 px-3 font-semibold text-slate-900">
+                                {it.productName}
+                              </td>
+                              <td className="py-2 px-2 text-right font-mono text-slate-700">
+                                {it.loadedQty}
+                              </td>
+                              <td className="py-2 px-2 text-right font-mono text-emerald-700 font-bold">
+                                {it.soldQty}
+                              </td>
+                              <td className="py-2 px-2 text-right font-mono text-slate-500">
+                                {it.remainingQty}
+                              </td>
+                              <td className="py-2 px-2 text-right">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  value={state.returnedQty}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value) || 0;
+                                    setVanReturnItemsState((prev) => ({
+                                      ...prev,
+                                      [it.productId.toString()]: {
+                                        ...prev[it.productId.toString()],
+                                        returnedQty: val,
+                                      },
+                                    }));
+                                  }}
+                                  className="w-16 bg-white border border-slate-200 rounded p-1 text-right font-bold text-xs text-slate-900"
+                                />
+                              </td>
+                              <td className="py-2 px-2 text-right">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  value={state.damagedQty}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value) || 0;
+                                    setVanReturnItemsState((prev) => ({
+                                      ...prev,
+                                      [it.productId.toString()]: {
+                                        ...prev[it.productId.toString()],
+                                        damagedQty: val,
+                                      },
+                                    }));
+                                  }}
+                                  className="w-14 bg-white border border-slate-200 rounded p-1 text-right font-bold text-xs text-amber-700"
+                                />
+                              </td>
+                              <td className="py-2 px-2 text-center">
+                                {discrepancy === 0 ? (
+                                  <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold">
+                                    Exact
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-rose-700 bg-rose-50 px-2 py-0.5 rounded font-bold">
+                                    {discrepancy > 0 ? `-${discrepancy}` : `+${Math.abs(discrepancy)}`}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Cash Settlement Section */}
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                  <span className="text-xs font-bold text-slate-900 uppercase tracking-wider block">
+                    2. Physical Cash Settlement
+                  </span>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-white p-2.5 rounded-xl border border-slate-200">
+                      <span className="text-slate-400 text-[10px] block">Net Route Revenue</span>
+                      <span className="font-mono font-bold text-slate-900">
+                        {formatCurrency(reconcilingVanSession.salesSummary?.netSalesTotal || 0)}
+                      </span>
+                    </div>
+                    <div className="bg-white p-2.5 rounded-xl border border-slate-200">
+                      <span className="text-slate-400 text-[10px] block">Expected Cash Collection</span>
+                      <span className="font-mono font-bold text-blue-700">
+                        {formatCurrency(reconcilingVanSession.salesSummary?.cashCollected || 0)}
+                      </span>
+                    </div>
+                    <div className="bg-white p-2.5 rounded-xl border border-slate-200">
+                      <span className="text-slate-400 text-[10px] block">LankaQR Collected</span>
+                      <span className="font-mono font-bold text-teal-700">
+                        {formatCurrency(reconcilingVanSession.salesSummary?.lankaQrCollected || 0)}
+                      </span>
+                    </div>
+                    <div className="bg-white p-2.5 rounded-xl border border-slate-200">
+                      <span className="text-slate-400 text-[10px] block">Credit Booked</span>
+                      <span className="font-mono font-bold text-purple-700">
+                        {formatCurrency(reconcilingVanSession.salesSummary?.creditCollected || 0)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        Physical Cash Submitted by Driver (Rs.)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={vanPhysicalCashSubmitted}
+                        onChange={(e) => setVanPhysicalCashSubmitted(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 font-bold focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        Cash Shortage / Overage Variance
+                      </label>
+                      <div className="bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-mono font-bold flex items-center justify-between">
+                        <span>Difference:</span>
+                        <span
+                          className={
+                            (parseFloat(vanPhysicalCashSubmitted) || 0) -
+                              (reconcilingVanSession.salesSummary?.cashCollected || 0) ===
+                            0
+                              ? "text-emerald-600"
+                              : (parseFloat(vanPhysicalCashSubmitted) || 0) -
+                                  (reconcilingVanSession.salesSummary?.cashCollected || 0) <
+                                0
+                              ? "text-rose-600"
+                              : "text-blue-600"
+                          }
+                        >
+                          {formatCurrency(
+                            (parseFloat(vanPhysicalCashSubmitted) || 0) -
+                              (reconcilingVanSession.salesSummary?.cashCollected || 0)
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Cashier Settlement Notes</label>
+                    <input
+                      type="text"
+                      value={vanReconciliationNotes}
+                      onChange={(e) => setVanReconciliationNotes(e.target.value)}
+                      placeholder="e.g. Received cash bag #4; verified with driver"
+                      className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setReconcilingVanSession(null)}
+                    className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingVanReconciliation}
+                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-sm"
+                  >
+                    {submittingVanReconciliation ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Restoring Stock to Store...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Audit & Restore Returned Stock to Store</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ================= MODAL: PRINT VAN LOADING SHEET & MANIFEST ================= */}
+        {selectedVanSlipSession && (
+          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-3xl max-w-4xl w-full p-6 shadow-2xl border border-slate-200 my-8">
+              <div className="flex justify-end pb-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedVanSlipSession(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <VanLoadingSheetSlip
+                data={{
+                  sessionNumber: selectedVanSlipSession.sessionNumber,
+                  storeName: businessName,
+                  driverName: selectedVanSlipSession.driverName,
+                  driverPhone: selectedVanSlipSession.driverPhone,
+                  vehicleType: selectedVanSlipSession.vehicleType,
+                  vehicleNumber: selectedVanSlipSession.vehicleNumber,
+                  routeZone: selectedVanSlipSession.routeZone,
+                  status: selectedVanSlipSession.status,
+                  loadedAt: selectedVanSlipSession.loadedAt,
+                  startedAt: selectedVanSlipSession.startedAt,
+                  completedAt: selectedVanSlipSession.completedAt,
+                  reconciledAt: selectedVanSlipSession.reconciledAt,
+                  items: selectedVanSlipSession.items || [],
+                  salesSummary: selectedVanSlipSession.salesSummary || {
+                    totalSalesCount: 0,
+                    grossSalesTotal: 0,
+                    discountsTotal: 0,
+                    netSalesTotal: 0,
+                    cashCollected: 0,
+                    lankaQrCollected: 0,
+                    creditCollected: 0,
+                    otherCollected: 0,
+                  },
+                  cashierReconciliation: selectedVanSlipSession.cashierReconciliation,
+                  vanPosUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+                }}
+                onPrint={() => window.print()}
+              />
             </div>
           </div>
         )}

@@ -7,7 +7,9 @@ export type MovementType =
   | "DAMAGE"
   | "RETURN"
   | "TRANSFER_OUT"
-  | "TRANSFER_IN";
+  | "TRANSFER_IN"
+  | "VAN_LOAD"
+  | "VAN_RETURN";
 
 export interface IInventoryMovement extends Document {
   businessId: Types.ObjectId;
@@ -51,7 +53,17 @@ const InventoryMovementSchema = new Schema<IInventoryMovement>(
     },
     type: {
       type: String,
-      enum: ["SALE", "RESTOCK", "ADJUSTMENT", "DAMAGE", "RETURN", "TRANSFER_OUT", "TRANSFER_IN"],
+      enum: [
+        "SALE",
+        "RESTOCK",
+        "ADJUSTMENT",
+        "DAMAGE",
+        "RETURN",
+        "TRANSFER_OUT",
+        "TRANSFER_IN",
+        "VAN_LOAD",
+        "VAN_RETURN",
+      ],
       required: true,
     },
     quantityChange: { type: Number, required: true },

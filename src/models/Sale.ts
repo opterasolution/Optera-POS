@@ -107,6 +107,10 @@ export interface ISale extends Document {
   salesRepName?: string;
   commissionAmount?: number;
   commissionRuleId?: Types.ObjectId;
+  vanSaleSessionId?: Types.ObjectId;
+  channel?: "IN_STORE" | "VAN_SALE" | "DELIVERY" | "ONLINE";
+  driverId?: Types.ObjectId;
+  vehicleNumber?: string;
   status: SaleStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -242,6 +246,15 @@ const SaleSchema = new Schema<ISale>(
     salesRepName: { type: String, trim: true },
     commissionAmount: { type: Number, default: 0, min: 0 },
     commissionRuleId: { type: Schema.Types.ObjectId, ref: "CommissionRule" },
+    vanSaleSessionId: { type: Schema.Types.ObjectId, ref: "VanSaleSession", index: true },
+    channel: {
+      type: String,
+      enum: ["IN_STORE", "VAN_SALE", "DELIVERY", "ONLINE"],
+      default: "IN_STORE",
+      index: true,
+    },
+    driverId: { type: Schema.Types.ObjectId, ref: "DeliveryDriver", index: true },
+    vehicleNumber: { type: String, trim: true },
     status: {
       type: String,
       enum: ["COMPLETED", "CANCELLED", "REFUNDED"],

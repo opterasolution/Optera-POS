@@ -13,6 +13,7 @@ export interface IDeliveryDriver extends Document {
   active: boolean;
   driverToken: string; // Passwordless mobile access token e.g. "drv_a83f9..."
   currentTripId?: mongoose.Types.ObjectId;
+  activeVanSessionId?: mongoose.Types.ObjectId;
   totalDeliveriesCompleted: number;
   totalCodCollected: number;
   notes?: string;
@@ -45,6 +46,7 @@ const DeliveryDriverSchema = new Schema<IDeliveryDriver>(
       index: true,
     },
     currentTripId: { type: Schema.Types.ObjectId, ref: "DeliveryTrip" },
+    activeVanSessionId: { type: Schema.Types.ObjectId, ref: "VanSaleSession" },
     totalDeliveriesCompleted: { type: Number, default: 0 },
     totalCodCollected: { type: Number, default: 0 },
     notes: { type: String, trim: true },

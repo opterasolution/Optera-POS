@@ -382,6 +382,24 @@ export default function DriverMobilePortalPage() {
         </div>
       </header>
 
+      {/* Van Mobile POS Shortcut Banner */}
+      <div className="bg-blue-950/40 border-b border-blue-900/60 px-4 py-2.5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Truck className="w-4 h-4 text-blue-400" />
+          <div>
+            <span className="text-xs font-bold text-white block">Van Spot Sales & Stock</span>
+            <span className="text-[10px] text-blue-300">Sell in-transit inventory, LankaQR & WhatsApp receipts</span>
+          </div>
+        </div>
+        <a
+          href={`/delivery/driver/${token}/van-pos`}
+          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition"
+        >
+          <span>Open POS</span>
+          <ChevronRight className="w-3.5 h-3.5" />
+        </a>
+      </div>
+
       {/* Feedback Banner */}
       {statusMessage && (
         <div
