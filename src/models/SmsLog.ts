@@ -12,6 +12,7 @@ export type SmsEventType =
   | "QUOTATION_ALERT"
   | "BROADCAST"
   | "PROMOTIONAL_CAMPAIGN"
+  | "DELIVERY_DISPATCH"
   | "CUSTOM"
   | "TEST";
 

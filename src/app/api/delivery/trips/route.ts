@@ -3,7 +3,7 @@ import { connectToDatabase } from "@/lib/db";
 import { requireAuth } from "@/lib/tenant";
 import { DeliveryTrip } from "@/models/DeliveryTrip";
 import { DeliveryDriver } from "@/models/DeliveryDriver";
-import { DeliveryOrder } from "@/models/DeliveryOrder";
+import { DeliveryOrder, generateTrackingToken } from "@/models/DeliveryOrder";
 
 export async function GET(req: NextRequest) {
   try {
@@ -150,6 +150,9 @@ export async function POST(req: NextRequest) {
         ord.status = "OUT_FOR_DELIVERY";
         ord.tripId = trip._id;
         ord.dispatchedAt = new Date();
+        if (!ord.trackingToken) {
+          ord.trackingToken = generateTrackingToken();
+        }
         ord.rider = {
           name: driver.name,
           phone: driver.phone,
@@ -169,6 +172,9 @@ export async function POST(req: NextRequest) {
       // Just stamp tripId
       for (const ord of orders) {
         ord.tripId = trip._id;
+        if (!ord.trackingToken) {
+          ord.trackingToken = generateTrackingToken();
+        }
         await ord.save();
       }
     }
@@ -218,22 +224,28 @@ export async function PUT(req: NextRequest) {
 
       // Update all stops to OUT_FOR_DELIVERY
       for (const stop of trip.stops) {
-        await DeliveryOrder.findByIdAndUpdate(stop.orderId, {
-          status: "OUT_FOR_DELIVERY",
-          dispatchedAt: new Date(),
-          "rider.name": trip.driverName,
-          "rider.phone": trip.driverPhone,
-          "rider.vehicleType": trip.vehicleType,
-          "rider.vehicleNumber": trip.vehicleNumber,
-          $push: {
-            auditTrail: {
-              timestamp: new Date(),
-              status: "OUT_FOR_DELIVERY",
-              actor: context.username || "Dispatcher",
-              notes: `Dispatched on Trip ${trip.tripNumber}`,
-            },
-          },
-        });
+        const ord = await DeliveryOrder.findById(stop.orderId);
+        if (ord) {
+          ord.status = "OUT_FOR_DELIVERY";
+          ord.dispatchedAt = new Date();
+          if (!ord.trackingToken) {
+            ord.trackingToken = generateTrackingToken();
+          }
+          ord.rider = {
+            name: trip.driverName,
+            phone: trip.driverPhone,
+            vehicleType: (trip.vehicleType as any) || "BIKE",
+            vehicleNumber: trip.vehicleNumber,
+            pickupPin: ord.rider?.pickupPin || Math.floor(1000 + Math.random() * 9000).toString(),
+          };
+          ord.auditTrail.push({
+            timestamp: new Date(),
+            status: "OUT_FOR_DELIVERY",
+            actor: context.username || "Dispatcher",
+            notes: `Dispatched on Trip ${trip.tripNumber}`,
+          });
+          await ord.save();
+        }
       }
 
       return NextResponse.json({

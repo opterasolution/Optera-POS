@@ -98,6 +98,7 @@ export {
 } from "./CustomerPaymentSlip";
 export {
   DeliveryOrder,
+  generateTrackingToken,
   type IDeliveryOrder,
   type DeliveryPlatform,
   type DeliveryOrderStatus,

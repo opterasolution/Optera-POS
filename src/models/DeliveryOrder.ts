@@ -1,4 +1,9 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
+import crypto from "crypto";
+
+export function generateTrackingToken(): string {
+  return "trk_" + crypto.randomBytes(12).toString("hex");
+}
 
 export type DeliveryPlatform = "PICKME_FOOD" | "PICKME_FLASH" | "UBER_EATS" | "DIRECT_STORE";
 
@@ -116,6 +121,10 @@ export interface IDeliveryOrder extends Document {
   dispatchedAt?: Date;
   deliveredAt?: Date;
   cancelReason?: string;
+  trackingToken?: string;
+  trackingSmsStatus?: "NOT_SENT" | "SENT" | "FAILED";
+  trackingSmsSentAt?: Date;
+  estimatedDeliveryMinutes?: number;
   auditTrail: IDeliveryOrderAuditEntry[];
   createdAt: Date;
   updatedAt: Date;
@@ -237,6 +246,14 @@ const DeliveryOrderSchema = new Schema<IDeliveryOrder>(
     dispatchedAt: { type: Date },
     deliveredAt: { type: Date },
     cancelReason: { type: String, trim: true },
+    trackingToken: { type: String, unique: true, sparse: true, index: true },
+    trackingSmsStatus: {
+      type: String,
+      enum: ["NOT_SENT", "SENT", "FAILED"],
+      default: "NOT_SENT",
+    },
+    trackingSmsSentAt: { type: Date },
+    estimatedDeliveryMinutes: { type: Number, default: 30 },
     auditTrail: [
       {
         timestamp: { type: Date, default: Date.now },
@@ -253,6 +270,7 @@ const DeliveryOrderSchema = new Schema<IDeliveryOrder>(
 DeliveryOrderSchema.index({ businessId: 1, status: 1, createdAt: -1 });
 DeliveryOrderSchema.index({ businessId: 1, platform: 1, externalOrderId: 1 });
 DeliveryOrderSchema.index({ businessId: 1, "rider.pickupPin": 1 });
+DeliveryOrderSchema.index({ trackingToken: 1 });
 
 export const DeliveryOrder: Model<IDeliveryOrder> =
   mongoose.models.DeliveryOrder || mongoose.model<IDeliveryOrder>("DeliveryOrder", DeliveryOrderSchema);

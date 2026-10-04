@@ -17,6 +17,8 @@ export const DEFAULT_SMS_TEMPLATES = {
     "Dear {customerName}, quotation {quoteNumber} for Rs. {amount} is ready at {storeName}. Valid until {validUntil}. View details: {receiptUrl}. Thank you!",
   quotationAlert:
     "Dear {customerName}, quotation {ref} for Rs. {amount} is ready at {storeName}. Valid until {dueDate}. View details: {receiptUrl}. Thank you!",
+  deliveryDispatch:
+    "Dear {customerName}, your order {orderNumber} from {storeName} is on the way with driver {driverName} ({vehicleNumber})! Track live: {trackingUrl}",
 };
 
 /**
