@@ -25,8 +25,11 @@ import {
   MapPin,
   Phone,
   User,
+  ClipboardList,
 } from "lucide-react";
 import StockTransferNoteReceipt, { StockTransferData } from "@/components/receipts/StockTransferNoteReceipt";
+import WarehouseBinManager from "@/components/warehouse/WarehouseBinManager";
+import PickListManager from "@/components/warehouse/PickListManager";
 import { formatSLDateTime } from "@/lib/formatters";
 
 interface Branch {
@@ -93,7 +96,9 @@ interface ProductOption {
 }
 
 export default function TransfersPage() {
-  const [activeTab, setActiveTab] = useState<"TRANSFERS" | "BRANCHES">("TRANSFERS");
+  const [activeTab, setActiveTab] = useState<
+    "TRANSFERS" | "PICK_LISTS" | "WAREHOUSE_BINS" | "BRANCHES"
+  >("TRANSFERS");
 
   // Data state
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -607,6 +612,32 @@ export default function TransfersPage() {
 
           <button
             type="button"
+            onClick={() => setActiveTab("PICK_LISTS")}
+            className={`pb-3 text-xs font-bold flex items-center gap-2 border-b-2 transition ${
+              activeTab === "PICK_LISTS"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <ClipboardList className="w-4 h-4" />
+            <span>Warehouse Pick-Lists (WMS Router)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("WAREHOUSE_BINS")}
+            className={`pb-3 text-xs font-bold flex items-center gap-2 border-b-2 transition ${
+              activeTab === "WAREHOUSE_BINS"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <Boxes className="w-4 h-4" />
+            <span>Bin Locations & Spatial Map</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab("BRANCHES")}
             className={`pb-3 text-xs font-bold flex items-center gap-2 border-b-2 transition ${
               activeTab === "BRANCHES"
@@ -621,6 +652,7 @@ export default function TransfersPage() {
             </span>
           </button>
         </div>
+
 
         {/* ================= TAB 1: STOCK TRANSFERS ================= */}
         {activeTab === "TRANSFERS" && (
@@ -792,14 +824,25 @@ export default function TransfersPage() {
 
                               {/* Dispatch Draft */}
                               {t.status === "DRAFT" && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleDispatchDraft(t._id)}
-                                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1"
-                                >
-                                  <Send className="w-3 h-3" /> Dispatch
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveTab("PICK_LISTS")}
+                                    className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg text-xs font-bold transition flex items-center gap-1 border border-amber-200"
+                                    title="Warehouse Pick List"
+                                  >
+                                    <ClipboardList className="w-3 h-3" /> Pick
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDispatchDraft(t._id)}
+                                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1"
+                                  >
+                                    <Send className="w-3 h-3" /> Dispatch
+                                  </button>
+                                </>
                               )}
+
 
                               {/* Receive Inward Shipment */}
                               {t.status === "IN_TRANSIT" && (
@@ -949,6 +992,16 @@ export default function TransfersPage() {
               ))}
             </div>
           </div>
+        )}
+
+        {/* ================= TAB 3: WAREHOUSE PICK-LISTS ================= */}
+        {activeTab === "PICK_LISTS" && (
+          <PickListManager />
+        )}
+
+        {/* ================= TAB 4: WAREHOUSE BINS & SPATIAL MAP ================= */}
+        {activeTab === "WAREHOUSE_BINS" && (
+          <WarehouseBinManager />
         )}
 
         {/* ================= MODAL: CREATE NEW TRANSFER ORDER ================= */}

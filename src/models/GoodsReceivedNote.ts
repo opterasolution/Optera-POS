@@ -30,6 +30,11 @@ export interface IGrnItem {
   mrp?: number;
   sellingPrice?: number;
   qcInspectionNotes?: string;
+  suggestedBinId?: Types.ObjectId;
+  suggestedBinCode?: string;
+  putawayBinId?: Types.ObjectId;
+  putawayBinCode?: string;
+  putawayStatus?: "PENDING" | "PUTAWAY_DONE";
 }
 
 export interface IGoodsReceivedNote extends Document {
@@ -45,6 +50,7 @@ export interface IGoodsReceivedNote extends Document {
   branchName?: string;
   status: GrnStatus;
   inspectionStatus: GrnInspectionStatus;
+  putawayStatus?: "PENDING" | "PARTIAL" | "COMPLETED";
   items: IGrnItem[];
   totalOrderedCost: number;
   totalAcceptedCost: number;
@@ -147,6 +153,29 @@ const GrnItemSchema = new Schema<IGrnItem>(
       type: String,
       trim: true,
     },
+    suggestedBinId: {
+      type: Schema.Types.ObjectId,
+      ref: "WarehouseBin",
+    },
+    suggestedBinCode: {
+      type: String,
+      trim: true,
+      uppercase: true,
+    },
+    putawayBinId: {
+      type: Schema.Types.ObjectId,
+      ref: "WarehouseBin",
+    },
+    putawayBinCode: {
+      type: String,
+      trim: true,
+      uppercase: true,
+    },
+    putawayStatus: {
+      type: String,
+      enum: ["PENDING", "PUTAWAY_DONE"],
+      default: "PENDING",
+    },
   },
   { _id: false }
 );
@@ -214,6 +243,12 @@ const GoodsReceivedNoteSchema = new Schema<IGoodsReceivedNote>(
       type: String,
       enum: ["PENDING_INSPECTION", "PASSED", "PARTIALLY_ACCEPTED", "REJECTED"],
       default: "PASSED",
+      index: true,
+    },
+    putawayStatus: {
+      type: String,
+      enum: ["PENDING", "PARTIAL", "COMPLETED"],
+      default: "PENDING",
       index: true,
     },
     items: {

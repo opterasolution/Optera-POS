@@ -6,12 +6,16 @@ export interface IStockTransferItem {
   productId: Types.ObjectId;
   name: string;
   sku?: string;
+  barcode?: string;
   unit: string;
   quantitySent: number;
   quantityReceived?: number;
   unitCost?: number;
+  batchNumber?: string;
+  expiryDate?: Date;
   notes?: string;
 }
+
 
 export interface IStockTransfer extends Document {
   businessId: Types.ObjectId;
@@ -33,6 +37,8 @@ export interface IStockTransfer extends Document {
   cancellationReason?: string;
   carrierName?: string; // e.g. "Store Van WP-CAB-1234", "PromptX Courier"
   trackingReference?: string;
+  pickListId?: Types.ObjectId;
+  pickListNumber?: string;
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -169,6 +175,15 @@ const StockTransferSchema = new Schema<IStockTransfer>(
     trackingReference: {
       type: String,
       trim: true,
+    },
+    pickListId: {
+      type: Schema.Types.ObjectId,
+      ref: "PickList",
+    },
+    pickListNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
     },
     notes: {
       type: String,

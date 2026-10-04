@@ -212,6 +212,12 @@ export default function PurchasesPage() {
   const [grnSearchQuery, setGrnSearchQuery] = useState("");
   const [viewingGrnReceipt, setViewingGrnReceipt] = useState<GoodsReceivedNoteData | null>(null);
 
+  // Warehouse Putaway Assistant Modal State
+  const [putawayGrn, setPutawayGrn] = useState<GoodsReceivedNoteData | null>(null);
+  const [putawaySuggestions, setPutawaySuggestions] = useState<any[]>([]);
+  const [loadingPutawaySuggestions, setLoadingPutawaySuggestions] = useState(false);
+  const [submittingPutawayConfirm, setSubmittingPutawayConfirm] = useState(false);
+
   // Receive GRN Modal State
   const [receivingPO, setReceivingPO] = useState<PurchaseOrder | null>(null);
   const [dockItems, setDockItems] = useState<DockInspectionItemInput[]>([]);
@@ -636,6 +642,90 @@ export default function PurchasesPage() {
       }
     } catch (err: any) {
       alert(err.message || "Network error.");
+    }
+  };
+
+  // Open Putaway Modal & Fetch Recommended Bins
+  const handleOpenPutawayModal = async (grn: GoodsReceivedNoteData) => {
+    setPutawayGrn(grn);
+    setLoadingPutawaySuggestions(true);
+    try {
+      const res = await fetch("/api/warehouse/putaway/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grnId: grn._id }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPutawaySuggestions(data.suggestions || []);
+      }
+    } catch (err) {
+      console.error("Failed to load putaway suggestions", err);
+    } finally {
+      setLoadingPutawaySuggestions(false);
+    }
+  };
+
+  // Confirm and commit Putaway allocations to physical bins
+  const handleConfirmPutaway = async () => {
+    if (!putawayGrn) return;
+    setSubmittingPutawayConfirm(true);
+    try {
+      const assignments: any[] = [];
+      for (const s of putawaySuggestions) {
+        if (s.acceptedQuantity > 0 && s.suggestedAcceptedBin) {
+          assignments.push({
+            itemId: s.itemId,
+            productId: s.productId,
+            productName: s.productName,
+            sku: s.sku,
+            unit: s.unit,
+            binId: s.suggestedAcceptedBin._id,
+            quantity: s.acceptedQuantity,
+            batchNumber: s.batchNumber,
+            expiryDate: s.expiryDate,
+          });
+        }
+        if (s.rejectedQuantity > 0 && s.suggestedQuarantineBin) {
+          assignments.push({
+            itemId: s.itemId,
+            productId: s.productId,
+            productName: s.productName,
+            sku: s.sku,
+            unit: s.unit,
+            binId: s.suggestedQuarantineBin._id,
+            quantity: s.rejectedQuantity,
+            batchNumber: s.batchNumber,
+            expiryDate: s.expiryDate,
+            isQuarantine: true,
+          });
+        }
+      }
+
+      const res = await fetch("/api/warehouse/putaway/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grnId: putawayGrn._id,
+          assignments,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({
+          type: "success",
+          text: data.message || "Dock putaway recorded! Bin inventory updated.",
+        });
+        setPutawayGrn(null);
+        loadGrns();
+      } else {
+        alert(data.error || "Failed to confirm putaway.");
+      }
+    } catch (err: any) {
+      alert(err.message || "Error confirming putaway.");
+    } finally {
+      setSubmittingPutawayConfirm(false);
     }
   };
 
@@ -1411,6 +1501,21 @@ export default function PurchasesPage() {
                               >
                                 <Printer className="w-3.5 h-3.5" />
                               </button>
+                              {!isDraft && grn.status === "CONFIRMED" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenPutawayModal(grn)}
+                                  className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition ${
+                                    grn.putawayStatus === "COMPLETED"
+                                      ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                      : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
+                                  }`}
+                                  title="Warehouse Dock Putaway Assistant"
+                                >
+                                  <Boxes className="w-3.5 h-3.5" />
+                                  <span>{grn.putawayStatus === "COMPLETED" ? "Putaway Done" : "Putaway"}</span>
+                                </button>
+                              )}
                               {isDraft && (
                                 <>
                                   <button
@@ -3262,7 +3367,179 @@ export default function PurchasesPage() {
             onClose={() => setSharingSupplierPortal(null)}
           />
         )}
+
+        {/* ================= MODAL: WAREHOUSE DOCK PUTAWAY ASSISTANT ================= */}
+        {putawayGrn && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95 max-h-[92vh] flex flex-col">
+              <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                    <Boxes className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-black text-slate-900">
+                        Dock Putaway Assistant
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-800 font-mono text-[11px] font-bold border border-indigo-200">
+                        {putawayGrn.grnNumber}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Vendor: {putawayGrn.supplierName} &bull; PO: {putawayGrn.poNumber} &bull; Facility:{" "}
+                      {putawayGrn.branchName || "Main Central Warehouse"}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPutawayGrn(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-xl hover:bg-slate-100 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {loadingPutawaySuggestions ? (
+                <div className="py-16 text-center text-slate-400">
+                  <Sparkles className="w-7 h-7 animate-spin mx-auto mb-2 text-indigo-600" />
+                  <div className="font-bold text-slate-700 text-xs">
+                    Analyzing Warehouse Spatial Layout...
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Matching pick-face capacity, FIFO batch ordering, and defect quarantine zones.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto space-y-4 py-3">
+                  <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-2xl text-xs text-indigo-900 flex items-center justify-between">
+                    <div>
+                      <span className="font-bold block">Automated Spatial Putaway Routing</span>
+                      <span className="text-[11px] text-indigo-700">
+                        Accepted goods are mapped to ground pick-faces or nearest overstock. Quarantined defects are isolated in Zone Q.
+                      </span>
+                    </div>
+                    <span className="font-bold font-mono text-indigo-800 text-xs">
+                      {putawaySuggestions.length} Items Evaluated
+                    </span>
+                  </div>
+
+                  <div className="border border-slate-200 rounded-2xl overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-[10px] uppercase font-bold text-slate-600 border-b border-slate-200">
+                        <tr>
+                          <th className="py-2.5 px-3">Item Description</th>
+                          <th className="py-2.5 px-3">Batch & Expiry</th>
+                          <th className="py-2.5 px-3 text-right">Accepted Qty</th>
+                          <th className="py-2.5 px-3">Suggested Putaway Bin</th>
+                          <th className="py-2.5 px-3 text-right">Defects / Quarantine</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium">
+                        {putawaySuggestions.map((s, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50/70 transition">
+                            <td className="py-3 px-3">
+                              <div className="font-bold text-slate-900">{s.productName}</div>
+                              {s.sku && (
+                                <span className="text-[10px] text-slate-500 font-mono">
+                                  SKU: {s.sku}
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="py-3 px-3 text-[11px] font-mono text-slate-600">
+                              {s.batchNumber || "—"}{" "}
+                              {s.expiryDate && (
+                                <span className="text-[10px] text-slate-400 block">
+                                  Exp: {new Date(s.expiryDate).toLocaleDateString()}
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="py-3 px-3 text-right font-mono font-bold text-slate-900">
+                              {s.acceptedQuantity} {s.unit}
+                            </td>
+
+                            <td className="py-3 px-3">
+                              {s.suggestedAcceptedBin ? (
+                                <div className="space-y-0.5">
+                                  <span className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-900 font-mono font-bold text-[11px] border border-blue-200 inline-block">
+                                    {s.suggestedAcceptedBin.binCode}
+                                  </span>
+                                  <div className="text-[10px] text-slate-500 font-sans">
+                                    {s.suggestedAcceptedBin.binType === "PRIMARY_PICK"
+                                      ? "Primary Pick Face"
+                                      : "Bulk Overstock Rack"}{" "}
+                                    &bull; Aisle {s.suggestedAcceptedBin.aisle}
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 italic text-[11px]">No bin needed</span>
+                              )}
+                            </td>
+
+                            <td className="py-3 px-3 text-right">
+                              {s.rejectedQuantity > 0 ? (
+                                <div className="space-y-0.5">
+                                  <span className="font-mono font-bold text-rose-700 block">
+                                    {s.rejectedQuantity} {s.unit}
+                                  </span>
+                                  {s.suggestedQuarantineBin && (
+                                    <span className="px-2 py-0.5 rounded-md bg-purple-100 text-purple-900 font-mono font-bold text-[10px] border border-purple-200 inline-block">
+                                      {s.suggestedQuarantineBin.binCode} (Zone Q)
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-slate-400">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-[11px] text-slate-500">
+                  Confirming updates physical bin stock & marks items as PUTAWAY_DONE.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPutawayGrn(null)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmPutaway}
+                    disabled={submittingPutawayConfirm || loadingPutawaySuggestions}
+                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5"
+                  >
+                    {submittingPutawayConfirm ? (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                        <span>Committing Putaway...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Confirm & Commit Putaway</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
     </AppLayout>
   );
 }

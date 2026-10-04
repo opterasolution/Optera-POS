@@ -57,8 +57,10 @@ export interface GoodsReceivedNoteData {
   inspectedBy?: string;
   confirmedBy?: string;
   confirmedAt?: string | Date;
+  putawayStatus?: "PENDING" | "PARTIAL" | "COMPLETED";
   createdAt: string | Date;
 }
+
 
 export interface GoodsReceivedNoteReceiptProps {
   business: {
