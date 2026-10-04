@@ -38,6 +38,8 @@ import {
   ArrowRightLeft,
   TrendingDown,
   Info,
+  Scale,
+  Cpu,
 } from "lucide-react";
 import { formatCurrency, isValidSLPhone } from "@/lib/formatters";
 import SubscriptionInvoiceReceipt, {
@@ -48,6 +50,8 @@ import {
   formatForeignCurrency,
   applyMerchantBuffer,
 } from "@/lib/currency";
+import { generateScaleBarcode } from "@/lib/hardware/barcode-scale";
+import ScaleBarcodeSvg from "@/components/labels/ScaleBarcodeSvg";
 
 interface RegisterItem {
   _id: string;
@@ -67,8 +71,29 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Tab State: profile | staff | registers | subscription | security | audit | currency
-  const [activeTab, setActiveTab] = useState<"profile" | "staff" | "registers" | "subscription" | "security" | "audit" | "currency">("profile");
+  // Tab State: profile | staff | registers | subscription | security | audit | currency | hardware
+  const [activeTab, setActiveTab] = useState<"profile" | "staff" | "registers" | "subscription" | "security" | "audit" | "currency" | "hardware">("profile");
+
+  // Hardware Weighing Scale & Variable Barcode Settings State
+  const [hardwareScaleSettings, setHardwareScaleSettings] = useState({
+    weighingScale: {
+      enabled: true,
+      scaleModel: "CAS_PD_II",
+      baudRate: 9600,
+      autoTare: true,
+      defaultTareWeightGrams: 5,
+    },
+    variableWeightBarcodes: {
+      enabled: true,
+      weightPrefixes: ["21", "20", "02"],
+      pricePrefixes: ["28", "29"],
+      defaultUnit: "kg",
+    },
+  });
+  const [savingHardware, setSavingHardware] = useState(false);
+  const [seedingProduce, setSeedingProduce] = useState(false);
+  const [testPlu, setTestPlu] = useState("101");
+  const [testWeightKg, setTestWeightKg] = useState(1.25);
 
   // Multi-Currency & Central Bank of Sri Lanka (CBSL) Exchange Engine State
   const [currencySettings, setCurrencySettings] = useState<{
@@ -334,12 +359,75 @@ export default function SettingsPage() {
       }
     }
 
+    async function loadHardware() {
+      try {
+        const res = await fetch("/api/hardware/scale/settings");
+        const data = await res.json();
+        if (data.success) {
+          setHardwareScaleSettings({
+            weighingScale: data.weighingScale,
+            variableWeightBarcodes: data.variableWeightBarcodes,
+          });
+        }
+      } catch (err) {
+        console.error("Failed to load hardware settings", err);
+      }
+    }
+
     loadSettings();
     loadStaff();
     loadInvoices();
     loadRegisters();
     loadCurrencies();
+    loadHardware();
   }, []);
+
+  const handleSaveHardwareSettings = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setSavingHardware(true);
+    setStatusMessage(null);
+    try {
+      const res = await fetch("/api/hardware/scale/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(hardwareScaleSettings),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({
+          type: "success",
+          text: "Digital scale & barcode hardware settings saved successfully!",
+        });
+      } else {
+        setStatusMessage({ type: "error", text: data.error || "Failed to save scale settings." });
+      }
+    } catch {
+      setStatusMessage({ type: "error", text: "Network error saving scale settings." });
+    } finally {
+      setSavingHardware(false);
+    }
+  };
+
+  const handleSeedProduceCatalog = async () => {
+    setSeedingProduce(true);
+    setStatusMessage(null);
+    try {
+      const res = await fetch("/api/hardware/scale/seed-produce", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({
+          type: "success",
+          text: data.message || "Produce catalog seeded with PLU 101-109 items!",
+        });
+      } else {
+        setStatusMessage({ type: "error", text: data.error || "Failed to seed produce items." });
+      }
+    } catch {
+      setStatusMessage({ type: "error", text: "Network error seeding produce items." });
+    } finally {
+      setSeedingProduce(false);
+    }
+  };
 
   const handleSyncRates = async () => {
     setSyncingRates(true);
@@ -791,6 +879,38 @@ export default function SettingsPage() {
                 <Phone className="w-3.5 h-3.5 text-blue-400" /> Platform Support
               </a>
             )}
+
+            {activeTab === "hardware" && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSeedProduceCatalog}
+                  disabled={seedingProduce}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all shadow-sm disabled:opacity-50"
+                >
+                  {seedingProduce ? (
+                    <RefreshCw className="w-4 h-4 animate-spin text-slate-500" />
+                  ) : (
+                    <Package className="w-4 h-4 text-emerald-600" />
+                  )}
+                  <span>Seed Produce Items</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveHardwareSettings}
+                  disabled={savingHardware}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold transition-all shadow-sm disabled:opacity-50"
+                >
+                  {savingHardware ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" /> Save Scale Settings
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -817,6 +937,17 @@ export default function SettingsPage() {
             }`}
           >
             <Globe className="w-4 h-4" /> Multi-Currency & FX Rates
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("hardware")}
+            className={`pb-3 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
+              activeTab === "hardware"
+                ? "border-emerald-600 text-emerald-600 font-bold"
+                : "border-transparent text-slate-500 hover:text-slate-900"
+            }`}
+          >
+            <Scale className="w-4 h-4" /> Scales & Barcodes
           </button>
           <button
             type="button"
@@ -2811,6 +2942,450 @@ export default function SettingsPage() {
                 <p className="text-[11px] text-amber-800 leading-normal">
                   When cashiers accept foreign notes (e.g. $50 USD or €20 EUR), the foreign banknotes are physically retained in the cash drawer and change is given in Sri Lankan Rupees (LKR). At the end of each shift, the X/Z-Report will itemize foreign banknotes separately from LKR cash float.
                 </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Digital Scales & GS1 Barcodes Settings Tab */}
+        {activeTab === "hardware" && (
+          <div className="space-y-6 animate-in fade-in duration-200">
+            {/* Header / Intro Card */}
+            <div className="p-6 bg-gradient-to-r from-emerald-900 to-teal-900 text-white rounded-3xl shadow-lg relative overflow-hidden">
+              <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-xs font-semibold">
+                    <Scale className="w-3.5 h-3.5" /> Retail Supermarket Hardware Engine
+                  </div>
+                  <h2 className="text-xl font-bold tracking-tight">
+                    Digital Weighing Scales & Variable Barcode Architecture
+                  </h2>
+                  <p className="text-xs text-emerald-100/80 max-w-2xl leading-relaxed">
+                    Direct Web Serial RS-232 / USB scale integration with live weight streaming, auto-tare calibration, and GS1 variable-measure barcode decoding (Price & Weight embedded EAN-13) for fresh produce, deli, and meat packaging.
+                  </p>
+                </div>
+                <div className="flex flex-col sm:flex-row items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleSeedProduceCatalog}
+                    disabled={seedingProduce}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-sm transition disabled:opacity-50"
+                  >
+                    {seedingProduce ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Package className="w-4 h-4" />
+                    )}
+                    <span>Seed Produce (PLUs 101–109)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveHardwareSettings}
+                    disabled={savingHardware}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-white text-emerald-900 hover:bg-emerald-50 rounded-xl text-xs font-bold shadow-md transition disabled:opacity-50"
+                  >
+                    {savingHardware ? (
+                      <RefreshCw className="w-4 h-4 animate-spin text-emerald-900" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    <span>Save Scale Config</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Web Serial Scale Driver Card */}
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                      <Cpu className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">Web Serial Scale Protocol</h3>
+                      <p className="text-xs text-slate-500">Physical RS-232 / USB scale communication</p>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={hardwareScaleSettings.weighingScale.enabled}
+                      onChange={(e) =>
+                        setHardwareScaleSettings({
+                          ...hardwareScaleSettings,
+                          weighingScale: {
+                            ...hardwareScaleSettings.weighingScale,
+                            enabled: e.target.checked,
+                          },
+                        })
+                      }
+                      className="sr-only peer"
+                    />
+                    <div className="w-10 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                  </label>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Scale Protocol / Manufacturer Model
+                    </label>
+                    <select
+                      value={hardwareScaleSettings.weighingScale.scaleModel}
+                      onChange={(e) =>
+                        setHardwareScaleSettings({
+                          ...hardwareScaleSettings,
+                          weighingScale: {
+                            ...hardwareScaleSettings.weighingScale,
+                            scaleModel: e.target.value,
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="CAS_PD_II">CAS AP-1 / PD-II / ER Plus (Standard SL Retail)</option>
+                      <option value="METTLER_TOLEDO">Mettler Toledo PS60 / 8217 (Supermarket Deli)</option>
+                      <option value="DIGI">DIGI DS-788 / SM-100 / SM-500 (Teraoka Seiko)</option>
+                      <option value="RONGTA">Rongta RLS1000 / RLS1100 (Barcode Printing Scale)</option>
+                      <option value="AVERY_BERKEL">Avery Berkel FX120 / 6720 POS Scale</option>
+                      <option value="CONTINUOUS_ASCII">Continuous Stream (Generic RS-232 / USB ASCII)</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        Baud Rate
+                      </label>
+                      <select
+                        value={hardwareScaleSettings.weighingScale.baudRate}
+                        onChange={(e) =>
+                          setHardwareScaleSettings({
+                            ...hardwareScaleSettings,
+                            weighingScale: {
+                              ...hardwareScaleSettings.weighingScale,
+                              baudRate: parseInt(e.target.value, 10) || 9600,
+                            },
+                          })
+                        }
+                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      >
+                        <option value={9600}>9600 baud (Standard)</option>
+                        <option value={4800}>4800 baud</option>
+                        <option value={2400}>2400 baud</option>
+                        <option value={19200}>19200 baud</option>
+                        <option value={38400}>38400 baud</option>
+                        <option value={115200}>115200 baud</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        Default Tare Deduction (g)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="1000"
+                        value={hardwareScaleSettings.weighingScale.defaultTareWeightGrams}
+                        onChange={(e) =>
+                          setHardwareScaleSettings({
+                            ...hardwareScaleSettings,
+                            weighingScale: {
+                              ...hardwareScaleSettings.weighingScale,
+                              defaultTareWeightGrams: parseInt(e.target.value, 10) || 0,
+                            },
+                          })
+                        }
+                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        placeholder="5g (Polythene bag)"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-100">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-bold text-slate-900 block">Automatic Tare Compensation</span>
+                      <span className="text-[11px] text-slate-500">Auto-deduct bag/tray packaging weight from raw weight</span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={hardwareScaleSettings.weighingScale.autoTare}
+                        onChange={(e) =>
+                          setHardwareScaleSettings({
+                            ...hardwareScaleSettings,
+                            weighingScale: {
+                              ...hardwareScaleSettings.weighingScale,
+                              autoTare: e.target.checked,
+                            },
+                          })
+                        }
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                    </label>
+                  </div>
+
+                  <div className="p-3 bg-emerald-50/70 border border-emerald-200/80 rounded-xl text-[11px] text-emerald-900 flex items-start gap-2.5">
+                    <Info className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold">Web Serial Driver Capabilities:</p>
+                      <p className="text-emerald-800 mt-0.5 leading-relaxed">
+                        Chrome, Edge & Opera support direct connection via USB or USB-to-RS232 FTDI cables. If no physical scale is connected, staff can switch to the interactive Scale Simulator in the POS Weighing Modal.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* GS1 Variable Barcode Settings Card */}
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-teal-100 text-teal-700 flex items-center justify-center font-bold">
+                      <Receipt className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">GS1 Variable-Measure Barcodes</h3>
+                      <p className="text-xs text-slate-500">Weight & Price embedded EAN-13 standards</p>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={hardwareScaleSettings.variableWeightBarcodes.enabled}
+                      onChange={(e) =>
+                        setHardwareScaleSettings({
+                          ...hardwareScaleSettings,
+                          variableWeightBarcodes: {
+                            ...hardwareScaleSettings.variableWeightBarcodes,
+                            enabled: e.target.checked,
+                          },
+                        })
+                      }
+                      className="sr-only peer"
+                    />
+                    <div className="w-10 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600"></div>
+                  </label>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Weight-Embedded EAN-13 Prefixes (2-digit)
+                    </label>
+                    <input
+                      type="text"
+                      value={hardwareScaleSettings.variableWeightBarcodes.weightPrefixes.join(", ")}
+                      onChange={(e) =>
+                        setHardwareScaleSettings({
+                          ...hardwareScaleSettings,
+                          variableWeightBarcodes: {
+                            ...hardwareScaleSettings.variableWeightBarcodes,
+                            weightPrefixes: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      placeholder="21, 20, 02"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Format: <span className="font-mono text-slate-700">PP-LLLLL-WWWWW-C</span> (2-digit prefix, 5-digit PLU, 5-digit weight in grams, Mod-10 checksum)
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Price-Embedded EAN-13 Prefixes (2-digit)
+                    </label>
+                    <input
+                      type="text"
+                      value={hardwareScaleSettings.variableWeightBarcodes.pricePrefixes.join(", ")}
+                      onChange={(e) =>
+                        setHardwareScaleSettings({
+                          ...hardwareScaleSettings,
+                          variableWeightBarcodes: {
+                            ...hardwareScaleSettings.variableWeightBarcodes,
+                            pricePrefixes: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      placeholder="28, 29"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Format: <span className="font-mono text-slate-700">PP-LLLLL-$$$$$-C</span> (2-digit prefix, 5-digit PLU, 5-digit price in cents/LKR, Mod-10 checksum)
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Default Unit</span>
+                      <span className="font-bold text-slate-800 uppercase font-mono">
+                        {hardwareScaleSettings.variableWeightBarcodes.defaultUnit || "kg"} (Kilograms)
+                      </span>
+                    </div>
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Checksum Algorithm</span>
+                      <span className="font-bold text-slate-800 font-mono">Modulo-10 (GS1 Spec)</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Test Barcode Generation & Vector SVG Verification */}
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                    <Search className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">GS1 Barcode Verification & Label Test</h3>
+                    <p className="text-xs text-slate-500">
+                      Real-time vector SVG rendering and Modulo-10 checksum validation
+                    </p>
+                  </div>
+                </div>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-semibold">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> EAN-13 Compliant
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Test PLU Code
+                    </label>
+                    <input
+                      type="text"
+                      value={testPlu}
+                      onChange={(e) => setTestPlu(e.target.value.replace(/\D/g, "").slice(0, 5))}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="101"
+                    />
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">e.g. 101 = Red Onions</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Test Net Weight (kg)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.01"
+                      max="50"
+                      value={testWeightKg}
+                      onChange={(e) => setTestWeightKg(parseFloat(e.target.value) || 0)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">
+                      = {Math.round(testWeightKg * 1000)} grams
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                  <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block">
+                    Decoded Barcode Structure
+                  </span>
+                  {(() => {
+                    const testBarcode = generateScaleBarcode({
+                      type: "WEIGHT",
+                      pluCode: testPlu || "101",
+                      prefix: hardwareScaleSettings.variableWeightBarcodes.weightPrefixes?.[0] || "21",
+                      weightKg: Number(testWeightKg) || 1.25,
+                    });
+                    const pfx = testBarcode.slice(0, 2);
+                    const pluPart = testBarcode.slice(2, 7);
+                    const wtPart = testBarcode.slice(7, 12);
+                    const chk = testBarcode.slice(12, 13);
+                    return (
+                      <div className="space-y-2">
+                        <div className="p-2.5 bg-white border border-slate-200 rounded-xl text-center">
+                          <span className="font-mono text-base font-bold text-slate-900 tracking-widest">
+                            <span className="text-emerald-600">{pfx}</span>
+                            <span className="text-blue-600">{pluPart}</span>
+                            <span className="text-purple-600">{wtPart}</span>
+                            <span className="text-rose-600">{chk}</span>
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5 text-[10px] text-slate-600 font-mono">
+                          <div>
+                            <span className="text-slate-400">Prefix: </span>
+                            <span className="font-bold text-emerald-600">{pfx} (Weight)</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400">PLU: </span>
+                            <span className="font-bold text-blue-600">{pluPart}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400">Weight: </span>
+                            <span className="font-bold text-purple-600">{wtPart}g</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400">Checksum: </span>
+                            <span className="font-bold text-rose-600">{chk}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <div className="flex flex-col items-center justify-center p-4 bg-slate-50 border border-slate-200 rounded-2xl text-center">
+                  <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-2">
+                    Live Vector SVG Rendering
+                  </span>
+                  <div className="p-3 bg-white border border-slate-200 rounded-xl shadow-xs">
+                    <ScaleBarcodeSvg
+                      value={generateScaleBarcode({
+                        type: "WEIGHT",
+                        pluCode: testPlu || "101",
+                        prefix: hardwareScaleSettings.variableWeightBarcodes.weightPrefixes?.[0] || "21",
+                        weightKg: Number(testWeightKg) || 1.25,
+                      })}
+                      height={54}
+                      moduleWidth={1.8}
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-2 font-mono">
+                    Scannable by 1D/2D POS Scanners
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Produce Seeding and Hardware Links Info Card */}
+            <div className="p-6 bg-slate-900 text-white rounded-3xl flex flex-col md:flex-row items-center justify-between gap-6">
+              <div className="space-y-1">
+                <h4 className="text-sm font-bold flex items-center gap-2">
+                  <Package className="w-4 h-4 text-emerald-400" />
+                  Pre-configured Produce Items (PLU 101–109)
+                </h4>
+                <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
+                  Red Onions (101), Big Onions (102), Potatoes (103), Carrots (104), Green Chillies (105), Fresh Chicken (106), Thalapath (107), Papaya (108), Bananas (109) with predefined bilingual names and tare allowances.
+                </p>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <a
+                  href="/labels"
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
+                >
+                  Thermal Label Station &rarr;
+                </a>
+                <a
+                  href="/pos"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition shadow-sm"
+                >
+                  Open POS Register &rarr;
+                </a>
               </div>
             </div>
           </div>

@@ -1174,6 +1174,7 @@ export default function POSPage() {
       const matched = products.find(
         (p) =>
           p.pluCode === parsedScale.pluCode ||
+          (p.pluCode && p.pluCode.replace(/^0+/, "") === parsedScale.normalizedPlu) ||
           p.barcode === parsedScale.pluCode ||
           p.sku?.toLowerCase() === parsedScale.pluCode.toLowerCase()
       );
@@ -4947,11 +4948,8 @@ export default function POSPage() {
             setIsWeighModalOpen(false);
             setWeighModalInitialProduct(null);
           }}
-          products={
-            weighModalInitialProduct
-              ? [weighModalInitialProduct, ...products.filter((p) => p._id !== weighModalInitialProduct._id)]
-              : products
-          }
+          initialProduct={weighModalInitialProduct}
+          products={products}
           onAddWeighedItem={(prod, netWeightKg) => {
             const foundProd = products.find((p) => p._id === prod._id);
             if (foundProd) {
@@ -4963,6 +4961,7 @@ export default function POSPage() {
             }
           }}
           currency={business?.currency || "LKR"}
+          businessName={business?.name || "Corner Store POS"}
         />
       </div>
     </AppLayout>

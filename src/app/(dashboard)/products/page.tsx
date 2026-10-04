@@ -17,6 +17,7 @@ import {
   Boxes,
   Sparkles,
   TrendingUp,
+  Scale,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/formatters";
 
@@ -29,9 +30,14 @@ interface Category {
 interface Product {
   _id: string;
   name: string;
+  nameSinhala?: string;
+  nameTamil?: string;
   categoryId?: { _id: string; name: string; color?: string } | string;
   sku?: string;
   barcode?: string;
+  pluCode?: string;
+  isWeighable?: boolean;
+  tareWeightGrams?: number;
   costPrice: number;
   sellingPrice: number;
   wholesalePrice?: number;
@@ -61,9 +67,14 @@ export default function ProductsPage() {
   // Product Form State
   const [productForm, setProductForm] = useState({
     name: "",
+    nameSinhala: "",
+    nameTamil: "",
     categoryId: "",
     sku: "",
     barcode: "",
+    pluCode: "",
+    isWeighable: false,
+    tareWeightGrams: 0,
     costPrice: 0,
     sellingPrice: 0,
     wholesalePrice: 0,
@@ -109,9 +120,14 @@ export default function ProductsPage() {
     setEditingProduct(p);
     setProductForm({
       name: p.name,
+      nameSinhala: p.nameSinhala || "",
+      nameTamil: p.nameTamil || "",
       categoryId: typeof p.categoryId === "object" ? p.categoryId?._id || "" : p.categoryId || "",
       sku: p.sku || "",
       barcode: p.barcode || "",
+      pluCode: p.pluCode || "",
+      isWeighable: Boolean(p.isWeighable),
+      tareWeightGrams: p.tareWeightGrams || 0,
       costPrice: p.costPrice,
       sellingPrice: p.sellingPrice,
       wholesalePrice: p.wholesalePrice || 0,
@@ -128,9 +144,14 @@ export default function ProductsPage() {
     setEditingProduct(null);
     setProductForm({
       name: "",
+      nameSinhala: "",
+      nameTamil: "",
       categoryId: categories[0]?._id || "",
       sku: "",
       barcode: "",
+      pluCode: "",
+      isWeighable: false,
+      tareWeightGrams: 0,
       costPrice: 0,
       sellingPrice: 0,
       wholesalePrice: 0,
@@ -376,7 +397,19 @@ export default function ProductsPage() {
                     return (
                       <tr key={p._id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="py-3 px-4">
-                          <div className="font-semibold text-slate-900">{p.name}</div>
+                          <div className="font-semibold text-slate-900 flex items-center gap-1.5">
+                            <span>{p.name}</span>
+                            {p.isWeighable && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200 flex items-center gap-0.5">
+                                <Scale className="w-2.5 h-2.5" /> Scale
+                              </span>
+                            )}
+                          </div>
+                          {(p.nameSinhala || p.nameTamil) && (
+                            <div className="text-[10px] text-slate-400">
+                              {p.nameSinhala} {p.nameTamil ? `• ${p.nameTamil}` : ""}
+                            </div>
+                          )}
                           <div className="text-[10px] text-slate-400 capitalize">Unit: {p.unit}</div>
                         </td>
                         <td className="py-3 px-4">
@@ -392,6 +425,11 @@ export default function ProductsPage() {
                             </div>
                           ) : (
                             <span className="text-slate-300">No Barcode</span>
+                          )}
+                          {p.pluCode && (
+                            <div className="text-[10px] font-mono text-teal-600 font-bold">
+                              PLU #{p.pluCode} {p.tareWeightGrams ? `(Tare: ${p.tareWeightGrams}g)` : ""}
+                            </div>
                           )}
                           {p.sku && <div className="text-[10px] text-slate-400">SKU: {p.sku}</div>}
                         </td>
@@ -657,18 +695,101 @@ export default function ProductsPage() {
                   </div>
                 </div>
 
+                {/* Electronic Weighing Scale & Produce Settings */}
+                <div className="p-3.5 bg-teal-50/50 border border-teal-200 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={productForm.isWeighable}
+                        onChange={(e) => {
+                          const isW = e.target.checked;
+                          setProductForm({
+                            ...productForm,
+                            isWeighable: isW,
+                            unit: isW ? "kg" : productForm.unit === "kg" ? "pcs" : productForm.unit,
+                          });
+                        }}
+                        className="rounded text-teal-600 focus:ring-teal-500 w-4 h-4"
+                      />
+                      <span className="text-xs font-bold text-teal-950 flex items-center gap-1.5">
+                        <Scale className="w-3.5 h-3.5 text-teal-600" />
+                        Weighable Item (Digital Scale & Loose Produce)
+                      </span>
+                    </label>
+                    <span className="text-[10px] text-teal-600 font-mono font-bold">
+                      {productForm.isWeighable ? "SCALE ACTIVE" : "STANDARD ITEM"}
+                    </span>
+                  </div>
+
+                  {productForm.isWeighable && (
+                    <div className="grid grid-cols-3 gap-2.5 pt-2 border-t border-teal-200/60">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Scale PLU Code #
+                        </label>
+                        <input
+                          type="text"
+                          value={productForm.pluCode}
+                          onChange={(e) => setProductForm({ ...productForm, pluCode: e.target.value.trim() })}
+                          placeholder="e.g. 101"
+                          className="w-full px-2.5 py-1.5 text-xs border border-teal-300 rounded-lg font-mono text-teal-900 bg-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Tare Weight (Grams)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={productForm.tareWeightGrams}
+                          onChange={(e) =>
+                            setProductForm({ ...productForm, tareWeightGrams: Math.max(0, parseInt(e.target.value) || 0) })
+                          }
+                          className="w-full px-2.5 py-1.5 text-xs border border-teal-300 rounded-lg font-mono text-teal-900 bg-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Unit of Measure
+                        </label>
+                        <select
+                          value={productForm.unit}
+                          onChange={(e) => setProductForm({ ...productForm, unit: e.target.value })}
+                          className="w-full px-2.5 py-1.5 text-xs border border-teal-300 rounded-lg text-teal-900 bg-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                        >
+                          <option value="kg">kg (Kilograms)</option>
+                          <option value="g">g (Grams)</option>
+                          <option value="packet">packet</option>
+                          <option value="pcs">pcs</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Current Stock Qty
+                      Current Stock Qty {productForm.isWeighable ? "(kg)" : ""}
                     </label>
                     <input
                       type="number"
-                      step="1"
+                      step={productForm.isWeighable ? "0.05" : "1"}
+                      min="0"
                       required
                       value={productForm.stockQuantity}
                       onChange={(e) =>
-                        setProductForm({ ...productForm, stockQuantity: parseInt(e.target.value) || 0 })
+                        setProductForm({
+                          ...productForm,
+                          stockQuantity: productForm.isWeighable
+                            ? parseFloat(e.target.value) || 0
+                            : parseInt(e.target.value) || 0,
+                        })
                       }
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono"
                     />
@@ -680,12 +801,17 @@ export default function ProductsPage() {
                     </label>
                     <input
                       type="number"
-                      step="1"
+                      step={productForm.isWeighable ? "0.5" : "1"}
                       min="0"
                       required
                       value={productForm.lowStockThreshold}
                       onChange={(e) =>
-                        setProductForm({ ...productForm, lowStockThreshold: parseInt(e.target.value) || 0 })
+                        setProductForm({
+                          ...productForm,
+                          lowStockThreshold: productForm.isWeighable
+                            ? parseFloat(e.target.value) || 0
+                            : parseInt(e.target.value) || 0,
+                        })
                       }
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono"
                     />

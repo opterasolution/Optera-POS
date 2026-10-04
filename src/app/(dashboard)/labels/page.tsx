@@ -19,25 +19,34 @@ import {
   Layers,
   ShoppingBag,
   Sparkles,
+  Scale,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/formatters";
 import ShelfEdgeLabel from "@/components/labels/ShelfEdgeLabel";
 import ProductBarcodeSticker from "@/components/labels/ProductBarcodeSticker";
 import CompactSticker from "@/components/labels/CompactSticker";
 import A4LabelSheet, { A4LabelItem } from "@/components/labels/A4LabelSheet";
+import ScaleBarcodeSticker from "@/components/labels/ScaleBarcodeSticker";
+import { generateScaleBarcode } from "@/lib/hardware/barcode-scale";
 
 interface QueueItem {
   productId: string;
   name: string;
+  nameSinhala?: string;
+  nameTamil?: string;
   sellingPrice: number;
   barcode?: string;
   sku?: string;
+  pluCode?: string;
+  isWeighable?: boolean;
+  tareWeightGrams?: number;
+  weightKg?: number;
   category?: string;
   unit?: string;
   printQuantity: number;
 }
 
-type LabelTemplate = "SHELF_EDGE" | "PRODUCT_STICKER" | "COMPACT" | "A4_SHEET";
+type LabelTemplate = "SHELF_EDGE" | "PRODUCT_STICKER" | "COMPACT" | "A4_SHEET" | "SCALE_STICKER";
 
 function LabelsContent() {
   const searchParams = useSearchParams();
@@ -136,14 +145,53 @@ function LabelsContent() {
         {
           productId: product._id,
           name: product.name,
+          nameSinhala: product.nameSinhala,
+          nameTamil: product.nameTamil,
           sellingPrice: product.sellingPrice,
           barcode: product.barcode,
           sku: product.sku,
+          pluCode: product.pluCode,
+          isWeighable: product.isWeighable,
+          tareWeightGrams: product.tareWeightGrams,
+          weightKg: 1.0,
           category: product.category,
           unit: product.unit,
           printQuantity: 1,
         },
       ];
+    });
+  };
+
+  // Quick populate with all weighable produce items
+  const handleLoadAllProduce = () => {
+    const produce = products.filter(
+      (p) => p.isWeighable || Boolean(p.pluCode) || p.unit?.toLowerCase().includes("kg")
+    );
+    if (produce.length === 0) {
+      alert("No weighable produce items found in catalog. Add or seed weighable products first.");
+      return;
+    }
+    const newItems: QueueItem[] = produce.map((p) => ({
+      productId: p._id,
+      name: p.name,
+      nameSinhala: p.nameSinhala,
+      nameTamil: p.nameTamil,
+      sellingPrice: p.sellingPrice,
+      barcode: p.barcode,
+      sku: p.sku,
+      pluCode: p.pluCode,
+      isWeighable: true,
+      tareWeightGrams: p.tareWeightGrams || 5,
+      weightKg: 1.0,
+      category: p.category,
+      unit: p.unit || "kg",
+      printQuantity: 2,
+    }));
+    setQueue(newItems);
+    setSelectedTemplate("SCALE_STICKER");
+    setStatusMessage({
+      type: "success",
+      text: `Loaded ${produce.length} weighable produce items into Scale Sticker queue!`,
     });
   };
 
@@ -248,7 +296,8 @@ function LabelsContent() {
               }
               .shelf-edge-label,
               .product-barcode-sticker,
-              .compact-sticker {
+              .compact-sticker,
+              .scale-barcode-sticker {
                 page-break-after: always;
                 page-break-inside: avoid;
                 margin: 0 auto !important;
@@ -300,6 +349,37 @@ function LabelsContent() {
             </div>
           )}
 
+          {selectedTemplate === "SCALE_STICKER" && (
+            <div className="space-y-1">
+              {expandedPrintItems.map((item, idx) => {
+                const weight = item.weightKg || 1.0;
+                const total = Math.round(item.sellingPrice * weight * 100) / 100;
+                const barcode = generateScaleBarcode({
+                  type: "WEIGHT",
+                  pluCode: item.pluCode || "101",
+                  weightKg: weight,
+                });
+                return (
+                  <div key={idx} className="print-label-wrapper scale-barcode-sticker py-0.5">
+                    <ScaleBarcodeSticker
+                      storeName={storeName}
+                      storePhone={business?.phone}
+                      productName={item.name}
+                      productNameSinhala={item.nameSinhala}
+                      productNameTamil={item.nameTamil}
+                      pluCode={item.pluCode}
+                      unitPrice={item.sellingPrice}
+                      netWeightKg={weight}
+                      tareGrams={item.tareWeightGrams || 5}
+                      totalPrice={total}
+                      barcode={barcode}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {selectedTemplate === "A4_SHEET" && (
             <A4LabelSheet
               items={expandedPrintItems}
@@ -329,6 +409,14 @@ function LabelsContent() {
             </div>
 
             <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button
+                onClick={handleLoadAllProduce}
+                className="flex items-center gap-2 px-3.5 py-2 text-xs sm:text-sm font-semibold text-teal-800 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/40 border border-teal-300 dark:border-teal-700 rounded-xl hover:bg-teal-100 dark:hover:bg-teal-900/40 shadow-sm transition"
+              >
+                <Scale className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                Produce Scale Stickers
+              </button>
+
               <button
                 onClick={() => setIsPoModalOpen(true)}
                 className="flex items-center gap-2 px-3.5 py-2 text-xs sm:text-sm font-semibold text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-700/50 shadow-sm transition"
@@ -495,6 +583,27 @@ function LabelsContent() {
                           </div>
                         </div>
 
+                        {/* If SCALE_STICKER: Show Net Weight adjustment */}
+                        {selectedTemplate === "SCALE_STICKER" && (
+                          <div className="flex items-center gap-1 bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800 rounded-lg px-2 py-1">
+                            <span className="text-[10px] text-teal-700 dark:text-teal-400 font-bold">Wt:</span>
+                            <input
+                              type="number"
+                              step="0.05"
+                              min="0.01"
+                              value={item.weightKg || 1.0}
+                              onChange={(e) => {
+                                const val = Math.max(0.01, parseFloat(e.target.value) || 0.1);
+                                setQueue((prev) =>
+                                  prev.map((q, i) => (i === idx ? { ...q, weightKg: val } : q))
+                                );
+                              }}
+                              className="w-14 text-center font-mono font-bold text-xs bg-white dark:bg-zinc-900 border border-teal-300 dark:border-teal-700 rounded px-1"
+                            />
+                            <span className="text-[10px] text-teal-600 dark:text-teal-400 font-bold">kg</span>
+                          </div>
+                        )}
+
                         {/* Quantity Stepper */}
                         <div className="flex items-center gap-1.5">
                           <button
@@ -566,57 +675,72 @@ function LabelsContent() {
                   Select Label Format
                 </span>
 
-                <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
                   <button
                     type="button"
                     onClick={() => setSelectedTemplate("SHELF_EDGE")}
-                    className={`p-2.5 rounded-xl border text-left transition ${
+                    className={`p-2 rounded-xl border text-left transition ${
                       selectedTemplate === "SHELF_EDGE"
                         ? "bg-blue-50 dark:bg-blue-950/40 border-blue-500 text-blue-900 dark:text-blue-300 ring-2 ring-blue-500/20"
                         : "bg-zinc-50 dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300"
                     }`}
                   >
-                    <div className="font-bold text-xs">1. Shelf-Edge Talker</div>
-                    <div className="text-[10px] text-zinc-500">80mm Gondola Price Tag</div>
+                    <div className="font-bold text-xs">1. Shelf-Edge</div>
+                    <div className="text-[10px] text-zinc-500">80mm Gondola</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setSelectedTemplate("PRODUCT_STICKER")}
-                    className={`p-2.5 rounded-xl border text-left transition ${
+                    className={`p-2 rounded-xl border text-left transition ${
                       selectedTemplate === "PRODUCT_STICKER"
                         ? "bg-blue-50 dark:bg-blue-950/40 border-blue-500 text-blue-900 dark:text-blue-300 ring-2 ring-blue-500/20"
                         : "bg-zinc-50 dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300"
                     }`}
                   >
                     <div className="font-bold text-xs">2. Product Sticker</div>
-                    <div className="text-[10px] text-zinc-500">50mm x 25mm Standard</div>
+                    <div className="text-[10px] text-zinc-500">50x25mm Standard</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setSelectedTemplate("COMPACT")}
-                    className={`p-2.5 rounded-xl border text-left transition ${
+                    className={`p-2 rounded-xl border text-left transition ${
                       selectedTemplate === "COMPACT"
                         ? "bg-blue-50 dark:bg-blue-950/40 border-blue-500 text-blue-900 dark:text-blue-300 ring-2 ring-blue-500/20"
                         : "bg-zinc-50 dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300"
                     }`}
                   >
                     <div className="font-bold text-xs">3. Compact Mini</div>
-                    <div className="text-[10px] text-zinc-500">38mm x 20mm Jewelry/Meds</div>
+                    <div className="text-[10px] text-zinc-500">38x20mm Meds</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTemplate("SCALE_STICKER")}
+                    className={`p-2 rounded-xl border text-left transition ${
+                      selectedTemplate === "SCALE_STICKER"
+                        ? "bg-teal-50 dark:bg-teal-950/40 border-teal-500 text-teal-900 dark:text-teal-300 ring-2 ring-teal-500/20 font-bold"
+                        : "bg-zinc-50 dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300"
+                    }`}
+                  >
+                    <div className="font-bold text-xs flex items-center gap-1 text-teal-600 dark:text-teal-400">
+                      <Scale className="w-3.5 h-3.5" /> 4. Scale Sticker
+                    </div>
+                    <div className="text-[10px] text-zinc-500">58x40mm Produce</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setSelectedTemplate("A4_SHEET")}
-                    className={`p-2.5 rounded-xl border text-left transition ${
+                    className={`p-2 rounded-xl border text-left transition ${
                       selectedTemplate === "A4_SHEET"
                         ? "bg-blue-50 dark:bg-blue-950/40 border-blue-500 text-blue-900 dark:text-blue-300 ring-2 ring-blue-500/20"
                         : "bg-zinc-50 dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300"
                     }`}
                   >
-                    <div className="font-bold text-xs">4. A4 Sheet (24-up)</div>
-                    <div className="text-[10px] text-zinc-500">Laser/Inkjet Paper</div>
+                    <div className="font-bold text-xs">5. A4 Sheet</div>
+                    <div className="text-[10px] text-zinc-500">24-up Laser</div>
                   </button>
                 </div>
 
@@ -682,6 +806,30 @@ function LabelsContent() {
                       }
                       if (selectedTemplate === "COMPACT") {
                         return <CompactSticker product={sampleProduct} />;
+                      }
+                      if (selectedTemplate === "SCALE_STICKER") {
+                        const weight = sampleProduct.weightKg || 1.0;
+                        const total = Math.round(sampleProduct.sellingPrice * weight * 100) / 100;
+                        const barcode = generateScaleBarcode({
+                          type: "WEIGHT",
+                          pluCode: sampleProduct.pluCode || "101",
+                          weightKg: weight,
+                        });
+                        return (
+                          <ScaleBarcodeSticker
+                            storeName={storeName}
+                            storePhone={business?.phone}
+                            productName={sampleProduct.name}
+                            productNameSinhala={sampleProduct.nameSinhala}
+                            productNameTamil={sampleProduct.nameTamil}
+                            pluCode={sampleProduct.pluCode}
+                            unitPrice={sampleProduct.sellingPrice}
+                            netWeightKg={weight}
+                            tareGrams={sampleProduct.tareWeightGrams || 5}
+                            totalPrice={total}
+                            barcode={barcode}
+                          />
+                        );
                       }
                       return (
                         <div className="scale-75 origin-top">

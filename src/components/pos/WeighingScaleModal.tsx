@@ -4,17 +4,25 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Scale,
   X,
-  RefreshCw,
   Check,
   Search,
   AlertCircle,
   Cpu,
   Minus,
   Plus,
-  ArrowRight,
-  Sparkles,
+  Zap,
+  Printer,
+  Hash,
+  CheckCircle2,
 } from "lucide-react";
-import { WebSerialScaleDriver, ScaleReading } from "@/lib/hardware/serial-scale";
+import {
+  WebSerialScaleDriver,
+  ScaleReading,
+  ScaleSimulator,
+  ScaleModel,
+} from "@/lib/hardware/serial-scale";
+import { generateScaleBarcode } from "@/lib/hardware/barcode-scale";
+import ScaleBarcodeSticker from "@/components/labels/ScaleBarcodeSticker";
 
 export interface IWeighableProduct {
   _id: string;
@@ -29,6 +37,7 @@ export interface IWeighableProduct {
   stockQuantity: number;
   isWeighable?: boolean;
   tareWeightGrams?: number;
+  category?: string;
 }
 
 interface WeighingScaleModalProps {
@@ -36,7 +45,9 @@ interface WeighingScaleModalProps {
   onClose: () => void;
   products: IWeighableProduct[];
   onAddWeighedItem: (product: IWeighableProduct, netWeightKg: number) => void;
+  initialProduct?: IWeighableProduct | null;
   currency?: string;
+  businessName?: string;
 }
 
 export default function WeighingScaleModal({
@@ -44,12 +55,14 @@ export default function WeighingScaleModal({
   onClose,
   products,
   onAddWeighedItem,
+  initialProduct = null,
   currency = "LKR",
+  businessName = "Corner Store Supermarket",
 }: WeighingScaleModalProps) {
   const [selectedProduct, setSelectedProduct] = useState<IWeighableProduct | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [manualWeightInput, setManualWeightInput] = useState<string>("0.500");
-  const [tareGrams, setTareGrams] = useState<number>(0);
+  const [tareGrams, setTareGrams] = useState<number>(5);
 
   // Serial scale state
   const [isScaleConnected, setIsScaleConnected] = useState(false);
@@ -57,7 +70,11 @@ export default function WeighingScaleModal({
   const [serialError, setSerialError] = useState<string | null>(null);
   const scaleDriverRef = useRef<WebSerialScaleDriver | null>(null);
 
-  // Filter weighable products or general produce
+  // Simulator
+  const [useSimulator, setUseSimulator] = useState(false);
+  const simulatorRef = useRef<ScaleSimulator | null>(null);
+
+  // Filter weighable products
   const weighableProducts = products.filter((p) => {
     const isWeightItem =
       p.isWeighable ||
@@ -77,10 +94,34 @@ export default function WeighingScaleModal({
     );
   });
 
-  // When a product is selected, initialize tare from product if present
+  // Initialize simulator
   useEffect(() => {
-    if (selectedProduct) {
-      setTareGrams(selectedProduct.tareWeightGrams || 0);
+    const sim = new ScaleSimulator((reading) => {
+      setScaleReading(reading);
+    });
+    simulatorRef.current = sim;
+
+    return () => {
+      if (scaleDriverRef.current) {
+        scaleDriverRef.current.disconnect();
+      }
+    };
+  }, []);
+
+  // When opened or initialProduct changes
+  useEffect(() => {
+    if (initialProduct) {
+      setSelectedProduct(initialProduct);
+      setTareGrams(initialProduct.tareWeightGrams || 5);
+    } else if (weighableProducts.length > 0 && !selectedProduct) {
+      setSelectedProduct(weighableProducts[0]);
+    }
+  }, [initialProduct, isOpen]);
+
+  // When a product is selected, initialize tare
+  useEffect(() => {
+    if (selectedProduct && selectedProduct.tareWeightGrams !== undefined) {
+      setTareGrams(selectedProduct.tareWeightGrams);
     }
   }, [selectedProduct]);
 
@@ -107,36 +148,75 @@ export default function WeighingScaleModal({
       if (success) {
         scaleDriverRef.current = driver;
         setIsScaleConnected(true);
-      } else {
-        setSerialError("Scale connection cancelled or port already in use.");
+        setUseSimulator(false);
       }
     } catch (err: any) {
       setSerialError(err.message || "Failed to connect to scale.");
     }
   };
 
-  // Disconnect scale on unmount
-  useEffect(() => {
-    return () => {
-      if (scaleDriverRef.current) {
-        scaleDriverRef.current.disconnect();
-      }
-    };
-  }, []);
+  const handleDisconnectScale = async () => {
+    if (scaleDriverRef.current) {
+      await scaleDriverRef.current.disconnect();
+      scaleDriverRef.current = null;
+    }
+    setIsScaleConnected(false);
+    setScaleReading(null);
+  };
+
+  const handleToggleSimulator = () => {
+    if (!useSimulator) {
+      if (isScaleConnected) handleDisconnectScale();
+      setUseSimulator(true);
+      simulatorRef.current?.placeWeight(0.85);
+    } else {
+      setUseSimulator(false);
+      setScaleReading(null);
+    }
+  };
+
+  const handleZeroScale = async () => {
+    if (isScaleConnected && scaleDriverRef.current) {
+      await scaleDriverRef.current.sendZero();
+    } else if (useSimulator && simulatorRef.current) {
+      simulatorRef.current.zero();
+    } else {
+      setManualWeightInput("0.000");
+    }
+  };
+
+  const handleTareScale = async () => {
+    if (isScaleConnected && scaleDriverRef.current) {
+      await scaleDriverRef.current.sendTare();
+    } else if (useSimulator && simulatorRef.current) {
+      simulatorRef.current.setTare(tareGrams);
+    }
+  };
 
   if (!isOpen) return null;
 
-  // Compute Active Net Weight
-  const rawWeightKg = isScaleConnected && scaleReading
+  // Active Weights
+  const isLiveOrSim = (isScaleConnected || useSimulator) && scaleReading;
+  const rawWeightKg = isLiveOrSim
     ? scaleReading.weightKg
     : parseFloat(manualWeightInput) || 0;
 
-  // Subtract container/packaging tare
-  const netWeightKg = Math.max(0, Math.round((rawWeightKg - (tareGrams / 1000)) * 1000) / 1000);
+  const netWeightKg = isLiveOrSim
+    ? Math.max(0, Math.round((rawWeightKg - (tareGrams / 1000)) * 1000) / 1000)
+    : Math.max(0, Math.round(rawWeightKg * 1000) / 1000);
 
-  // Compute Total
+  // Line calculations
   const unitPrice = selectedProduct?.sellingPrice || 0;
   const lineTotal = Math.round(unitPrice * netWeightKg * 100) / 100;
+
+  // Generated EAN-13
+  const generatedBarcode = selectedProduct
+    ? generateScaleBarcode({
+        type: "WEIGHT",
+        pluCode: selectedProduct.pluCode || "101",
+        weightKg: netWeightKg,
+      })
+    : "2100000000000";
 
   const handleConfirmAdd = () => {
     if (!selectedProduct) return;
@@ -149,10 +229,10 @@ export default function WeighingScaleModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden text-slate-100 animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden text-slate-100 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-800 bg-slate-800/60 flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-teal-500 to-emerald-400 flex items-center justify-center text-slate-950 font-bold shadow-md shadow-teal-500/20">
               <Scale className="w-5 h-5 text-white" />
@@ -160,21 +240,35 @@ export default function WeighingScaleModal({
             <div>
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
                 Weighing Scale Station
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-400 border border-teal-500/30">
-                  CAS / Toledo / Avery
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-400 border border-teal-500/30">
+                  Live POS Integration
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
-                Live RS-232 / USB scale streaming & produce weighing engine
+                Direct RS-232 / USB scale streaming with tare deduction & EAN-13 variable barcodes
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleToggleSimulator}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition ${
+                useSimulator
+                  ? "bg-purple-600 text-white shadow-md shadow-purple-900/30"
+                  : "bg-slate-800 text-slate-400 hover:text-white"
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5" />
+              {useSimulator ? "Simulator ON" : "Simulate"}
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Modal Body */}
@@ -195,7 +289,7 @@ export default function WeighingScaleModal({
             </div>
 
             {/* List */}
-            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5 max-h-[380px]">
               {weighableProducts.length === 0 ? (
                 <div className="text-center py-10 text-slate-500 text-sm">
                   No weighable products found. Check product "isWeighable" or unit="kg".
@@ -218,7 +312,7 @@ export default function WeighingScaleModal({
                           <span>{p.name}</span>
                           {p.pluCode && (
                             <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-teal-300 border border-teal-500/30">
-                              PLU: {p.pluCode}
+                              PLU: #{p.pluCode}
                             </span>
                           )}
                         </div>
@@ -233,7 +327,7 @@ export default function WeighingScaleModal({
                       </div>
 
                       <div className="text-right">
-                        <div className="font-bold text-teal-400 text-sm">
+                        <div className="font-bold text-teal-400 text-sm font-mono">
                           {currency} {p.sellingPrice.toFixed(2)}
                         </div>
                         <div className="text-[11px] text-slate-500">per {p.unit || "kg"}</div>
@@ -246,23 +340,31 @@ export default function WeighingScaleModal({
           </div>
 
           {/* Right: Scale & Weight Meter */}
-          <div className="w-full md:w-1/2 flex flex-col justify-between space-y-4">
+          <div className="w-full md:w-1/2 flex flex-col justify-between space-y-3">
             {/* Scale Connection status card */}
-            <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-2xl flex items-center justify-between">
+            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-2xl flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <div
                   className={`w-3 h-3 rounded-full ${
-                    isScaleConnected ? "bg-emerald-400 animate-pulse" : "bg-slate-600"
+                    isScaleConnected || useSimulator
+                      ? "bg-emerald-400 animate-pulse"
+                      : "bg-slate-600"
                   }`}
                 />
                 <div>
                   <div className="text-sm font-semibold text-white">
-                    {isScaleConnected ? "Electronic Scale Live" : "Serial Scale Disconnected"}
+                    {isScaleConnected
+                      ? "Electronic Scale Connected"
+                      : useSimulator
+                      ? "Scale Simulator Running"
+                      : "Scale Disconnected"}
                   </div>
                   <div className="text-xs text-slate-400">
                     {isScaleConnected
-                      ? "CAS / Toledo / Avery @ 9600 baud"
-                      : "Use live USB/Serial or manual net entry"}
+                      ? "CAS / Toledo / Avery via RS-232"
+                      : useSimulator
+                      ? "Interactive Platter Test Mode"
+                      : "Connect USB/Serial port or enter manually"}
                   </div>
                 </div>
               </div>
@@ -276,11 +378,7 @@ export default function WeighingScaleModal({
                 </button>
               ) : (
                 <button
-                  onClick={() => {
-                    scaleDriverRef.current?.disconnect();
-                    setIsScaleConnected(false);
-                    setScaleReading(null);
-                  }}
+                  onClick={handleDisconnectScale}
                   className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
                 >
                   Disconnect
@@ -289,113 +387,163 @@ export default function WeighingScaleModal({
             </div>
 
             {serialError && (
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
+              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
                 <span>{serialError}</span>
               </div>
             )}
 
             {/* Big LED Scale Weight Display */}
-            <div className="p-6 bg-slate-950 border-2 border-teal-500/40 rounded-2xl shadow-inner text-center relative overflow-hidden">
-              <span className="text-[11px] font-bold uppercase tracking-widest text-teal-400">
-                {isScaleConnected ? "Live Scale Reading" : "Net Weight (KG)"}
-              </span>
+            <div className="p-5 bg-black border-2 border-teal-500/50 rounded-2xl shadow-inner text-center relative overflow-hidden">
+              <div className="flex items-center justify-between text-[11px] font-bold">
+                <span className="uppercase tracking-widest text-teal-400">
+                  {isLiveOrSim ? "Live Scale Platter" : "Net Weight (KG)"}
+                </span>
 
-              <div className="text-6xl font-black font-mono tracking-tight text-white my-2 flex items-center justify-center gap-2">
-                <span>{netWeightKg.toFixed(3)}</span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[9px] border font-bold ${
+                    isLiveOrSim && scaleReading?.isStable
+                      ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                      : isLiveOrSim
+                      ? "bg-amber-500/20 text-amber-400 border-amber-500/40 animate-pulse"
+                      : "bg-slate-800 text-slate-400 border-slate-700"
+                  }`}
+                >
+                  {isLiveOrSim
+                    ? scaleReading?.isStable
+                      ? "STABLE"
+                      : "MOTION"
+                    : "MANUAL"}
+                </span>
+              </div>
+
+              <div className="text-5xl font-black font-mono tracking-tight text-white my-2 flex items-center justify-center gap-2">
+                <span className="tabular-nums">{netWeightKg.toFixed(3)}</span>
                 <span className="text-2xl font-bold text-teal-400">kg</span>
               </div>
 
-              {/* Status / Stable pill */}
-              <div className="flex items-center justify-center gap-4 text-xs mt-2">
-                {isScaleConnected && scaleReading ? (
-                  <span
-                    className={`px-2.5 py-0.5 rounded-full font-semibold border ${
-                      scaleReading.isStable
-                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
-                        : "bg-amber-500/20 text-amber-400 border-amber-500/30"
-                    }`}
-                  >
-                    {scaleReading.isStable ? "STABLE" : "MOTION / WEIGHING"}
-                  </span>
-                ) : (
-                  <span className="text-slate-500">Manual Entry Mode</span>
-                )}
-
-                {tareGrams > 0 && (
-                  <span className="px-2.5 py-0.5 rounded-full font-semibold bg-slate-800 text-slate-300 border border-slate-700">
-                    Tare: -{tareGrams}g
-                  </span>
-                )}
+              {/* Sub-weights */}
+              <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-900 text-center font-mono text-[10px]">
+                <div>
+                  <span className="text-slate-500 block uppercase">Gross</span>
+                  <span className="text-slate-300 font-bold">{rawWeightKg.toFixed(3)} kg</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block uppercase">Tare</span>
+                  <span className="text-amber-400 font-bold">-{tareGrams} g</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block uppercase">Net Wt</span>
+                  <span className="text-emerald-400 font-bold">{netWeightKg.toFixed(3)} kg</span>
+                </div>
               </div>
             </div>
 
-            {/* Manual Weight / Tare Adjustment Controls */}
-            <div className="grid grid-cols-2 gap-3">
-              {/* Tare Box */}
-              <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
-                <label className="text-[11px] font-medium text-slate-400 block mb-1">
-                  Packaging Tare (Grams)
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min="0"
-                    step="5"
-                    value={tareGrams}
-                    onChange={(e) => setTareGrams(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-sm font-mono text-white focus:outline-none focus:border-teal-500"
-                  />
+            {/* Scale Control / Tare Presets */}
+            <div className="p-2.5 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex gap-1.5">
                   <button
-                    onClick={() => setTareGrams(0)}
-                    className="text-xs text-slate-400 hover:text-white px-2 py-1.5 rounded bg-slate-800"
+                    onClick={handleZeroScale}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold"
                   >
-                    Zero
+                    Zero (Z)
                   </button>
+                  <button
+                    onClick={handleTareScale}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-bold"
+                  >
+                    Tare (T)
+                  </button>
+                </div>
+
+                {/* Quick Tare Presets */}
+                <div className="flex items-center gap-1 text-[10px]">
+                  <span className="text-slate-500 mr-1">Tare:</span>
+                  {[
+                    { label: "0g", val: 0 },
+                    { label: "5g Bag", val: 5 },
+                    { label: "15g Tub", val: 15 },
+                  ].map((t) => (
+                    <button
+                      key={t.val}
+                      onClick={() => setTareGrams(t.val)}
+                      className={`px-1.5 py-0.5 rounded font-semibold transition ${
+                        tareGrams === t.val
+                          ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                          : "bg-slate-900 text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Manual KG Input (when scale not connected) */}
-              <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
-                <label className="text-[11px] font-medium text-slate-400 block mb-1">
-                  Manual Weight (KG)
-                </label>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => {
-                      const cur = parseFloat(manualWeightInput) || 0;
-                      setManualWeightInput(Math.max(0.05, Math.round((cur - 0.1) * 100) / 100).toFixed(3));
-                    }}
-                    className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
-                  >
-                    <Minus className="w-3.5 h-3.5" />
-                  </button>
-                  <input
-                    type="number"
-                    step="0.05"
-                    min="0.01"
-                    disabled={isScaleConnected}
-                    value={manualWeightInput}
-                    onChange={(e) => setManualWeightInput(e.target.value)}
-                    className="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg text-sm font-mono text-white text-center focus:outline-none focus:border-teal-500 disabled:opacity-50"
-                  />
-                  <button
-                    onClick={() => {
-                      const cur = parseFloat(manualWeightInput) || 0;
-                      setManualWeightInput(Math.round((cur + 0.1) * 100 / 100).toFixed(3));
-                    }}
-                    className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </button>
+              {/* Simulator weight buttons */}
+              {useSimulator && (
+                <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-900">
+                  <span className="text-purple-300 text-[10px] font-semibold">Test Platter:</span>
+                  <div className="flex gap-1">
+                    {[0.25, 0.5, 1.0, 2.5].map((w) => (
+                      <button
+                        key={w}
+                        onClick={() => simulatorRef.current?.placeWeight(w)}
+                        className="px-1.5 py-0.5 rounded bg-purple-900/60 hover:bg-purple-800 text-purple-200 text-[10px] font-mono font-bold"
+                      >
+                        {w}kg
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => simulatorRef.current?.zero()}
+                      className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px]"
+                    >
+                      Clear
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* Manual KG Input when neither live scale nor simulator */}
+              {!isLiveOrSim && (
+                <div className="flex items-center justify-between text-xs pt-1">
+                  <span className="text-slate-400">Manual Weight:</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        const cur = parseFloat(manualWeightInput) || 0;
+                        setManualWeightInput(Math.max(0.05, Math.round((cur - 0.1) * 100) / 100).toFixed(3));
+                      }}
+                      className="p-1 rounded bg-slate-800 text-slate-300"
+                    >
+                      <Minus className="w-3 h-3" />
+                    </button>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0.01"
+                      value={manualWeightInput}
+                      onChange={(e) => setManualWeightInput(e.target.value)}
+                      className="w-16 px-1.5 py-0.5 bg-slate-900 border border-slate-800 rounded text-center font-mono text-xs text-white"
+                    />
+                    <button
+                      onClick={() => {
+                        const cur = parseFloat(manualWeightInput) || 0;
+                        setManualWeightInput(Math.round((cur + 0.1) * 100 / 100).toFixed(3));
+                      }}
+                      className="p-1 rounded bg-slate-800 text-slate-300"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Selected Product Calculation Summary */}
-            <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-between">
+            <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between">
               <div>
-                <span className="text-xs text-slate-400">Total Calculation</span>
+                <span className="text-[11px] text-slate-400">Total Calculation</span>
                 <div className="text-sm font-semibold text-white mt-0.5">
                   {selectedProduct ? selectedProduct.name : "Select a product"}
                 </div>
@@ -407,7 +555,7 @@ export default function WeighingScaleModal({
               </div>
 
               <div className="text-right">
-                <span className="text-xs text-slate-400">Item Total</span>
+                <span className="text-[11px] text-slate-400">Item Total</span>
                 <div className="text-2xl font-black font-mono text-emerald-400">
                   {currency} {lineTotal.toFixed(2)}
                 </div>
@@ -415,11 +563,11 @@ export default function WeighingScaleModal({
             </div>
 
             {/* Action Buttons */}
-            <div className="flex gap-3 pt-2">
+            <div className="flex gap-2 pt-1">
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-sm transition-all"
+                className="flex-1 py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition-all"
               >
                 Cancel
               </button>
@@ -427,7 +575,7 @@ export default function WeighingScaleModal({
                 type="button"
                 disabled={!selectedProduct || netWeightKg <= 0}
                 onClick={handleConfirmAdd}
-                className="flex-[2] py-3 px-4 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-teal-500/20 disabled:opacity-50 disabled:pointer-events-none transition-all"
+                className="flex-[2] py-2.5 px-3 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg shadow-teal-500/20 disabled:opacity-50 disabled:pointer-events-none transition-all"
               >
                 <Check className="w-4 h-4" /> Add Weighed Item to Cart
               </button>
