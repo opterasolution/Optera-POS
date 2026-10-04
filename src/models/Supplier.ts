@@ -13,11 +13,14 @@ export interface ISupplier extends Document {
   creditLimit: number;
   currentBalance: number; // outstanding accounts payable debt owed in LKR
   portalToken?: string; // secure access token for Supplier Self-Service Portal
+  minOrderAmount?: number; // Minimum Order Value (MOV) in LKR
+  defaultLeadTimeDays?: number; // Default delivery lead time in days
   notes?: string;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
+
 
 export function generateVendorPortalToken(): string {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -86,7 +89,18 @@ const SupplierSchema = new Schema<ISupplier>(
       type: String,
       trim: true,
     },
+    minOrderAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    defaultLeadTimeDays: {
+      type: Number,
+      default: 3,
+      min: 0,
+    },
     notes: {
+
       type: String,
       trim: true,
     },

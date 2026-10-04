@@ -20,6 +20,13 @@ export interface IProduct extends Document {
   unit: string;
   isBatchTracked?: boolean;
   kitchenStation?: string;
+  supplierId?: Types.ObjectId;
+  supplierName?: string;
+  leadTimeDays?: number;
+  safetyStockDays?: number;
+  minOrderQuantity?: number;
+  orderPackSize?: number;
+  maxStockLevel?: number;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -55,8 +62,16 @@ const ProductSchema = new Schema<IProduct>(
     unit: { type: String, default: "pcs", trim: true },
     isBatchTracked: { type: Boolean, default: false },
     kitchenStation: { type: String, trim: true, default: "HOT_KITCHEN" },
+    supplierId: { type: Schema.Types.ObjectId, ref: "Supplier" },
+    supplierName: { type: String, trim: true },
+    leadTimeDays: { type: Number, default: 3, min: 0 },
+    safetyStockDays: { type: Number, default: 5, min: 0 },
+    minOrderQuantity: { type: Number, default: 1, min: 1 },
+    orderPackSize: { type: Number, default: 1, min: 1 },
+    maxStockLevel: { type: Number, min: 0 },
     isActive: { type: Boolean, default: true },
   },
+
   { timestamps: true }
 );
 

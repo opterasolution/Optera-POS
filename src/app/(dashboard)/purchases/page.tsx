@@ -42,7 +42,9 @@ import SupplierPaymentReceipt, { SupplierPaymentData } from "@/components/receip
 import GoodsReceivedNoteReceipt, { GoodsReceivedNoteData } from "@/components/receipts/GoodsReceivedNoteReceipt";
 import RfqBiddingManager from "@/components/purchases/RfqBiddingManager";
 import VendorPortalShareModal from "@/components/purchases/VendorPortalShareModal";
+import AutomatedReorderPlanner from "@/components/purchases/AutomatedReorderPlanner";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
+
 
 interface Supplier {
   _id: string;
@@ -134,7 +136,9 @@ export interface DockInspectionItemInput {
 }
 
 export default function PurchasesPage() {
-  const [activeTab, setActiveTab] = useState<"ORDERS" | "GRN" | "RFQ" | "SUPPLIERS" | "VOUCHERS">("ORDERS");
+  const [activeTab, setActiveTab] = useState<
+    "ORDERS" | "REORDER_PLANNER" | "GRN" | "RFQ" | "SUPPLIERS" | "VOUCHERS"
+  >("ORDERS");
 
   // Data
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -1010,7 +1014,24 @@ export default function PurchasesPage() {
 
           <button
             type="button"
+            onClick={() => setActiveTab("REORDER_PLANNER")}
+            className={`pb-3 text-xs font-bold flex items-center gap-2 border-b-2 transition ${
+              activeTab === "REORDER_PLANNER"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <Boxes className="w-4 h-4 text-blue-600" />
+            <span>Auto-Reorder Engine</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-100 font-mono text-blue-800 font-bold">
+              AI Planner
+            </span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab("GRN")}
+
             className={`pb-3 text-xs font-bold flex items-center gap-2 border-b-2 transition ${
               activeTab === "GRN"
                 ? "border-emerald-600 text-emerald-600"
@@ -1297,7 +1318,17 @@ export default function PurchasesPage() {
           </div>
         )}
 
+        {/* ================= TAB: AUTO-REORDER INTELLIGENCE ENGINE ================= */}
+        {activeTab === "REORDER_PLANNER" && (
+          <AutomatedReorderPlanner
+            onViewPO={(poId) => {
+              setActiveTab("ORDERS");
+            }}
+          />
+        )}
+
         {/* ================= TAB: GRN & DOCK RECEIVING ================= */}
+
         {activeTab === "GRN" && (
           <div className="space-y-4">
             {/* GRN Metrics Banner */}
