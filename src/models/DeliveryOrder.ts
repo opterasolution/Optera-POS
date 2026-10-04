@@ -67,6 +67,33 @@ export interface IDeliveryOrderAuditEntry {
   notes?: string;
 }
 
+export interface IProofOfDelivery {
+  signatureUrl?: string; // Base64 data URL or uploaded URL
+  photoUrl?: string;     // Base64 data URL or uploaded URL
+  receivedBy?: string;   // Name & relationship e.g. "Saman Perera (Self)"
+  notes?: string;
+  deliveredAt: Date;
+  coordinates?: {
+    lat: number;
+    lng: number;
+  };
+}
+
+export interface ICashOnDelivery {
+  isCod: boolean;
+  expectedAmount: number;
+  collectedAmount?: number;
+  changeGiven?: number;
+  paymentMethod: "CASH" | "LANKAQR" | "CARD" | "OTHER";
+  notes?: string;
+}
+
+export interface IDeliveryFailure {
+  reason: "CUSTOMER_UNREACHABLE" | "INCORRECT_ADDRESS" | "CUSTOMER_REFUSED_COD" | "CUSTOMER_RESCHEDULED" | "OTHER";
+  notes?: string;
+  failedAt: Date;
+}
+
 export interface IDeliveryOrder extends Document {
   businessId: mongoose.Types.ObjectId;
   branchId?: mongoose.Types.ObjectId;
@@ -77,6 +104,11 @@ export interface IDeliveryOrder extends Document {
   items: IDeliveryOrderItem[];
   financials: IDeliveryOrderFinancials;
   rider: IDeliveryOrderRider;
+  tripId?: mongoose.Types.ObjectId;
+  stopSequence?: number;
+  proofOfDelivery?: IProofOfDelivery;
+  cashOnDelivery?: ICashOnDelivery;
+  deliveryFailure?: IDeliveryFailure;
   prepTimeMinutes: number; // default 15 mins
   scheduledPrepEnd?: Date;
   acceptedAt?: Date;
@@ -168,6 +200,35 @@ const DeliveryOrderSchema = new Schema<IDeliveryOrder>(
       arrivedAtStore: { type: Boolean, default: false },
       handoverConfirmedAt: { type: Date },
       handoverConfirmedBy: { type: String, trim: true },
+    },
+    tripId: { type: Schema.Types.ObjectId, ref: "DeliveryTrip" },
+    stopSequence: { type: Number },
+    proofOfDelivery: {
+      signatureUrl: { type: String },
+      photoUrl: { type: String },
+      receivedBy: { type: String, trim: true },
+      notes: { type: String, trim: true },
+      deliveredAt: { type: Date },
+      coordinates: {
+        lat: { type: Number },
+        lng: { type: Number },
+      },
+    },
+    cashOnDelivery: {
+      isCod: { type: Boolean, default: false },
+      expectedAmount: { type: Number, default: 0 },
+      collectedAmount: { type: Number },
+      changeGiven: { type: Number },
+      paymentMethod: { type: String, enum: ["CASH", "LANKAQR", "CARD", "OTHER"], default: "CASH" },
+      notes: { type: String },
+    },
+    deliveryFailure: {
+      reason: {
+        type: String,
+        enum: ["CUSTOMER_UNREACHABLE", "INCORRECT_ADDRESS", "CUSTOMER_REFUSED_COD", "CUSTOMER_RESCHEDULED", "OTHER"],
+      },
+      notes: { type: String, trim: true },
+      failedAt: { type: Date },
     },
     prepTimeMinutes: { type: Number, default: 15, min: 1 },
     scheduledPrepEnd: { type: Date },

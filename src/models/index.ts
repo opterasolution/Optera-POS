@@ -96,6 +96,27 @@ export {
   type ICustomerPaymentSlip,
   type CustomerPaymentSlipStatus,
 } from "./CustomerPaymentSlip";
+export {
+  DeliveryOrder,
+  type IDeliveryOrder,
+  type DeliveryPlatform,
+  type DeliveryOrderStatus,
+  type IProofOfDelivery,
+  type ICashOnDelivery,
+  type IDeliveryFailure,
+} from "./DeliveryOrder";
+export {
+  DeliveryDriver,
+  type IDeliveryDriver,
+  type DriverVehicleType,
+  generateDriverToken,
+} from "./DeliveryDriver";
+export {
+  DeliveryTrip,
+  type IDeliveryTrip,
+  type IDeliveryTripStop,
+  type DeliveryTripStatus,
+} from "./DeliveryTrip";
 
 
 

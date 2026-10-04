@@ -27,10 +27,23 @@ import {
   Car,
   Check,
   Calendar,
+  FileText,
+  Wallet,
+  Copy,
+  ExternalLink,
+  Share2,
+  Camera,
+  Navigation,
+  UserCheck,
+  Users,
+  CheckCheck,
+  ClipboardList,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/formatters";
 import DeliveryDispatchSlip, { DeliveryDispatchSlipData } from "@/components/receipts/DeliveryDispatchSlip";
+import DeliveryRunsheetSlip, { DeliveryRunsheetSlipData } from "@/components/receipts/DeliveryRunsheetSlip";
 import { playDeliveryOrderChime, startRepeatingDeliveryAlert, stopRepeatingDeliveryAlert } from "@/lib/delivery/sound-alert";
+import { buildWhatsAppUrl } from "@/lib/notifications";
 
 interface DeliveryOrder {
   _id: string;
@@ -82,6 +95,26 @@ interface DeliveryOrder {
     arrivedAtStore?: boolean;
     handoverConfirmedAt?: string;
   };
+  tripId?: string;
+  stopSequence?: number;
+  proofOfDelivery?: {
+    signatureUrl?: string;
+    photoUrl?: string;
+    receivedBy?: string;
+    notes?: string;
+    deliveredAt?: string;
+  };
+  cashOnDelivery?: {
+    isCod: boolean;
+    expectedAmount: number;
+    collectedAmount?: number;
+    changeGiven?: number;
+  };
+  deliveryFailure?: {
+    reason: string;
+    notes?: string;
+    failedAt?: string;
+  };
   prepTimeMinutes: number;
   scheduledPrepEnd?: string;
   acceptedAt?: string;
@@ -92,11 +125,79 @@ interface DeliveryOrder {
   createdAt: string;
 }
 
+interface DriverItem {
+  _id: string;
+  name: string;
+  phone: string;
+  vehicleType: "BIKE" | "THREE_WHEELER" | "CAR" | "VAN";
+  vehicleNumber: string;
+  nicNumber?: string;
+  active: boolean;
+  driverToken: string;
+  totalDeliveriesCompleted: number;
+  totalCodCollected: number;
+  activeTrip?: any;
+  notes?: string;
+}
+
+interface TripItem {
+  _id: string;
+  tripNumber: string;
+  driverId: string;
+  driverName: string;
+  driverPhone: string;
+  vehicleType: string;
+  vehicleNumber: string;
+  status: "DRAFT" | "DISPATCHED" | "COMPLETED" | "CANCELLED";
+  totalStops: number;
+  completedStops: number;
+  failedStops: number;
+  totalCodExpected: number;
+  totalCodCollected: number;
+  cashierReconciliation?: {
+    status: "PENDING" | "RECONCILED" | "DISCREPANCY";
+    reconciledAt?: string;
+    reconciledBy?: string;
+    cashDrawerAmountSubmitted?: number;
+    shortageOrOverage?: number;
+    cashierNotes?: string;
+  };
+  dispatchedAt?: string;
+  completedAt?: string;
+  stops: Array<{
+    orderId: string;
+    orderNumber: string;
+    customerName: string;
+    customerPhone: string;
+    deliveryAddress: string;
+    deliveryNotes?: string;
+    stopSequence: number;
+    isCod: boolean;
+    codAmount: number;
+    status: string;
+    deliveredAt?: string;
+    collectedCod?: number;
+    failureReason?: string;
+    signatureUrl?: string;
+    photoUrl?: string;
+    receivedBy?: string;
+  }>;
+  notes?: string;
+}
+
 export default function DeliveryHubPage() {
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<
-    "PENDING_ACCEPT" | "PREPARING" | "READY_FOR_PICKUP" | "OUT_FOR_DELIVERY" | "DELIVERED" | "RECONCILIATION"
+    | "PENDING_ACCEPT"
+    | "PREPARING"
+    | "READY_FOR_PICKUP"
+    | "OUT_FOR_DELIVERY"
+    | "DELIVERED"
+    | "FLEET_DRIVERS"
+    | "TRIP_RUNSHEETS"
+    | "COD_RECONCILIATION"
+    | "RECONCILIATION"
   >("PENDING_ACCEPT");
   const [platformFilter, setPlatformFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
@@ -110,6 +211,42 @@ export default function DeliveryHubPage() {
   const [pinError, setPinError] = useState<string | null>(null);
   const [slipModalOrder, setSlipModalOrder] = useState<DeliveryOrder | null>(null);
   const [reconciliationData, setReconciliationData] = useState<any | null>(null);
+
+  // Fleet & Drivers State
+  const [drivers, setDrivers] = useState<DriverItem[]>([]);
+  const [loadingDrivers, setLoadingDrivers] = useState(false);
+  const [isNewDriverModalOpen, setIsNewDriverModalOpen] = useState(false);
+  const [newDriverName, setNewDriverName] = useState("");
+  const [newDriverPhone, setNewDriverPhone] = useState("");
+  const [newDriverVehicleType, setNewDriverVehicleType] = useState<"BIKE" | "THREE_WHEELER" | "CAR" | "VAN">("THREE_WHEELER");
+  const [newDriverVehicleNumber, setNewDriverVehicleNumber] = useState("");
+  const [newDriverNic, setNewDriverNic] = useState("");
+  const [newDriverNotes, setNewDriverNotes] = useState("");
+  const [submittingDriver, setSubmittingDriver] = useState(false);
+  const [copiedDriverToken, setCopiedDriverToken] = useState<string | null>(null);
+
+  // Trip Runsheets State
+  const [trips, setTrips] = useState<TripItem[]>([]);
+  const [loadingTrips, setLoadingTrips] = useState(false);
+  const [isNewTripModalOpen, setIsNewTripModalOpen] = useState(false);
+  const [tripDriverId, setTripDriverId] = useState("");
+  const [tripOrderIds, setTripOrderIds] = useState<string[]>([]);
+  const [tripNotes, setTripNotes] = useState("");
+  const [tripDispatchImmediately, setTripDispatchImmediately] = useState(true);
+  const [submittingTrip, setSubmittingTrip] = useState(false);
+  const [selectedRunsheetTrip, setSelectedRunsheetTrip] = useState<TripItem | null>(null);
+
+  // Cash Reconciliation Modal State
+  const [reconcilingTrip, setReconcilingTrip] = useState<TripItem | null>(null);
+  const [cashDrawerAmountSubmitted, setCashDrawerAmountSubmitted] = useState("");
+  const [cashierReconciliationNotes, setCashierReconciliationNotes] = useState("");
+  const [submittingReconciliation, setSubmittingReconciliation] = useState(false);
+
+  // Proof of Delivery Viewer Modal State
+  const [viewingPodOrder, setViewingPodOrder] = useState<DeliveryOrder | null>(null);
+
+  // Feedback message
+  const [feedbackMessage, setFeedbackMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // New Phone Order Form state
   const [newCustName, setNewCustName] = useState("");
@@ -182,6 +319,199 @@ export default function DeliveryHubPage() {
       stopRepeatingDeliveryAlert();
     };
   }, [soundEnabled]);
+
+  const fetchDrivers = async () => {
+    try {
+      setLoadingDrivers(true);
+      const res = await fetch("/api/delivery/drivers");
+      const data = await res.json();
+      if (data.success && Array.isArray(data.drivers)) {
+        setDrivers(data.drivers);
+      }
+    } catch (err) {
+      console.error("Failed to load drivers:", err);
+    } finally {
+      setLoadingDrivers(false);
+    }
+  };
+
+  const fetchTrips = async () => {
+    try {
+      setLoadingTrips(true);
+      const res = await fetch("/api/delivery/trips");
+      const data = await res.json();
+      if (data.success && Array.isArray(data.trips)) {
+        setTrips(data.trips);
+      }
+    } catch (err) {
+      console.error("Failed to load trips:", err);
+    } finally {
+      setLoadingTrips(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "FLEET_DRIVERS") {
+      fetchDrivers();
+    } else if (activeTab === "TRIP_RUNSHEETS" || activeTab === "COD_RECONCILIATION") {
+      fetchTrips();
+      fetchDrivers();
+    }
+  }, [activeTab]);
+
+  const handleCreateDriver = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDriverName.trim() || !newDriverPhone.trim() || !newDriverVehicleNumber.trim()) {
+      alert("Driver name, phone, and vehicle registration number are required.");
+      return;
+    }
+    try {
+      setSubmittingDriver(true);
+      const res = await fetch("/api/delivery/drivers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newDriverName.trim(),
+          phone: newDriverPhone.trim(),
+          vehicleType: newDriverVehicleType,
+          vehicleNumber: newDriverVehicleNumber.trim().toUpperCase(),
+          nicNumber: newDriverNic.trim() || undefined,
+          notes: newDriverNotes.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedbackMessage({ type: "success", text: `Driver ${newDriverName} registered successfully!` });
+        setIsNewDriverModalOpen(false);
+        setNewDriverName("");
+        setNewDriverPhone("");
+        setNewDriverVehicleNumber("");
+        setNewDriverNic("");
+        setNewDriverNotes("");
+        fetchDrivers();
+      } else {
+        alert(data.error || "Failed to create driver.");
+      }
+    } catch {
+      alert("Network error creating driver.");
+    } finally {
+      setSubmittingDriver(false);
+    }
+  };
+
+  const handleCreateTrip = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tripDriverId) {
+      alert("Please select a driver for this trip.");
+      return;
+    }
+    if (tripOrderIds.length === 0) {
+      alert("Please select at least one delivery order.");
+      return;
+    }
+    try {
+      setSubmittingTrip(true);
+      const res = await fetch("/api/delivery/trips", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          driverId: tripDriverId,
+          orderIds: tripOrderIds,
+          notes: tripNotes.trim() || undefined,
+          dispatchImmediately: tripDispatchImmediately,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedbackMessage({ type: "success", text: `Trip ${data.trip?.tripNumber} created successfully!` });
+        setIsNewTripModalOpen(false);
+        setTripOrderIds([]);
+        setTripNotes("");
+        fetchTrips();
+        fetchOrders();
+      } else {
+        alert(data.error || "Failed to create trip.");
+      }
+    } catch {
+      alert("Network error creating trip.");
+    } finally {
+      setSubmittingTrip(false);
+    }
+  };
+
+  const handleDispatchTrip = async (tripId: string) => {
+    try {
+      const res = await fetch("/api/delivery/trips", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tripId, action: "DISPATCH" }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedbackMessage({ type: "success", text: data.message || "Trip dispatched successfully!" });
+        fetchTrips();
+        fetchOrders();
+      } else {
+        alert(data.error || "Failed to dispatch trip.");
+      }
+    } catch {
+      alert("Network error dispatching trip.");
+    }
+  };
+
+  const handleReconcileTrip = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reconcilingTrip) return;
+    try {
+      setSubmittingReconciliation(true);
+      const res = await fetch("/api/delivery/trips", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tripId: reconcilingTrip._id,
+          action: "RECONCILE",
+          cashDrawerAmountSubmitted: parseFloat(cashDrawerAmountSubmitted) || 0,
+          cashierNotes: cashierReconciliationNotes.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedbackMessage({ type: "success", text: data.message || "Trip cash reconciled successfully!" });
+        setReconcilingTrip(null);
+        setCashDrawerAmountSubmitted("");
+        setCashierReconciliationNotes("");
+        fetchTrips();
+        fetchOrders();
+      } else {
+        alert(data.error || "Failed to reconcile trip.");
+      }
+    } catch {
+      alert("Network error reconciling trip.");
+    } finally {
+      setSubmittingReconciliation(false);
+    }
+  };
+
+  const handleCancelTrip = async (tripId: string) => {
+    if (!confirm("Are you sure you want to cancel this trip? Orders will be returned to Ready for Pickup queue.")) return;
+    try {
+      const res = await fetch("/api/delivery/trips", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tripId, action: "CANCEL" }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedbackMessage({ type: "success", text: data.message || "Trip cancelled." });
+        fetchTrips();
+        fetchOrders();
+      } else {
+        alert(data.error || "Failed to cancel trip.");
+      }
+    } catch {
+      alert("Network error cancelling trip.");
+    }
+  };
 
   // Handle Order Status Update (Accept, Prep, Ready, Handover)
   const handleUpdateOrderStatus = async (
@@ -460,6 +790,31 @@ export default function DeliveryHubPage() {
           </div>
         </header>
 
+        {feedbackMessage && (
+          <div
+            className={`mx-4 sm:mx-6 mt-4 p-3 rounded-2xl flex items-center justify-between border shadow-2xs animate-in fade-in transition ${
+              feedbackMessage.type === "success"
+                ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                : "bg-rose-50 border-rose-200 text-rose-800"
+            }`}
+          >
+            <div className="flex items-center gap-2 text-xs font-bold">
+              {feedbackMessage.type === "success" ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              )}
+              <span>{feedbackMessage.text}</span>
+            </div>
+            <button
+              onClick={() => setFeedbackMessage(null)}
+              className="p-1 hover:opacity-70 text-slate-500"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Financial KPI Summary Cards */}
         <div className="p-4 sm:p-6 pb-2 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-2xs">
@@ -589,6 +944,47 @@ export default function DeliveryHubPage() {
             </button>
 
             <button
+              onClick={() => setActiveTab("FLEET_DRIVERS")}
+              className={`px-3.5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition shrink-0 ${
+                activeTab === "FLEET_DRIVERS"
+                  ? "bg-purple-600 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              <span>Fleet & Drivers ({drivers.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("TRIP_RUNSHEETS")}
+              className={`px-3.5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition shrink-0 ${
+                activeTab === "TRIP_RUNSHEETS"
+                  ? "bg-blue-700 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              <ClipboardList className="w-4 h-4" />
+              <span>Dispatch Runsheets ({trips.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("COD_RECONCILIATION")}
+              className={`px-3.5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition shrink-0 ${
+                activeTab === "COD_RECONCILIATION"
+                  ? "bg-amber-600 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              <Wallet className="w-4 h-4" />
+              <span>Driver COD Cash</span>
+              {trips.filter((t) => t.status === "DISPATCHED" || t.cashierReconciliation?.status === "PENDING").length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-amber-200 text-amber-900">
+                  {trips.filter((t) => t.status === "DISPATCHED" || t.cashierReconciliation?.status === "PENDING").length}
+                </span>
+              )}
+            </button>
+
+            <button
               onClick={() => setActiveTab("RECONCILIATION")}
               className={`px-3.5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition shrink-0 ${
                 activeTab === "RECONCILIATION"
@@ -596,7 +992,7 @@ export default function DeliveryHubPage() {
                   : "text-slate-600 hover:bg-slate-100"
               }`}
             >
-              <span>📊 Payout & Reconciliation</span>
+              <span>📊 Aggregator Payout</span>
             </button>
           </div>
 
@@ -630,7 +1026,7 @@ export default function DeliveryHubPage() {
         {/* Main Content Area */}
         <main className="p-4 sm:p-6 flex-1">
           {/* TAB 1 TO 5: ORDER CARDS BOARD */}
-          {activeTab !== "RECONCILIATION" && (
+          {["PENDING_ACCEPT", "PREPARING", "READY_FOR_PICKUP", "OUT_FOR_DELIVERY", "DELIVERED"].includes(activeTab) && (
             <div>
               {tabFilteredOrders.length === 0 ? (
                 <div className="py-20 flex flex-col items-center justify-center text-slate-400 text-center">
@@ -859,6 +1255,20 @@ export default function DeliveryHubPage() {
                             </button>
                           )}
 
+                          {/* Doorstep Proof of Delivery Button if present */}
+                          {order.proofOfDelivery && (
+                            <div className="pt-2">
+                              <button
+                                type="button"
+                                onClick={() => setViewingPodOrder(order)}
+                                className="w-full py-2 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-2xs"
+                              >
+                                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                                <span>View Doorstep POD ({order.proofOfDelivery.receivedBy || "Signed"})</span>
+                              </button>
+                            </div>
+                          )}
+
                           {/* Print Slip Button */}
                           <div className="flex items-center justify-between pt-1">
                             <span className="text-[11px] text-slate-400">
@@ -877,6 +1287,559 @@ export default function DeliveryHubPage() {
                   })}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ================= TAB 7: FLEET & DRIVERS ================= */}
+          {activeTab === "FLEET_DRIVERS" && (
+            <div className="space-y-6 max-w-6xl mx-auto animate-in fade-in duration-150">
+              {/* Fleet Metric Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-2xs">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Total Drivers</span>
+                  <div className="text-2xl font-black text-slate-900 mt-1">{drivers.length}</div>
+                  <span className="text-[11px] text-slate-400 mt-0.5 block">Registered fleet drivers</span>
+                </div>
+                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-2xs">
+                  <span className="text-xs font-semibold text-emerald-700 uppercase tracking-wider block">Active On-Duty</span>
+                  <div className="text-2xl font-black text-emerald-600 mt-1">
+                    {drivers.filter((d) => d.active).length}
+                  </div>
+                  <span className="text-[11px] text-emerald-600/80 mt-0.5 block">Available for trip dispatch</span>
+                </div>
+                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-2xs">
+                  <span className="text-xs font-semibold text-blue-700 uppercase tracking-wider block">Deliveries Completed</span>
+                  <div className="text-2xl font-black text-blue-900 mt-1">
+                    {drivers.reduce((sum, d) => sum + (d.totalDeliveriesCompleted || 0), 0)}
+                  </div>
+                  <span className="text-[11px] text-slate-400 mt-0.5 block">Lifetime doorstep handovers</span>
+                </div>
+                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-2xs">
+                  <span className="text-xs font-semibold text-amber-700 uppercase tracking-wider block">Total COD Handed Over</span>
+                  <div className="text-2xl font-black font-mono text-amber-700 mt-1">
+                    {formatCurrency(drivers.reduce((sum, d) => sum + (d.totalCodCollected || 0), 0))}
+                  </div>
+                  <span className="text-[11px] text-slate-400 mt-0.5 block">Reconciled driver cash drops</span>
+                </div>
+              </div>
+
+              {/* Action Toolbar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Express Fleet Drivers</h3>
+                  <p className="text-xs text-slate-500">
+                    Each driver has a secure, passwordless mobile runsheet URL for GPS navigation, phone calls, and doorstep touch signature POD.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsNewDriverModalOpen(true)}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shrink-0"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Register New Driver</span>
+                </button>
+              </div>
+
+              {/* Drivers Grid */}
+              {loadingDrivers ? (
+                <div className="py-16 text-center text-slate-400 text-xs">Loading fleet drivers...</div>
+              ) : drivers.length === 0 ? (
+                <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center space-y-3">
+                  <div className="w-14 h-14 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center mx-auto">
+                    <Users className="w-7 h-7" />
+                  </div>
+                  <h4 className="font-bold text-slate-900 text-sm">No Fleet Drivers Registered</h4>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    Register your in-house tuk-tuk, bike, or van drivers to assign trips, track parcel handovers, and collect doorstep POD signatures.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsNewDriverModalOpen(true)}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold shadow-sm"
+                  >
+                    + Register Driver
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {drivers.map((drv) => {
+                    const origin = typeof window !== "undefined" ? window.location.origin : "";
+                    const driverAppUrl = `${origin}/delivery/driver/${drv.driverToken}`;
+                    const waShareUrl = buildWhatsAppUrl(
+                      drv.phone,
+                      `Hello ${drv.name}, here is your personal Express Delivery mobile dispatch link: ${driverAppUrl}`
+                    );
+
+                    return (
+                      <div
+                        key={drv._id}
+                        className="bg-white border border-slate-200 rounded-2xl p-5 shadow-2xs space-y-4 hover:shadow-sm transition"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-11 h-11 rounded-2xl bg-purple-50 text-purple-700 border border-purple-200 flex items-center justify-center">
+                              {drv.vehicleType === "BIKE" ? (
+                                <Bike className="w-5 h-5" />
+                              ) : drv.vehicleType === "VAN" ? (
+                                <Truck className="w-5 h-5" />
+                              ) : (
+                                <Car className="w-5 h-5" />
+                              )}
+                            </div>
+                            <div>
+                              <div className="font-black text-slate-900 text-sm">{drv.name}</div>
+                              <div className="text-xs text-slate-500 font-mono flex items-center gap-1">
+                                <Phone className="w-3 h-3 text-slate-400" />
+                                <a href={`tel:${drv.phone}`} className="hover:underline">
+                                  {drv.phone}
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              drv.active
+                                ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            {drv.active ? "Active" : "Inactive"}
+                          </span>
+                        </div>
+
+                        {/* Vehicle & Trip Info */}
+                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1.5 text-xs">
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Vehicle:</span>
+                            <span className="font-bold text-slate-800">
+                              {drv.vehicleType.replace("_", " ")} ({drv.vehicleNumber})
+                            </span>
+                          </div>
+                          {drv.nicNumber && (
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">NIC:</span>
+                              <span className="font-mono text-slate-700">{drv.nicNumber}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between pt-1 border-t border-slate-200/60">
+                            <span className="text-slate-500">Current Trip:</span>
+                            {drv.activeTrip ? (
+                              <span className="font-mono font-bold text-blue-700">
+                                {drv.activeTrip.tripNumber} ({drv.activeTrip.completedStops}/{drv.activeTrip.totalStops})
+                              </span>
+                            ) : (
+                              <span className="text-emerald-600 font-medium">Standby / Available</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Lifetime Stats */}
+                        <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                          <div className="p-2 bg-slate-50 rounded-xl">
+                            <span className="text-[10px] text-slate-400 uppercase font-bold block">Deliveries</span>
+                            <span className="font-black text-slate-900 font-mono text-sm">
+                              {drv.totalDeliveriesCompleted || 0}
+                            </span>
+                          </div>
+                          <div className="p-2 bg-slate-50 rounded-xl">
+                            <span className="text-[10px] text-slate-400 uppercase font-bold block">COD Collected</span>
+                            <span className="font-black text-amber-700 font-mono text-sm">
+                              {formatCurrency(drv.totalCodCollected || 0)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Driver Mobile Portal Link */}
+                        <div className="pt-2 border-t border-slate-100 space-y-2">
+                          <div className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                            <span>Driver Mobile Dispatch Link:</span>
+                            <a
+                              href={driverAppUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline flex items-center gap-0.5 text-[10px]"
+                            >
+                              <span>Open</span>
+                              <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(driverAppUrl);
+                                setCopiedDriverToken(drv._id);
+                                setTimeout(() => setCopiedDriverToken(null), 3000);
+                              }}
+                              className="flex-1 py-1.5 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1.5"
+                            >
+                              {copiedDriverToken === drv._id ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span className="text-emerald-700">Copied!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3.5 h-3.5 text-slate-500" />
+                                  <span>Copy Link</span>
+                                </>
+                              )}
+                            </button>
+
+                            <a
+                              href={waShareUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-1 py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1.5"
+                            >
+                              <Share2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>WhatsApp</span>
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ================= TAB 8: TRIP RUNSHEETS & DISPATCH ================= */}
+          {activeTab === "TRIP_RUNSHEETS" && (
+            <div className="space-y-6 max-w-6xl mx-auto animate-in fade-in duration-150">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Delivery Runsheets & Trip Manifests</h3>
+                  <p className="text-xs text-slate-500">
+                    Group ready orders into a single driver trip, print route manifests, and track live stop completion.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const readyOrders = orders.filter((o) => o.status === "READY_FOR_PICKUP" || o.status === "ACCEPTED");
+                    setTripOrderIds(readyOrders.map((o) => o._id));
+                    setIsNewTripModalOpen(true);
+                  }}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shrink-0"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Create Delivery Trip</span>
+                </button>
+              </div>
+
+              {loadingTrips ? (
+                <div className="py-16 text-center text-slate-400 text-xs">Loading delivery trips...</div>
+              ) : trips.length === 0 ? (
+                <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center space-y-3">
+                  <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
+                    <ClipboardList className="w-7 h-7" />
+                  </div>
+                  <h4 className="font-bold text-slate-900 text-sm">No Delivery Trips Created Yet</h4>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    Batch orders currently in "Ready for Pickup" into a trip manifest assigned to a driver for delivery.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsNewTripModalOpen(true)}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold shadow-sm"
+                  >
+                    + Create Trip
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {trips.map((tr) => {
+                    const isDispatched = tr.status === "DISPATCHED";
+                    const isCompleted = tr.status === "COMPLETED";
+                    const isDraft = tr.status === "DRAFT";
+                    const progress = tr.totalStops > 0 ? Math.round((tr.completedStops / tr.totalStops) * 100) : 0;
+
+                    return (
+                      <div
+                        key={tr._id}
+                        className="bg-white border border-slate-200 rounded-2xl p-5 shadow-2xs space-y-4"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                          <div className="flex items-center gap-3">
+                            <span className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center font-mono font-bold text-xs">
+                              {tr.vehicleType === "BIKE" ? (
+                                <Bike className="w-5 h-5" />
+                              ) : tr.vehicleType === "VAN" ? (
+                                <Truck className="w-5 h-5" />
+                              ) : (
+                                <Car className="w-5 h-5" />
+                              )}
+                            </span>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-black text-slate-900 text-base font-mono">{tr.tripNumber}</span>
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    isCompleted
+                                      ? "bg-slate-100 text-slate-700"
+                                      : isDispatched
+                                      ? "bg-blue-100 text-blue-800"
+                                      : "bg-amber-100 text-amber-800"
+                                  }`}
+                                >
+                                  {tr.status}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-500">
+                                Driver: <strong className="text-slate-800">{tr.driverName}</strong> ({tr.driverPhone}) • {tr.vehicleNumber}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedRunsheetTrip(tr)}
+                              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              <span>Print Manifest</span>
+                            </button>
+
+                            {isDraft && (
+                              <button
+                                type="button"
+                                onClick={() => handleDispatchTrip(tr._id)}
+                                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                              >
+                                Dispatch Trip
+                              </button>
+                            )}
+
+                            {isDispatched && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReconcilingTrip(tr);
+                                  setCashDrawerAmountSubmitted(tr.totalCodCollected.toString());
+                                }}
+                                className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5"
+                              >
+                                <Wallet className="w-3.5 h-3.5" />
+                                <span>Reconcile Cash</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Progress Bar & Financials */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                          <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                            <span className="text-[10px] text-slate-400 uppercase font-bold block">Delivery Progress</span>
+                            <div className="font-bold text-slate-900 mt-0.5">
+                              {tr.completedStops} / {tr.totalStops} Stops Completed ({progress}%)
+                            </div>
+                            <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden mt-1.5">
+                              <div className="bg-emerald-500 h-full transition-all" style={{ width: `${progress}%` }} />
+                            </div>
+                          </div>
+
+                          <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                            <span className="text-[10px] text-slate-400 uppercase font-bold block">Expected COD</span>
+                            <div className="font-mono font-bold text-slate-900 mt-0.5">
+                              {formatCurrency(tr.totalCodExpected)}
+                            </div>
+                            <span className="text-[10px] text-slate-400">Total billable on delivery</span>
+                          </div>
+
+                          <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                            <span className="text-[10px] text-slate-400 uppercase font-bold block">Collected COD</span>
+                            <div className="font-mono font-black text-amber-700 mt-0.5">
+                              {formatCurrency(tr.totalCodCollected)}
+                            </div>
+                            <span className="text-[10px] text-slate-400">Cash in driver's pocket</span>
+                          </div>
+                        </div>
+
+                        {/* Stops sequence overview */}
+                        <div className="space-y-1.5">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                            Route Stops ({tr.stops.length}):
+                          </span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                            {tr.stops.map((st) => (
+                              <div
+                                key={st.stopSequence}
+                                className={`p-2 rounded-xl border text-xs flex items-center justify-between ${
+                                  st.status === "DELIVERED"
+                                    ? "bg-emerald-50/60 border-emerald-200"
+                                    : st.status === "FAILED"
+                                    ? "bg-rose-50/60 border-rose-200"
+                                    : "bg-slate-50 border-slate-200"
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="w-5 h-5 rounded-full bg-slate-900 text-white font-mono font-bold text-[10px] flex items-center justify-center shrink-0">
+                                    {st.stopSequence}
+                                  </span>
+                                  <div>
+                                    <div className="font-bold text-slate-900 leading-tight">{st.orderNumber}</div>
+                                    <div className="text-[10px] text-slate-500 truncate max-w-[140px]">
+                                      {st.customerName}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div>
+                                  {st.isCod ? (
+                                    <span className="font-mono text-[10px] font-bold text-amber-800">
+                                      {formatCurrency(st.codAmount)}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-bold text-emerald-700">PAID</span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ================= TAB 9: DRIVER COD RECONCILIATION ================= */}
+          {activeTab === "COD_RECONCILIATION" && (
+            <div className="space-y-6 max-w-6xl mx-auto animate-in fade-in duration-150">
+              {/* Summary KPIs */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-2xs">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
+                    Total Driver COD Handed Over
+                  </span>
+                  <div className="text-2xl font-black font-mono text-emerald-700 mt-1">
+                    {formatCurrency(
+                      trips
+                        .filter((t) => t.cashierReconciliation?.status === "RECONCILED")
+                        .reduce((sum, t) => sum + (t.cashierReconciliation?.cashDrawerAmountSubmitted || t.totalCodCollected), 0)
+                    )}
+                  </div>
+                  <span className="text-[11px] text-slate-400 mt-0.5 block">Reconciled and banked in POS drawer</span>
+                </div>
+
+                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-2xs">
+                  <span className="text-xs font-semibold text-amber-700 uppercase tracking-wider block">
+                    Pending Driver Cash in Bag
+                  </span>
+                  <div className="text-2xl font-black font-mono text-amber-700 mt-1">
+                    {formatCurrency(
+                      trips
+                        .filter((t) => t.status === "DISPATCHED" || t.cashierReconciliation?.status === "PENDING")
+                        .reduce((sum, t) => sum + (t.totalCodCollected || 0), 0)
+                    )}
+                  </div>
+                  <span className="text-[11px] text-slate-400 mt-0.5 block">Awaiting cashier return verification</span>
+                </div>
+
+                <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-2xs">
+                  <span className="text-xs font-semibold text-rose-700 uppercase tracking-wider block">
+                    Cash Discrepancies
+                  </span>
+                  <div className="text-2xl font-black font-mono text-rose-700 mt-1">
+                    {trips.filter((t) => t.cashierReconciliation?.status === "DISCREPANCY").length} Trips
+                  </div>
+                  <span className="text-[11px] text-slate-400 mt-0.5 block">Shortage or overage noted</span>
+                </div>
+              </div>
+
+              {/* Trips Awaiting Reconciliation Table */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+                <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                  <h3 className="font-bold text-slate-900 text-sm">Driver Cash Handover Register</h3>
+                  <span className="text-xs text-slate-400">Match driver collection against trip manifest</span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-100">
+                      <tr>
+                        <th className="py-3 px-4">Trip #</th>
+                        <th className="py-3 px-4">Driver & Vehicle</th>
+                        <th className="py-3 px-4 text-center">Stops</th>
+                        <th className="py-3 px-4 text-right">Expected COD</th>
+                        <th className="py-3 px-4 text-right">Driver Collected</th>
+                        <th className="py-3 px-4 text-center">Status</th>
+                        <th className="py-3 px-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {trips.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-12 text-center text-slate-400">
+                            No trips found. Create and dispatch a delivery trip to record driver COD.
+                          </td>
+                        </tr>
+                      ) : (
+                        trips.map((tr) => (
+                          <tr key={tr._id} className="hover:bg-slate-50/60">
+                            <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                              {tr.tripNumber}
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="font-bold text-slate-800">{tr.driverName}</div>
+                              <div className="text-[11px] text-slate-400 font-mono">
+                                {tr.vehicleNumber} ({tr.vehicleType})
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-center font-bold">
+                              {tr.completedStops} / {tr.totalStops}
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono font-semibold text-slate-700">
+                              {formatCurrency(tr.totalCodExpected)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono font-black text-amber-700 text-sm">
+                              {formatCurrency(tr.totalCodCollected)}
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  tr.cashierReconciliation?.status === "RECONCILED"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : tr.cashierReconciliation?.status === "DISCREPANCY"
+                                    ? "bg-rose-100 text-rose-800"
+                                    : "bg-amber-100 text-amber-800"
+                                }`}
+                              >
+                                {tr.cashierReconciliation?.status || "PENDING"}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              {tr.cashierReconciliation?.status === "RECONCILED" ? (
+                                <span className="text-[11px] text-slate-400">
+                                  Settled by {tr.cashierReconciliation.reconciledBy}
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setReconcilingTrip(tr);
+                                    setCashDrawerAmountSubmitted(tr.totalCodCollected.toString());
+                                  }}
+                                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition shadow-2xs"
+                                >
+                                  Reconcile Cash
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1349,6 +2312,680 @@ export default function DeliveryHubPage() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL 4: REGISTER NEW DELIVERY DRIVER */}
+        {isNewDriverModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[92vh]">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-slate-900 text-white flex items-center justify-center font-bold">
+                    <UserCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">Register Fleet Driver</h3>
+                    <p className="text-xs text-slate-500">In-house dispatch & COD collection rider</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsNewDriverModalOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateDriver} className="flex-1 overflow-y-auto py-4 space-y-4 text-xs">
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Driver Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Kasun Chamara Perera"
+                    value={newDriverName}
+                    onChange={(e) => setNewDriverName(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-slate-900 font-medium text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Mobile Phone Number (07XXXXXXXX) *</label>
+                  <input
+                    type="tel"
+                    required
+                    placeholder="0771234567"
+                    value={newDriverPhone}
+                    onChange={(e) => setNewDriverPhone(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono focus:outline-none focus:border-slate-900 text-xs"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    Used to send WhatsApp runsheet dispatch links and SMS notifications.
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Vehicle Type *</label>
+                    <select
+                      value={newDriverVehicleType}
+                      onChange={(e) => setNewDriverVehicleType(e.target.value as any)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                    >
+                      <option value="THREE_WHEELER">Three-Wheeler (Tuk-Tuk)</option>
+                      <option value="BIKE">Motorcycle / Scooter</option>
+                      <option value="CAR">Car</option>
+                      <option value="VAN">Delivery Van / Truck</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Vehicle Reg Number *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. WP BDF-4592"
+                      value={newDriverVehicleNumber}
+                      onChange={(e) => setNewDriverVehicleNumber(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono uppercase focus:outline-none focus:border-slate-900 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">National Identity Card (NIC) (Optional)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 199412304581 or 941234567V"
+                    value={newDriverNic}
+                    onChange={(e) => setNewDriverNic(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono uppercase focus:outline-none focus:border-slate-900 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Notes & Availability (Optional)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Available 11am-8pm, Colombo South deliveries only"
+                    value={newDriverNotes}
+                    onChange={(e) => setNewDriverNotes(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-slate-900 text-xs"
+                  />
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsNewDriverModalOpen(false)}
+                    className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingDriver}
+                    className="flex-1 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs disabled:opacity-50 transition shadow-sm"
+                  >
+                    {submittingDriver ? "Registering..." : "Register Driver"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL 5: CREATE TRIP RUNSHEET */}
+        {isNewTripModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl flex flex-col max-h-[92vh] border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                    <ClipboardList className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">Create Delivery Runsheet</h3>
+                    <p className="text-xs text-slate-500">Assign stops to a fleet driver with COD tracking</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsNewTripModalOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateTrip} className="flex-1 overflow-y-auto py-4 space-y-4 text-xs">
+                {/* Driver Selection */}
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Select Driver *</label>
+                  {drivers.filter((d) => d.active).length === 0 ? (
+                    <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-800 text-xs">
+                      No active fleet drivers registered. Please register a driver in the Fleet tab first.
+                    </div>
+                  ) : (
+                    <select
+                      required
+                      value={tripDriverId}
+                      onChange={(e) => setTripDriverId(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium"
+                    >
+                      <option value="">-- Choose fleet driver --</option>
+                      {drivers
+                        .filter((d) => d.active)
+                        .map((drv) => (
+                          <option key={drv._id} value={drv._id}>
+                            {drv.name} ({drv.vehicleType}) - {drv.vehicleNumber} {drv.activeTrip ? "⚠️ (Currently on Active Trip)" : "✓ (Ready)"}
+                          </option>
+                        ))}
+                    </select>
+                  )}
+                </div>
+
+                {/* Orders to Deliver */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-slate-700 block">
+                      Select Delivery Stops / Orders * ({tripOrderIds.length} selected)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const eligible = orders.filter((o) => !o.tripId && o.status !== "DELIVERED" && o.status !== "CANCELLED" && o.status !== "REJECTED");
+                          setTripOrderIds(eligible.map((o) => o._id));
+                        }}
+                        className="text-blue-600 hover:underline font-bold text-[11px]"
+                      >
+                        Select All
+                      </button>
+                      <span className="text-slate-300">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setTripOrderIds([])}
+                        className="text-slate-500 hover:underline font-medium text-[11px]"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-56 overflow-y-auto bg-slate-50/50">
+                    {orders.filter((o) => !o.tripId && o.status !== "DELIVERED" && o.status !== "CANCELLED" && o.status !== "REJECTED").length === 0 ? (
+                      <div className="p-4 text-center text-slate-400 text-xs">
+                        No unassigned delivery orders available. Orders must not already be assigned to an active trip.
+                      </div>
+                    ) : (
+                      orders
+                        .filter((o) => !o.tripId && o.status !== "DELIVERED" && o.status !== "CANCELLED" && o.status !== "REJECTED")
+                        .map((o) => {
+                          const isSelected = tripOrderIds.includes(o._id);
+                          const isCod = o.cashOnDelivery?.isCod ?? (o.platform === "DIRECT_STORE");
+                          const codAmt = o.cashOnDelivery?.expectedAmount ?? o.financials?.totalBill ?? 0;
+
+                          return (
+                            <label
+                              key={o._id}
+                              className={`p-3 flex items-start gap-3 cursor-pointer transition ${
+                                isSelected ? "bg-blue-50/70" : "hover:bg-white"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setTripOrderIds([...tripOrderIds, o._id]);
+                                  } else {
+                                    setTripOrderIds(tripOrderIds.filter((id) => id !== o._id));
+                                  }
+                                }}
+                                className="mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-mono font-bold text-slate-900 text-xs">
+                                    {o.externalOrderId}
+                                  </span>
+                                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">
+                                    {o.platform}
+                                  </span>
+                                </div>
+                                <div className="font-medium text-slate-800 text-xs mt-0.5">
+                                  {o.customer.name} • {o.customer.phone}
+                                </div>
+                                <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                                  {o.customer.deliveryAddress}
+                                </div>
+                                <div className="mt-1 flex items-center justify-between text-[11px]">
+                                  <span className="text-slate-400">{o.items.length} item(s)</span>
+                                  {isCod ? (
+                                    <span className="font-mono font-bold text-amber-700">
+                                      COD: {formatCurrency(codAmt)}
+                                    </span>
+                                  ) : (
+                                    <span className="font-bold text-emerald-700">Prepaid</span>
+                                  )}
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })
+                    )}
+                  </div>
+                </div>
+
+                {/* Dispatch options & notes */}
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 p-3 bg-blue-50/60 rounded-xl border border-blue-100 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={tripDispatchImmediately}
+                      onChange={(e) => setTripDispatchImmediately(e.target.checked)}
+                      className="rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <span className="font-bold text-blue-900 block text-xs">
+                        Dispatch Immediately
+                      </span>
+                      <span className="text-[10px] text-blue-700">
+                        Mark stops as Out for Delivery and notify driver's mobile runsheet app.
+                      </span>
+                    </div>
+                  </label>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Route & Driver Instructions (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Deliver Havelock Town orders first, collect cash carefully"
+                      value={tripNotes}
+                      onChange={(e) => setTripNotes(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-slate-900 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsNewTripModalOpen(false)}
+                    className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingTrip || tripOrderIds.length === 0 || !tripDriverId}
+                    className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs disabled:opacity-50 transition shadow-sm"
+                  >
+                    {submittingTrip ? "Creating Runsheet..." : `Create Trip (${tripOrderIds.length} stops)`}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL 6: PRINT DELIVERY RUNSHEET MANIFEST */}
+        {selectedRunsheetTrip && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-2xl w-full p-5 shadow-2xl flex flex-col max-h-[92vh] border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-slate-900 text-white flex items-center justify-center font-bold">
+                    <Printer className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">Trip Runsheet & Manifest</h3>
+                    <p className="text-xs text-slate-500 font-mono">Trip #{selectedRunsheetTrip.tripNumber}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRunsheetTrip(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto py-3">
+                <DeliveryRunsheetSlip
+                  data={{
+                    tripNumber: selectedRunsheetTrip.tripNumber,
+                    storeName: businessName,
+                    dispatchedAt: selectedRunsheetTrip.dispatchedAt,
+                    driverName: selectedRunsheetTrip.driverName,
+                    driverPhone: selectedRunsheetTrip.driverPhone,
+                    vehicleType: selectedRunsheetTrip.vehicleType,
+                    vehicleNumber: selectedRunsheetTrip.vehicleNumber,
+                    totalStops: selectedRunsheetTrip.totalStops,
+                    completedStops: selectedRunsheetTrip.completedStops,
+                    totalCodExpected: selectedRunsheetTrip.totalCodExpected,
+                    totalCodCollected: selectedRunsheetTrip.totalCodCollected,
+                    stops: selectedRunsheetTrip.stops.map((s) => ({
+                      stopSequence: s.stopSequence,
+                      orderNumber: s.orderNumber,
+                      customerName: s.customerName,
+                      customerPhone: s.customerPhone,
+                      deliveryAddress: s.deliveryAddress,
+                      deliveryNotes: s.deliveryNotes,
+                      isCod: s.isCod,
+                      codAmount: s.codAmount,
+                      status: s.status,
+                    })),
+                    notes: selectedRunsheetTrip.notes,
+                    driverPortalUrl: (() => {
+                      const drv = drivers.find((d) => d._id === selectedRunsheetTrip.driverId);
+                      return drv?.driverToken && typeof window !== "undefined"
+                        ? `${window.location.origin}/delivery/driver/${drv.driverToken}`
+                        : undefined;
+                    })(),
+                  }}
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedRunsheetTrip(null)}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Print Runsheet (80mm / A4)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL 7: CASHIER COD RECONCILIATION */}
+        {reconcilingTrip && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[92vh]">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
+                    <Wallet className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">Driver Cash Handover</h3>
+                    <p className="text-xs text-slate-500 font-mono">Trip #{reconcilingTrip.tripNumber}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReconcilingTrip(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleReconcileTrip} className="flex-1 overflow-y-auto py-4 space-y-4 text-xs">
+                {/* Trip summary */}
+                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-800">{reconcilingTrip.driverName}</span>
+                    <span className="font-mono text-slate-500 text-[11px]">{reconcilingTrip.vehicleNumber}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    Stops Completed: <strong className="text-slate-800">{reconcilingTrip.completedStops} / {reconcilingTrip.totalStops}</strong>
+                  </div>
+                  <div className="pt-2 border-t border-slate-200/60 grid grid-cols-2 gap-2 text-center">
+                    <div className="bg-white p-2 rounded-xl border border-slate-200">
+                      <span className="text-[10px] text-slate-400 block font-bold uppercase">Expected COD</span>
+                      <span className="font-mono font-bold text-slate-800 text-xs">
+                        {formatCurrency(reconcilingTrip.totalCodExpected)}
+                      </span>
+                    </div>
+                    <div className="bg-amber-50 p-2 rounded-xl border border-amber-200">
+                      <span className="text-[10px] text-amber-700 block font-bold uppercase">Driver Logged</span>
+                      <span className="font-mono font-black text-amber-800 text-xs">
+                        {formatCurrency(reconcilingTrip.totalCodCollected)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Physical Cash Input */}
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">
+                    Physical Cash Bag Handed Over by Driver (LKR) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={cashDrawerAmountSubmitted}
+                    onChange={(e) => setCashDrawerAmountSubmitted(e.target.value)}
+                    className="w-full p-3 bg-slate-50 border-2 border-amber-500 rounded-xl font-mono text-xl font-black text-slate-900 focus:outline-none focus:ring-4 focus:ring-amber-200"
+                    placeholder="e.g. 5200"
+                    autoFocus
+                  />
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    Count notes and coins from driver's cash bag into the store POS drawer.
+                  </span>
+                </div>
+
+                {/* Variance Feedback */}
+                {(() => {
+                  const submitted = parseFloat(cashDrawerAmountSubmitted) || 0;
+                  const diff = submitted - reconcilingTrip.totalCodCollected;
+                  if (isNaN(submitted)) return null;
+
+                  if (diff === 0) {
+                    return (
+                      <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 font-bold text-xs flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Exact Match: Physical cash matches driver doorstep collection.</span>
+                      </div>
+                    );
+                  } else if (diff < 0) {
+                    return (
+                      <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 font-bold text-xs flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                        <span>Shortage of {formatCurrency(Math.abs(diff))}: Driver cash is less than logged.</span>
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 font-bold text-xs flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>Overage of {formatCurrency(diff)}: Driver submitted extra cash.</span>
+                      </div>
+                    );
+                  }
+                })()}
+
+                {/* Cashier Notes */}
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Cashier Discrepancy / Handover Notes</label>
+                  <textarea
+                    rows={2}
+                    value={cashierReconciliationNotes}
+                    onChange={(e) => setCashierReconciliationNotes(e.target.value)}
+                    placeholder="e.g. Customer rounded up Rs. 50, driver verified all 4 stops."
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-slate-900"
+                  />
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setReconcilingTrip(null)}
+                    className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingReconciliation || !cashDrawerAmountSubmitted}
+                    className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs disabled:opacity-50 transition shadow-sm"
+                  >
+                    {submittingReconciliation ? "Reconciling..." : "Confirm & Deposit to Drawer"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL 8: DOORSTEP PROOF OF DELIVERY (POD) VIEWER */}
+        {viewingPodOrder && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[92vh]">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">Proof of Delivery (POD)</h3>
+                    <p className="text-xs text-slate-500 font-mono">Order #{viewingPodOrder.externalOrderId}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setViewingPodOrder(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto py-4 space-y-4 text-xs">
+                {/* Customer & Delivery Details */}
+                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-900 text-sm">{viewingPodOrder.customer?.name}</span>
+                    <span className="font-mono text-slate-500">{viewingPodOrder.customer?.phone}</span>
+                  </div>
+                  <div className="text-slate-600 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span>{viewingPodOrder.customer?.deliveryAddress}</span>
+                  </div>
+                  <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>
+                      Received by: <strong className="text-slate-800">{viewingPodOrder.proofOfDelivery?.receivedBy || "Customer"}</strong>
+                    </span>
+                    <span>
+                      {viewingPodOrder.proofOfDelivery?.deliveredAt
+                        ? new Date(viewingPodOrder.proofOfDelivery.deliveredAt).toLocaleString("en-LK")
+                        : "Delivered"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Cash-on-Delivery Breakdown if COD */}
+                {viewingPodOrder.cashOnDelivery?.isCod && (
+                  <div className="p-3 bg-amber-50/70 rounded-2xl border border-amber-200 space-y-1 text-xs">
+                    <div className="font-bold text-amber-900 uppercase text-[10px] tracking-wider">
+                      Cash on Delivery Reconciliation
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 pt-1 font-mono text-center">
+                      <div className="bg-white p-2 rounded-xl border border-amber-200">
+                        <span className="text-[10px] text-slate-400 block">Expected</span>
+                        <span className="font-bold text-slate-800">
+                          {formatCurrency(viewingPodOrder.cashOnDelivery.expectedAmount)}
+                        </span>
+                      </div>
+                      <div className="bg-white p-2 rounded-xl border border-amber-200">
+                        <span className="text-[10px] text-amber-700 block font-bold">Collected</span>
+                        <span className="font-black text-amber-800">
+                          {formatCurrency(viewingPodOrder.cashOnDelivery.collectedAmount || 0)}
+                        </span>
+                      </div>
+                      <div className="bg-white p-2 rounded-xl border border-amber-200">
+                        <span className="text-[10px] text-slate-400 block">Change Given</span>
+                        <span className="font-bold text-slate-700">
+                          {formatCurrency(viewingPodOrder.cashOnDelivery.changeGiven || 0)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Proof Visuals: Signature & Photo */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Customer Touch Signature</label>
+                    {viewingPodOrder.proofOfDelivery?.signatureUrl ? (
+                      <div className="bg-white p-2 rounded-2xl border border-slate-200 flex items-center justify-center">
+                        <img
+                          src={viewingPodOrder.proofOfDelivery.signatureUrl}
+                          alt="Customer Signature"
+                          className="w-full h-36 object-contain bg-slate-50/50 rounded-xl"
+                        />
+                      </div>
+                    ) : (
+                      <div className="h-36 bg-slate-50 border border-dashed border-slate-200 rounded-2xl flex items-center justify-center text-slate-400 text-xs">
+                        No signature recorded
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Doorstep Photo Verification</label>
+                    {viewingPodOrder.proofOfDelivery?.photoUrl ? (
+                      <div className="bg-white p-2 rounded-2xl border border-slate-200 flex items-center justify-center">
+                        <img
+                          src={viewingPodOrder.proofOfDelivery.photoUrl}
+                          alt="Doorstep Photo"
+                          className="w-full h-36 object-cover rounded-xl"
+                        />
+                      </div>
+                    ) : (
+                      <div className="h-36 bg-slate-50 border border-dashed border-slate-200 rounded-2xl flex items-center justify-center text-slate-400 text-xs">
+                        No doorstep photo uploaded
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Delivery failure reason if applicable */}
+                {viewingPodOrder.deliveryFailure && (
+                  <div className="p-3 bg-rose-50 rounded-2xl border border-rose-200 text-rose-800 space-y-1">
+                    <div className="font-bold text-xs flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 text-rose-600" />
+                      <span>Delivery Attempt Failed: {viewingPodOrder.deliveryFailure.reason}</span>
+                    </div>
+                    {viewingPodOrder.deliveryFailure.notes && (
+                      <p className="text-[11px] text-rose-700">{viewingPodOrder.deliveryFailure.notes}</p>
+                    )}
+                    {viewingPodOrder.deliveryFailure.failedAt && (
+                      <span className="text-[10px] text-rose-500 block">
+                        Attempted at: {new Date(viewingPodOrder.deliveryFailure.failedAt).toLocaleString("en-LK")}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setViewingPodOrder(null)}
+                  className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition"
+                >
+                  Close Proof of Delivery
+                </button>
+              </div>
             </div>
           </div>
         )}
