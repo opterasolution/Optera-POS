@@ -9,7 +9,8 @@ export type MovementType =
   | "TRANSFER_OUT"
   | "TRANSFER_IN"
   | "VAN_LOAD"
-  | "VAN_RETURN";
+  | "VAN_RETURN"
+  | "SUPPLIER_RETURN";
 
 export interface IInventoryMovement extends Document {
   businessId: Types.ObjectId;
@@ -63,6 +64,7 @@ const InventoryMovementSchema = new Schema<IInventoryMovement>(
         "TRANSFER_IN",
         "VAN_LOAD",
         "VAN_RETURN",
+        "SUPPLIER_RETURN",
       ],
       required: true,
     },

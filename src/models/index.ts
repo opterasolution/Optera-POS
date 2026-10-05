@@ -150,3 +150,12 @@ export {
   type IBankAccount,
   type BankAccountType,
 } from "./BankAccount";
+export {
+  SupplierDebitNote,
+  type ISupplierDebitNote,
+  type ISupplierDebitNoteItem,
+  type SupplierDebitNoteStatus,
+  type DebitNoteSettlementType,
+  type DebitNoteReturnReason,
+  generateDebitNoteNumber,
+} from "./SupplierDebitNote";

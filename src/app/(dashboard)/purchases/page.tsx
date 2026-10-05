@@ -48,6 +48,7 @@ import RfqBiddingManager from "@/components/purchases/RfqBiddingManager";
 import VendorPortalShareModal from "@/components/purchases/VendorPortalShareModal";
 import AutomatedReorderPlanner from "@/components/purchases/AutomatedReorderPlanner";
 import PoDispatchModal from "@/components/purchases/PoDispatchModal";
+import DebitNoteManager from "@/components/purchases/DebitNoteManager";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
 
 
@@ -167,7 +168,7 @@ export interface DockInspectionItemInput {
 
 export default function PurchasesPage() {
   const [activeTab, setActiveTab] = useState<
-    "ORDERS" | "REORDER_PLANNER" | "GRN" | "RFQ" | "SUPPLIERS" | "VOUCHERS"
+    "ORDERS" | "REORDER_PLANNER" | "GRN" | "DEBIT_NOTES" | "RFQ" | "SUPPLIERS" | "VOUCHERS"
   >("ORDERS");
 
   // Data
@@ -303,25 +304,35 @@ export default function PurchasesPage() {
   const [dispatchingPo, setDispatchingPo] = useState<PurchaseOrder | null>(null);
   const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
 
+  // Debit Notes & Returns State
+  const [preselectedGrnForDebitNote, setPreselectedGrnForDebitNote] = useState<string | null>(null);
+  const [debitNotesCount, setDebitNotesCount] = useState<number>(0);
+
   // Load Data
   const loadData = async () => {
     try {
       setLoading(true);
-      const [supRes, poRes, branchRes, prodRes, bizRes] = await Promise.all([
+      const [supRes, poRes, branchRes, prodRes, bizRes, dnRes] = await Promise.all([
         fetch("/api/suppliers"),
         fetch(`/api/purchases?status=${statusFilter}${supplierFilter ? `&supplierId=${supplierFilter}` : ""}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ""}`),
         fetch("/api/branches"),
         fetch("/api/products?limit=500"),
         fetch("/api/business"),
+        fetch("/api/purchases/debit-notes?limit=1"),
       ]);
 
-      const [supData, poData, branchData, prodData, bizData] = await Promise.all([
+      const [supData, poData, branchData, prodData, bizData, dnData] = await Promise.all([
         supRes.json(),
         poRes.json(),
         branchRes.json(),
         prodRes.json(),
         bizRes.json(),
+        dnRes.json(),
       ]);
+
+      if (dnData.success && dnData.metrics) {
+        setDebitNotesCount(dnData.metrics.totalDebitNotesCount || 0);
+      }
 
       if (supData.success) {
         setSuppliers(supData.suppliers || []);
@@ -1090,6 +1101,24 @@ export default function PurchasesPage() {
 
           <button
             type="button"
+            onClick={() => setActiveTab("DEBIT_NOTES")}
+            className={`pb-3 text-xs font-bold flex items-center gap-2 border-b-2 transition ${
+              activeTab === "DEBIT_NOTES"
+                ? "border-rose-600 text-rose-600"
+                : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <RotateCcw className="w-4 h-4 text-rose-600" />
+            <span>Debit Notes & Returns</span>
+            {debitNotesCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-100 font-mono text-rose-800 font-bold">
+                {debitNotesCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab("RFQ")}
             className={`pb-3 text-xs font-bold flex items-center gap-2 border-b-2 transition ${
               activeTab === "RFQ"
@@ -1639,6 +1668,22 @@ export default function PurchasesPage() {
                               >
                                 <Printer className="w-3.5 h-3.5" />
                               </button>
+
+                              {grn.totalRejectedCost > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPreselectedGrnForDebitNote(grn._id);
+                                    setActiveTab("DEBIT_NOTES");
+                                  }}
+                                  className="px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition"
+                                  title="Generate Supplier Debit Note for rejected items"
+                                >
+                                  <RotateCcw className="w-3 h-3 text-rose-600" />
+                                  <span>Debit Note</span>
+                                </button>
+                              )}
+
                               {!isDraft && grn.status === "CONFIRMED" && (
                                 <button
                                   type="button"
@@ -1683,6 +1728,20 @@ export default function PurchasesPage() {
               </table>
             </div>
           </div>
+        )}
+
+        {/* ================= TAB: DEBIT NOTES & DAMAGED / EXPIRY RETURNS ================= */}
+        {activeTab === "DEBIT_NOTES" && (
+          <DebitNoteManager
+            suppliers={suppliers}
+            branches={branches}
+            products={products}
+            business={business}
+            preselectedGrnId={preselectedGrnForDebitNote}
+            onClearPreselectedGrn={() => setPreselectedGrnForDebitNote(null)}
+            onRefreshData={loadData}
+            setStatusMessage={setStatusMessage}
+          />
         )}
 
         {/* ================= TAB: E-BIDDING & RFQS ================= */}

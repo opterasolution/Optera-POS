@@ -3,6 +3,7 @@ import { connectToDatabase } from "@/lib/db";
 import { Supplier } from "@/models/Supplier";
 import { SupplierPayment } from "@/models/SupplierPayment";
 import { PurchaseOrder } from "@/models/PurchaseOrder";
+import { SupplierDebitNote } from "@/models/SupplierDebitNote";
 import { AuditLog } from "@/models/AuditLog";
 import { requireAuth, requireRole } from "@/lib/tenant";
 
@@ -23,8 +24,8 @@ export async function GET(
         return NextResponse.json({ success: false, error: "Supplier not found." }, { status: 404 });
       }
 
-      // Fetch all bills inward (POs received) and payments made
-      const [pos, payments] = await Promise.all([
+      // Fetch all bills inward (POs received), payments made, and applied debit notes
+      const [pos, payments, debitNotes] = await Promise.all([
         PurchaseOrder.find({
           businessId,
           supplierId: id,
@@ -34,6 +35,12 @@ export async function GET(
           businessId,
           supplierId: id,
         }).lean(),
+        SupplierDebitNote.find({
+          businessId,
+          supplierId: id,
+          status: "APPLIED",
+          settlementType: "AP_CREDIT_OFFSET",
+        }).lean(),
       ]);
 
       // Combine into unified chronological ledger
@@ -41,7 +48,7 @@ export async function GET(
         id: string;
         date: Date;
         ref: string;
-        type: "BILL_INWARD" | "PAYMENT_VOUCHER";
+        type: "BILL_INWARD" | "PAYMENT_VOUCHER" | "DEBIT_NOTE";
         description: string;
         billAmount?: number;
         paidAmount?: number;
@@ -72,6 +79,18 @@ export async function GET(
           paidAmount: pv.amount,
           paymentMethod: pv.paymentMethod,
           chequeNumber: pv.chequeNumber,
+        });
+      });
+
+      debitNotes.forEach((dn) => {
+        entries.push({
+          id: dn._id.toString(),
+          date: dn.settledAt || dn.createdAt,
+          ref: dn.debitNoteNumber,
+          type: "DEBIT_NOTE",
+          description: `Debit Note: Return of Damaged/Expired Stock${dn.distributorCreditNoteNumber ? ` (CN: ${dn.distributorCreditNoteNumber})` : ""}`,
+          paidAmount: dn.netTotal,
+          paymentMethod: "DEBIT_NOTE",
         });
       });
 
