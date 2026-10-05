@@ -13,7 +13,15 @@ export { Shift, type IShift, type ICashMovement, type ShiftStatus, type CashMove
 export { CreditTransaction, type ICreditTransaction, type CreditTransactionType, type CreditPaymentMethod } from "./CreditTransaction";
 export { Branch, type IBranch, type BranchType } from "./Branch";
 export { BranchStock, type IBranchStock } from "./BranchStock";
-export { StockTransfer, type IStockTransfer, type StockTransferStatus, type IStockTransferItem } from "./StockTransfer";
+export {
+  StockTransfer,
+  type IStockTransfer,
+  type StockTransferStatus,
+  type IStockTransferItem,
+  type TransferDiscrepancyReason,
+  type TransferDiscrepancyAction,
+  generateTransferManifestToken,
+} from "./StockTransfer";
 export { Supplier, type ISupplier } from "./Supplier";
 export {
   PurchaseOrder,

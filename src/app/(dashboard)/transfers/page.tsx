@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import AppLayout from "@/components/layout/AppLayout";
 import {
   Truck,
@@ -26,11 +27,18 @@ import {
   Phone,
   User,
   ClipboardList,
+  Barcode,
+  FileText,
+  AlertCircle,
+  ExternalLink,
 } from "lucide-react";
 import StockTransferNoteReceipt, { StockTransferData } from "@/components/receipts/StockTransferNoteReceipt";
+import StockTransferManifestReceipt, {
+  StockTransferManifestData,
+} from "@/components/receipts/StockTransferManifestReceipt";
 import WarehouseBinManager from "@/components/warehouse/WarehouseBinManager";
 import PickListManager from "@/components/warehouse/PickListManager";
-import { formatSLDateTime } from "@/lib/formatters";
+import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
 
 interface Branch {
   _id: string;
@@ -53,16 +61,26 @@ interface TransferItem {
   productId: string;
   name: string;
   sku?: string;
+  barcode?: string;
   unit: string;
   quantitySent: number;
   quantityReceived?: number;
+  quantityDamagedInTransit?: number;
+  discrepancyReason?: string;
+  discrepancyAction?: string;
+  discrepancyNotes?: string;
   unitCost?: number;
+  totalSentCost?: number;
+  totalReceivedCost?: number;
+  batchNumber?: string;
+  expiryDate?: string;
   notes?: string;
 }
 
 interface Transfer {
   _id: string;
   transferNumber: string;
+  manifestToken?: string;
   sourceBranchId: string;
   sourceBranchName: string;
   destinationBranchId: string;
@@ -71,6 +89,19 @@ interface Transfer {
   items: TransferItem[];
   totalItemsSent: number;
   totalItemsReceived?: number;
+  totalTransitValue?: number;
+  totalReceivedValue?: number;
+  totalDiscrepancyValue?: number;
+  discrepancyStatus?: "NO_DISCREPANCY" | "SHORTAGE" | "OVERAGE" | "DAMAGED";
+  discrepancyResolved?: boolean;
+  discrepancyResolutionNotes?: string;
+  discrepancyResolvedBy?: string;
+  discrepancyResolvedAt?: string;
+  vehicleNumber?: string;
+  driverName?: string;
+  driverPhone?: string;
+  gatePassOutTime?: string;
+  estimatedArrival?: string;
   carrierName?: string;
   trackingReference?: string;
   dispatchedBy?: string;
@@ -96,6 +127,7 @@ interface ProductOption {
 }
 
 export default function TransfersPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<
     "TRANSFERS" | "PICK_LISTS" | "WAREHOUSE_BINS" | "BRANCHES"
   >("TRANSFERS");
@@ -120,6 +152,8 @@ export default function TransfersPage() {
     draftCount: 0,
     cancelledCount: 0,
     totalCount: 0,
+    inTransitValuation: 0,
+    discrepanciesPendingCount: 0,
   });
 
   // Notifications
@@ -131,6 +165,10 @@ export default function TransfersPage() {
   const [newTransferDest, setNewTransferDest] = useState("");
   const [newTransferCarrier, setNewTransferCarrier] = useState("");
   const [newTransferTracking, setNewTransferTracking] = useState("");
+  const [newTransferVehicle, setNewTransferVehicle] = useState("");
+  const [newTransferDriverName, setNewTransferDriverName] = useState("");
+  const [newTransferDriverPhone, setNewTransferDriverPhone] = useState("");
+  const [newTransferEstArrival, setNewTransferEstArrival] = useState("");
   const [newTransferNotes, setNewTransferNotes] = useState("");
   const [transferLineItems, setTransferLineItems] = useState<
     Array<{ productId: string; name: string; sku?: string; unit: string; quantitySent: number; availableStock: number }>
@@ -139,10 +177,31 @@ export default function TransfersPage() {
   const [addQty, setAddQty] = useState("1");
   const [submittingTransfer, setSubmittingTransfer] = useState(false);
 
+  // Dispatch Modal State
+  const [dispatchingTransfer, setDispatchingTransfer] = useState<Transfer | null>(null);
+  const [dispatchVehicle, setDispatchVehicle] = useState("");
+  const [dispatchDriverName, setDispatchDriverName] = useState("");
+  const [dispatchDriverPhone, setDispatchDriverPhone] = useState("");
+  const [dispatchEstArrival, setDispatchEstArrival] = useState("");
+  const [dispatchCarrier, setDispatchCarrier] = useState("");
+  const [dispatchTracking, setDispatchTracking] = useState("");
+  const [dispatchNotes, setDispatchNotes] = useState("");
+  const [submittingDispatch, setSubmittingDispatch] = useState(false);
+
   // Receive Transfer Modal State
   const [receivingTransfer, setReceivingTransfer] = useState<Transfer | null>(null);
   const [receivedQtyMap, setReceivedQtyMap] = useState<Record<string, number>>({});
+  const [damagedQtyMap, setDamagedQtyMap] = useState<Record<string, number>>({});
+  const [discrepancyReasonMap, setDiscrepancyReasonMap] = useState<Record<string, string>>({});
+  const [discrepancyActionMap, setDiscrepancyActionMap] = useState<Record<string, string>>({});
+  const [discrepancyNotesMap, setDiscrepancyNotesMap] = useState<Record<string, string>>({});
   const [submittingReceive, setSubmittingReceive] = useState(false);
+
+  // Discrepancy Resolution Modal State
+  const [resolvingDiscrepancyTransfer, setResolvingDiscrepancyTransfer] = useState<Transfer | null>(null);
+  const [resolutionAction, setResolutionAction] = useState<string>("RECONCILED");
+  const [resolutionNotes, setResolutionNotes] = useState<string>("");
+  const [submittingResolution, setSubmittingResolution] = useState(false);
 
   // Add / Edit Branch Modal State
   const [isBranchModalOpen, setIsBranchModalOpen] = useState(false);
@@ -165,8 +224,9 @@ export default function TransfersPage() {
   const [loadingBranchStock, setLoadingBranchStock] = useState(false);
   const [branchStockSearch, setBranchStockSearch] = useState("");
 
-  // Printable STN Modal State
+  // Printable STN / Manifest Modal State
   const [activePrintTransfer, setActivePrintTransfer] = useState<Transfer | null>(null);
+  const [activeManifestTransfer, setActiveManifestTransfer] = useState<StockTransferManifestData | null>(null);
 
   // Initial Data Fetch
   const loadData = async () => {
@@ -304,6 +364,10 @@ export default function TransfersPage() {
             quantitySent: i.quantitySent,
           })),
           dispatchImmediately,
+          vehicleNumber: newTransferVehicle.trim() || undefined,
+          driverName: newTransferDriverName.trim() || undefined,
+          driverPhone: newTransferDriverPhone.trim() || undefined,
+          estimatedArrival: newTransferEstArrival ? new Date(newTransferEstArrival) : undefined,
           carrierName: newTransferCarrier.trim() || undefined,
           trackingReference: newTransferTracking.trim() || undefined,
           notes: newTransferNotes.trim() || undefined,
@@ -316,6 +380,10 @@ export default function TransfersPage() {
         setTransferLineItems([]);
         setNewTransferCarrier("");
         setNewTransferTracking("");
+        setNewTransferVehicle("");
+        setNewTransferDriverName("");
+        setNewTransferDriverPhone("");
+        setNewTransferEstArrival("");
         setNewTransferNotes("");
         setStatusMessage({
           type: "success",
@@ -332,36 +400,84 @@ export default function TransfersPage() {
     }
   };
 
-  // Dispatch Draft Transfer
-  const handleDispatchDraft = async (transferId: string) => {
-    if (!confirm("Are you sure you want to dispatch this transfer? Stock will be immediately deducted from the source warehouse.")) return;
+  // Open Dispatch Modal
+  const handleOpenDispatchModal = (transfer: Transfer) => {
+    setDispatchingTransfer(transfer);
+    setDispatchVehicle(transfer.vehicleNumber || "");
+    setDispatchDriverName(transfer.driverName || "");
+    setDispatchDriverPhone(transfer.driverPhone || "");
+    setDispatchEstArrival(
+      transfer.estimatedArrival
+        ? new Date(transfer.estimatedArrival).toISOString().slice(0, 16)
+        : ""
+    );
+    setDispatchCarrier(transfer.carrierName || "");
+    setDispatchTracking(transfer.trackingReference || "");
+    setDispatchNotes(transfer.notes || "");
+  };
 
+  // Confirm Dispatch & Generate Van Gate Pass
+  const handleConfirmDispatch = async () => {
+    if (!dispatchingTransfer) return;
+
+    setSubmittingDispatch(true);
     try {
-      const res = await fetch(`/api/transfers/${transferId}`, {
+      const res = await fetch(`/api/transfers/${dispatchingTransfer._id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "DISPATCH" }),
+        body: JSON.stringify({
+          action: "DISPATCH",
+          vehicleNumber: dispatchVehicle.trim() || undefined,
+          driverName: dispatchDriverName.trim() || undefined,
+          driverPhone: dispatchDriverPhone.trim() || undefined,
+          estimatedArrival: dispatchEstArrival ? new Date(dispatchEstArrival) : undefined,
+          carrierName: dispatchCarrier.trim() || undefined,
+          trackingReference: dispatchTracking.trim() || undefined,
+          notes: dispatchNotes.trim() || undefined,
+          gatePassOutTime: new Date(),
+        }),
       });
       const data = await res.json();
       if (data.success) {
-        setStatusMessage({ type: "success", text: data.message || "Transfer marked as IN_TRANSIT." });
+        const updated = data.transfer || dispatchingTransfer;
+        setDispatchingTransfer(null);
+        setStatusMessage({
+          type: "success",
+          text: data.message || "Transfer dispatched in transit with Gate Pass generated.",
+        });
         loadData();
       } else {
         alert(data.error || "Failed to dispatch transfer.");
       }
     } catch (err: any) {
       alert(err.message || "Network error.");
+    } finally {
+      setSubmittingDispatch(false);
     }
   };
 
   // Open Receive Modal
   const handleOpenReceiveModal = (transfer: Transfer) => {
     setReceivingTransfer(transfer);
-    const initialMap: Record<string, number> = {};
+    const recMap: Record<string, number> = {};
+    const dmgMap: Record<string, number> = {};
+    const reasonMap: Record<string, string> = {};
+    const actionMap: Record<string, string> = {};
+    const notesMap: Record<string, string> = {};
+
     transfer.items.forEach((item) => {
-      initialMap[item.productId] = item.quantitySent;
+      recMap[item.productId] = item.quantitySent;
+      dmgMap[item.productId] = 0;
+      reasonMap[item.productId] = "NONE";
+      actionMap[item.productId] = "NONE";
+      notesMap[item.productId] = "";
     });
-    setReceivedQtyMap(initialMap);
+
+    setReceivedQtyMap(recMap);
+    setDamagedQtyMap(dmgMap);
+    setDiscrepancyReasonMap(reasonMap);
+    setDiscrepancyActionMap(actionMap);
+    setDiscrepancyNotesMap(notesMap);
   };
 
   // Confirm Inward Receipt
@@ -373,6 +489,10 @@ export default function TransfersPage() {
       const receivedItems = receivingTransfer.items.map((i) => ({
         productId: i.productId,
         quantityReceived: receivedQtyMap[i.productId] ?? i.quantitySent,
+        quantityDamagedInTransit: damagedQtyMap[i.productId] ?? 0,
+        discrepancyReason: discrepancyReasonMap[i.productId] || "NONE",
+        discrepancyAction: discrepancyActionMap[i.productId] || "NONE",
+        discrepancyNotes: discrepancyNotesMap[i.productId] || undefined,
       }));
 
       const res = await fetch(`/api/transfers/${receivingTransfer._id}`, {
@@ -399,6 +519,47 @@ export default function TransfersPage() {
       alert(err.message || "Error processing receipt.");
     } finally {
       setSubmittingReceive(false);
+    }
+  };
+
+  // Open Discrepancy Resolution Modal
+  const handleOpenResolveDiscrepancy = (transfer: Transfer) => {
+    setResolvingDiscrepancyTransfer(transfer);
+    setResolutionAction("RECONCILED");
+    setResolutionNotes(transfer.discrepancyResolutionNotes || "");
+  };
+
+  // Confirm Discrepancy Resolution
+  const handleConfirmResolveDiscrepancy = async () => {
+    if (!resolvingDiscrepancyTransfer) return;
+
+    setSubmittingResolution(true);
+    try {
+      const res = await fetch(`/api/transfers/${resolvingDiscrepancyTransfer._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "RESOLVE_DISCREPANCY",
+          resolutionAction,
+          resolutionNotes: resolutionNotes.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setResolvingDiscrepancyTransfer(null);
+        setStatusMessage({
+          type: "success",
+          text: data.message || "Transfer discrepancy resolved successfully.",
+        });
+        loadData();
+      } else {
+        alert(data.error || "Failed to resolve discrepancy.");
+      }
+    } catch (err: any) {
+      alert(err.message || "Network error.");
+    } finally {
+      setSubmittingResolution(false);
     }
   };
 
@@ -510,6 +671,16 @@ export default function TransfersPage() {
 
             <button
               type="button"
+              onClick={() => router.push("/transfers/scan")}
+              className="px-3.5 py-2 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center gap-1.5 transition"
+              title="Open dock barcode scanner for replenishment intake"
+            >
+              <Barcode className="w-3.5 h-3.5" />
+              <span>Dock Intake Scanner</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setIsNewTransferOpen(true)}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm shadow-blue-500/20 transition"
             >
@@ -541,53 +712,79 @@ export default function TransfersPage() {
           </div>
         )}
 
-        {/* 4 Summary KPI Cards */}
+        {/* 4 Executive KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+          {/* Card 1: In-Transit Inventory Valuation */}
           <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+            <div className="w-11 h-11 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
               <Truck className="w-5 h-5" />
             </div>
-            <div>
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">In Transit</span>
-              <div className="text-xl font-black text-slate-900 font-mono mt-0.5">
-                {metrics.inTransitCount}
+            <div className="min-w-0">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block truncate">
+                In-Transit Valuation
+              </span>
+              <div className="text-lg sm:text-xl font-black text-slate-900 font-mono mt-0.5 truncate">
+                {formatCurrency(metrics.inTransitValuation || 0)}
               </div>
+              <span className="text-[10px] text-indigo-600 font-medium">Floating Stock on Road</span>
             </div>
           </div>
 
+          {/* Card 2: In-Transit Deliveries */}
+          <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+              <Layers className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                Active In-Transit
+              </span>
+              <div className="text-xl font-black text-slate-900 font-mono mt-0.5">
+                {metrics.inTransitCount}
+              </div>
+              <span className="text-[10px] text-slate-400">Van & Lorry Shipments</span>
+            </div>
+          </div>
+
+          {/* Card 3: Discrepancies Pending Resolution */}
+          <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+            <div
+              className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
+                metrics.discrepanciesPendingCount > 0
+                  ? "bg-amber-100 text-amber-700 animate-pulse"
+                  : "bg-slate-100 text-slate-500"
+              }`}
+            >
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                Pending Variances
+              </span>
+              <div
+                className={`text-xl font-black font-mono mt-0.5 ${
+                  metrics.discrepanciesPendingCount > 0 ? "text-amber-600" : "text-slate-900"
+                }`}
+              >
+                {metrics.discrepanciesPendingCount}
+              </div>
+              <span className="text-[10px] text-slate-400">Shortage / Damaged Stock</span>
+            </div>
+          </div>
+
+          {/* Card 4: Completed Transfers */}
           <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
             <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
               <CheckCircle2 className="w-5 h-5" />
             </div>
             <div>
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Completed</span>
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                Completed
+              </span>
               <div className="text-xl font-black text-slate-900 font-mono mt-0.5">
                 {metrics.completedCount}
               </div>
-            </div>
-          </div>
-
-          <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
-              <Building className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Active Locations</span>
-              <div className="text-xl font-black text-slate-900 font-mono mt-0.5">
-                {branches.filter((b) => b.isActive).length}
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
-              <Clock className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Draft Orders</span>
-              <div className="text-xl font-black text-slate-900 font-mono mt-0.5">
-                {metrics.draftCount}
-              </div>
+              <span className="text-[10px] text-emerald-600">Reconciled Deliveries</span>
             </div>
           </div>
         </div>
@@ -730,11 +927,11 @@ export default function TransfersPage() {
                 <table className="w-full text-xs text-left">
                   <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                     <tr>
-                      <th className="py-3 px-4">Transfer Number</th>
+                      <th className="py-3 px-4">Transfer / Manifest</th>
                       <th className="py-3 px-4">Route (Origin → Destination)</th>
-                      <th className="py-3 px-4">Dispatched Items</th>
-                      <th className="py-3 px-4">Carrier / Transport</th>
-                      <th className="py-3 px-4 text-center">Status</th>
+                      <th className="py-3 px-4">Items & Valuation</th>
+                      <th className="py-3 px-4">Van / Driver Logistics</th>
+                      <th className="py-3 px-4 text-center">Status & Variances</th>
                       <th className="py-3 px-4 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -764,6 +961,11 @@ export default function TransfersPage() {
                         <tr key={t._id} className="hover:bg-slate-50/70 transition">
                           <td className="py-3 px-4">
                             <span className="font-mono font-bold text-slate-900 block">{t.transferNumber}</span>
+                            {t.manifestToken && (
+                              <span className="text-[10px] font-mono text-indigo-700 font-semibold block">
+                                Token: {t.manifestToken}
+                              </span>
+                            )}
                             <span className="text-[10px] text-slate-400">{formatSLDateTime(t.createdAt)}</span>
                           </td>
 
@@ -779,44 +981,81 @@ export default function TransfersPage() {
                             <span className="font-bold text-slate-800 block">
                               {t.totalItemsSent} Units ({t.items?.length || 0} SKUs)
                             </span>
+                            <span className="font-mono text-xs font-semibold text-indigo-900 block">
+                              {formatCurrency(t.totalTransitValue || 0)}
+                            </span>
                             {t.status === "COMPLETED" && typeof t.totalItemsReceived === "number" && (
-                              <span className={`text-[10px] ${t.totalItemsReceived === t.totalItemsSent ? "text-emerald-700 font-semibold" : "text-rose-600 font-bold"}`}>
-                                Received: {t.totalItemsReceived} Units
+                              <span
+                                className={`text-[10px] block ${
+                                  t.totalItemsReceived === t.totalItemsSent
+                                    ? "text-emerald-700 font-semibold"
+                                    : "text-rose-600 font-bold"
+                                }`}
+                              >
+                                Rec: {t.totalItemsReceived} Units
                               </span>
                             )}
                           </td>
 
                           <td className="py-3 px-4 text-slate-600">
-                            <span className="font-medium block">{t.carrierName || "In-house Vehicle"}</span>
-                            {t.trackingReference && (
-                              <span className="font-mono text-[10px] text-slate-400 block">Ref: {t.trackingReference}</span>
+                            <span className="font-bold text-slate-800 font-mono block">
+                              {t.vehicleNumber || t.carrierName || "In-house Van"}
+                            </span>
+                            {t.driverName && (
+                              <span className="text-xs text-slate-600 flex items-center gap-1">
+                                <User className="w-3 h-3 text-slate-400" />
+                                <span>{t.driverName}</span>
+                              </span>
+                            )}
+                            {t.gatePassOutTime && (
+                              <span className="font-mono text-[10px] text-slate-400 block">
+                                Gate Out: {formatSLDateTime(t.gatePassOutTime)}
+                              </span>
                             )}
                           </td>
 
                           <td className="py-3 px-4 text-center">
-                            <span
-                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                                t.status === "COMPLETED"
-                                  ? "bg-emerald-100 text-emerald-800"
-                                  : t.status === "IN_TRANSIT"
-                                  ? "bg-blue-100 text-blue-800 animate-pulse"
-                                  : t.status === "CANCELLED"
-                                  ? "bg-rose-100 text-rose-800"
-                                  : "bg-amber-100 text-amber-800"
-                              }`}
-                            >
-                              {t.status === "IN_TRANSIT" && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
-                              {t.status.replace("_", " ")}
-                            </span>
+                            <div className="flex flex-col items-center gap-1">
+                              <span
+                                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                  t.status === "COMPLETED"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : t.status === "IN_TRANSIT"
+                                    ? "bg-blue-100 text-blue-800 animate-pulse"
+                                    : t.status === "CANCELLED"
+                                    ? "bg-rose-100 text-rose-800"
+                                    : "bg-amber-100 text-amber-800"
+                                }`}
+                              >
+                                {t.status === "IN_TRANSIT" && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
+                                {t.status.replace("_", " ")}
+                              </span>
+
+                              {/* Discrepancy indicator */}
+                              {t.discrepancyStatus && t.discrepancyStatus !== "NO_DISCREPANCY" && (
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
+                                    t.discrepancyResolved
+                                      ? "bg-slate-100 text-slate-600"
+                                      : "bg-amber-100 text-amber-800 border border-amber-300"
+                                  }`}
+                                >
+                                  <AlertTriangle className="w-2.5 h-2.5" />
+                                  <span>
+                                    {t.discrepancyStatus} {t.discrepancyResolved ? "(Reconciled)" : ""}
+                                  </span>
+                                </span>
+                              )}
+                            </div>
                           </td>
 
                           <td className="py-3 px-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {/* Print Challan */}
+                              {/* Print Manifest & Challan */}
                               <button
                                 type="button"
-                                onClick={() => setActivePrintTransfer(t)}
-                                title="Print Delivery Challan"
+                                onClick={() => setActiveManifestTransfer(t as any)}
+                                title="Print Delivery Challan & Driver Gate Pass"
                                 className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 transition"
                               >
                                 <Printer className="w-3.5 h-3.5" />
@@ -835,25 +1074,49 @@ export default function TransfersPage() {
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => handleDispatchDraft(t._id)}
-                                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1"
+                                    onClick={() => handleOpenDispatchModal(t)}
+                                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
                                   >
                                     <Send className="w-3 h-3" /> Dispatch
                                   </button>
                                 </>
                               )}
 
-
-                              {/* Receive Inward Shipment */}
+                              {/* In Transit Actions: Scan Intake & Manual Receive */}
                               {t.status === "IN_TRANSIT" && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenReceiveModal(t)}
-                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
-                                >
-                                  <Check className="w-3 h-3" /> Receive
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => router.push(`/transfers/scan?transferId=${t._id}`)}
+                                    className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition flex items-center gap-1"
+                                    title="Dock Barcode Scanner Intake"
+                                  >
+                                    <Barcode className="w-3 h-3" /> Scan
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenReceiveModal(t)}
+                                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                                  >
+                                    <Check className="w-3 h-3" /> Receive
+                                  </button>
+                                </>
                               )}
+
+                              {/* Completed with unresolved discrepancy: Resolve */}
+                              {t.status === "COMPLETED" &&
+                                t.discrepancyStatus &&
+                                t.discrepancyStatus !== "NO_DISCREPANCY" &&
+                                !t.discrepancyResolved && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenResolveDiscrepancy(t)}
+                                    className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                                    title="Resolve transit shortage / damage"
+                                  >
+                                    <AlertCircle className="w-3 h-3 text-amber-700" /> Resolve
+                                  </button>
+                                )}
 
                               {/* Cancel */}
                               {(t.status === "DRAFT" || t.status === "IN_TRANSIT") && (
@@ -1160,17 +1423,70 @@ export default function TransfersPage() {
                 </table>
               </div>
 
-              {/* Logistics & Carrier Inputs */}
+              {/* Logistics & Vehicle / Driver Inputs */}
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div>
                   <label className="block text-slate-700 font-semibold mb-1">
-                    Carrier / Vehicle / Driver
+                    Carrier / Van / Lorry Reg Number
+                  </label>
+                  <input
+                    type="text"
+                    value={newTransferVehicle}
+                    onChange={(e) => setNewTransferVehicle(e.target.value)}
+                    placeholder="e.g. WP-CAB-4921 (Store Van)"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    Driver Full Name
+                  </label>
+                  <input
+                    type="text"
+                    value={newTransferDriverName}
+                    onChange={(e) => setNewTransferDriverName(e.target.value)}
+                    placeholder="e.g. K. Perera"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    Driver Mobile Phone
+                  </label>
+                  <input
+                    type="text"
+                    value={newTransferDriverPhone}
+                    onChange={(e) => setNewTransferDriverPhone(e.target.value)}
+                    placeholder="e.g. 077 123 4567"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    Estimated Arrival Date & Time
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={newTransferEstArrival}
+                    onChange={(e) => setNewTransferEstArrival(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    Logistics Carrier Name (Optional)
                   </label>
                   <input
                     type="text"
                     value={newTransferCarrier}
                     onChange={(e) => setNewTransferCarrier(e.target.value)}
-                    placeholder="e.g. Store Van WP-CAB-1234"
+                    placeholder="e.g. Internal Fleet or City Logistics"
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
@@ -1182,21 +1498,21 @@ export default function TransfersPage() {
                     type="text"
                     value={newTransferTracking}
                     onChange={(e) => setNewTransferTracking(e.target.value)}
-                    placeholder="e.g. TRK-99882 or Driver Phone"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g. WB-89102"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
               </div>
 
               <div>
                 <label className="block text-slate-700 font-semibold text-xs mb-1">
-                  Notes / Handling Instructions (Optional)
+                  Notes / Dispatch Remarks (Optional)
                 </label>
                 <input
                   type="text"
                   value={newTransferNotes}
                   onChange={(e) => setNewTransferNotes(e.target.value)}
-                  placeholder="e.g. Fragile glass bottles, deliver before 3 PM"
+                  placeholder="e.g. Fragile cartons, keep refrigerated, check security seals"
                   className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -1235,7 +1551,7 @@ export default function TransfersPage() {
         {/* ================= MODAL: RECEIVE INWARD SHIPMENT ================= */}
         {receivingTransfer && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[95vh] overflow-y-auto">
+            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[95vh] overflow-y-auto">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
@@ -1255,6 +1571,24 @@ export default function TransfersPage() {
                 </button>
               </div>
 
+              {/* Barcode Scanner Dock Shortcut Banner */}
+              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <Barcode className="w-4 h-4 text-indigo-700" />
+                  <span className="font-semibold text-indigo-900">
+                    Prefer barcode intake on mobile or scanner gun?
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => router.push(`/transfers/scan?transferId=${receivingTransfer._id}`)}
+                  className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs flex items-center gap-1 shadow-xs transition"
+                >
+                  <span>Open Scanner Dock</span>
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              </div>
+
               {/* Origin Notice */}
               <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs space-y-1">
                 <div className="flex justify-between">
@@ -1262,32 +1596,39 @@ export default function TransfersPage() {
                   <span className="font-bold text-slate-900">{receivingTransfer.sourceBranchName}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Destination:</span>
+                  <span className="text-slate-500">Destination Store:</span>
                   <span className="font-bold text-blue-700">{receivingTransfer.destinationBranchName}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Carrier / Vehicle:</span>
-                  <span className="font-semibold">{receivingTransfer.carrierName || "In-house vehicle"}</span>
+                  <span className="text-slate-500">Assigned Van / Driver:</span>
+                  <span className="font-semibold text-slate-800">
+                    {receivingTransfer.vehicleNumber || receivingTransfer.carrierName || "Store Van"}{" "}
+                    {receivingTransfer.driverName ? `• ${receivingTransfer.driverName}` : ""}
+                  </span>
                 </div>
               </div>
 
               {/* Verification Table */}
               <div className="space-y-1">
                 <span className="text-xs font-bold text-slate-800 block">
-                  Verify & Confirm Received Quantities:
+                  Verify Received & Damaged Quantities:
                 </span>
                 <div className="overflow-hidden border border-slate-200 rounded-xl">
                   <table className="w-full text-xs text-left">
                     <thead className="bg-slate-100 text-[10px] font-bold text-slate-600 uppercase">
                       <tr>
                         <th className="py-2.5 px-3">Product Name</th>
-                        <th className="py-2.5 px-3 w-20 text-center">Sent Qty</th>
-                        <th className="py-2.5 px-3 w-28 text-center">Received Qty</th>
+                        <th className="py-2.5 px-3 w-16 text-center">Sent</th>
+                        <th className="py-2.5 px-3 w-24 text-center">Received</th>
+                        <th className="py-2.5 px-3 w-20 text-center">Damaged</th>
+                        <th className="py-2.5 px-3 w-32">Reason</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-mono text-xs">
                       {receivingTransfer.items.map((it) => {
                         const recVal = receivedQtyMap[it.productId] ?? it.quantitySent;
+                        const dmgVal = damagedQtyMap[it.productId] ?? 0;
+                        const reason = discrepancyReasonMap[it.productId] || "NONE";
                         const isShort = recVal < it.quantitySent;
                         const isOver = recVal > it.quantitySent;
 
@@ -1296,10 +1637,10 @@ export default function TransfersPage() {
                             <td className="py-2 px-3 font-sans font-semibold text-slate-800">
                               {it.name}
                               <span className="block text-[10px] text-slate-400 font-normal">
-                                SKU: {it.sku || "—"}
+                                SKU: {it.sku || "—"} {it.barcode ? `• Barcode: ${it.barcode}` : ""}
                               </span>
                             </td>
-                            <td className="py-2 px-3 text-center text-slate-700">
+                            <td className="py-2 px-3 text-center text-slate-700 font-bold">
                               {it.quantitySent} {it.unit}
                             </td>
                             <td className="py-2 px-3 text-center">
@@ -1316,13 +1657,45 @@ export default function TransfersPage() {
                                 }}
                                 className={`w-16 px-1.5 py-1 text-center font-bold font-mono border rounded text-xs ${
                                   isShort
-                                    ? "border-rose-400 bg-rose-50 text-rose-800"
+                                    ? "border-amber-400 bg-amber-50 text-amber-800"
                                     : isOver
                                     ? "border-blue-400 bg-blue-50 text-blue-800"
                                     : "border-slate-300 text-slate-900"
                                 }`}
-                              />{" "}
-                              <span className="text-[10px] text-slate-500 font-sans">{it.unit}</span>
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                value={dmgVal}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  setDamagedQtyMap({
+                                    ...damagedQtyMap,
+                                    [it.productId]: val,
+                                  });
+                                }}
+                                className="w-14 px-1.5 py-1 text-center font-bold font-mono border border-rose-300 bg-rose-50 text-rose-800 rounded text-xs"
+                              />
+                            </td>
+                            <td className="py-2 px-3 font-sans">
+                              <select
+                                value={reason}
+                                onChange={(e) => {
+                                  setDiscrepancyReasonMap({
+                                    ...discrepancyReasonMap,
+                                    [it.productId]: e.target.value,
+                                  });
+                                }}
+                                className="w-full text-[11px] p-1 border border-slate-200 rounded bg-white text-slate-700"
+                              >
+                                <option value="NONE">None</option>
+                                <option value="SHORTAGE_IN_TRANSIT">Shortage</option>
+                                <option value="DAMAGED_IN_TRANSIT">Damaged</option>
+                                <option value="WRONG_ITEM">Wrong Item</option>
+                                <option value="OVER_DELIVERED">Excess</option>
+                              </select>
                             </td>
                           </tr>
                         );
@@ -1348,6 +1721,227 @@ export default function TransfersPage() {
                   className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/25 transition disabled:opacity-50"
                 >
                   {submittingReceive ? "Receiving Goods..." : "Confirm & Update Branch Inventory"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= MODAL: DISPATCH DRAFT ORDER WITH GATE PASS ================= */}
+        {dispatchingTransfer && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
+                    <Send className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-sm">Dispatch Van & Issue Gate Pass</h3>
+                    <p className="text-[11px] text-slate-500 font-mono">{dispatchingTransfer.transferNumber}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDispatchingTransfer(null)}
+                  className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Route:</span>
+                  <span className="font-bold text-slate-900">
+                    {dispatchingTransfer.sourceBranchName} &rarr; {dispatchingTransfer.destinationBranchName}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Total Dispatched Items:</span>
+                  <span className="font-bold text-slate-900">
+                    {dispatchingTransfer.totalItemsSent} Units ({dispatchingTransfer.items.length} SKUs)
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-1">
+                      Van / Lorry Reg Number *
+                    </label>
+                    <input
+                      type="text"
+                      value={dispatchVehicle}
+                      onChange={(e) => setDispatchVehicle(e.target.value)}
+                      placeholder="e.g. WP-CAB-4921"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-1">
+                      Driver Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={dispatchDriverName}
+                      onChange={(e) => setDispatchDriverName(e.target.value)}
+                      placeholder="e.g. K. Perera"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-1">
+                      Driver Phone Number
+                    </label>
+                    <input
+                      type="text"
+                      value={dispatchDriverPhone}
+                      onChange={(e) => setDispatchDriverPhone(e.target.value)}
+                      placeholder="077XXXXXXX"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-1">
+                      Estimated Arrival Time
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={dispatchEstArrival}
+                      onChange={(e) => setDispatchEstArrival(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    Gate Out Remarks / Departure Seal No
+                  </label>
+                  <input
+                    type="text"
+                    value={dispatchNotes}
+                    onChange={(e) => setDispatchNotes(e.target.value)}
+                    placeholder="e.g. Security seal #SL-8921, driver inspected fuel/tyres"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setDispatchingTransfer(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={submittingDispatch}
+                  onClick={handleConfirmDispatch}
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/25 transition disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{submittingDispatch ? "Dispatching..." : "Confirm Dispatch & Issue Gate Pass"}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= MODAL: RESOLVE RECEIVING DISCREPANCY ================= */}
+        {resolvingDiscrepancyTransfer && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center">
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-sm">Settle Transit Discrepancy</h3>
+                    <p className="text-[11px] text-slate-500 font-mono">
+                      {resolvingDiscrepancyTransfer.transferNumber} • Status: {resolvingDiscrepancyTransfer.discrepancyStatus}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setResolvingDiscrepancyTransfer(null)}
+                  className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Variance Financial Summary */}
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-amber-800">Total Transit Discrepancy Loss:</span>
+                  <span className="font-black font-mono text-rose-700">
+                    {formatCurrency(resolvingDiscrepancyTransfer.totalDiscrepancyValue || 0)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-slate-600 text-[11px]">
+                  <span>Sent Items: {resolvingDiscrepancyTransfer.totalItemsSent} Units</span>
+                  <span>Received: {resolvingDiscrepancyTransfer.totalItemsReceived ?? "N/A"} Units</span>
+                </div>
+              </div>
+
+              {/* Resolution Form */}
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    Discrepancy Resolution Action *
+                  </label>
+                  <select
+                    value={resolutionAction}
+                    onChange={(e) => setResolutionAction(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="ACCEPT_SHORTAGE">Accept as Transit Shrinkage / Write-Off</option>
+                    <option value="CLAIM_DRIVER">File Claim Against Van Driver / Carrier</option>
+                    <option value="RETURN_TO_SENDER">Return Damaged Stock to Source Branch</option>
+                    <option value="RECONCILED">Reconciled / Settled with Counterpart Stock</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    Resolution Notes & Financial Approval Details *
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={resolutionNotes}
+                    onChange={(e) => setResolutionNotes(e.target.value)}
+                    placeholder="Enter management justification, insurance claim number, driver acknowledgement..."
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setResolvingDiscrepancyTransfer(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={submittingResolution || !resolutionNotes.trim()}
+                  onClick={handleConfirmResolveDiscrepancy}
+                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-md shadow-amber-600/25 transition disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>{submittingResolution ? "Settling..." : "Confirm & Settle Discrepancy"}</span>
                 </button>
               </div>
             </div>
@@ -1599,6 +2193,20 @@ export default function TransfersPage() {
             }
             transfer={activePrintTransfer as any}
             onClose={() => setActivePrintTransfer(null)}
+          />
+        )}
+
+        {/* ================= MODAL: GOODS TRANSFER MANIFEST & GATE PASS ================= */}
+        {activeManifestTransfer && (
+          <StockTransferManifestReceipt
+            business={
+              business || {
+                name: "Sri Lanka POS",
+                address: "Central Logistics Division",
+              }
+            }
+            transfer={activeManifestTransfer}
+            onClose={() => setActiveManifestTransfer(null)}
           />
         )}
       </div>

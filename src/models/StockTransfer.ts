@@ -1,6 +1,18 @@
 import mongoose, { Schema, Document, Model, Types } from "mongoose";
 
 export type StockTransferStatus = "DRAFT" | "IN_TRANSIT" | "COMPLETED" | "CANCELLED";
+export type TransferDiscrepancyReason =
+  | "SHORTAGE_IN_TRANSIT"
+  | "DAMAGED_IN_TRANSIT"
+  | "WRONG_ITEM"
+  | "OVER_DELIVERED"
+  | "NONE";
+
+export type TransferDiscrepancyAction =
+  | "ACCEPT_SHORTAGE"
+  | "CLAIM_DRIVER"
+  | "RETURN_TO_SENDER"
+  | "RECONCILED";
 
 export interface IStockTransferItem {
   productId: Types.ObjectId;
@@ -10,12 +22,26 @@ export interface IStockTransferItem {
   unit: string;
   quantitySent: number;
   quantityReceived?: number;
+  quantityDamagedInTransit?: number;
+  discrepancyReason?: TransferDiscrepancyReason;
+  discrepancyAction?: TransferDiscrepancyAction;
+  discrepancyNotes?: string;
   unitCost?: number;
+  totalSentCost?: number;
+  totalReceivedCost?: number;
   batchNumber?: string;
   expiryDate?: Date;
   notes?: string;
 }
 
+export function generateTransferManifestToken(): string {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let token = "stn_";
+  for (let i = 0; i < 24; i++) {
+    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return token;
+}
 
 export interface IStockTransfer extends Document {
   businessId: Types.ObjectId;
@@ -28,6 +54,14 @@ export interface IStockTransfer extends Document {
   items: IStockTransferItem[];
   totalItemsSent: number;
   totalItemsReceived?: number;
+  totalTransitValue: number; // In-transit inventory financial valuation (Rs.)
+  totalReceivedValue?: number;
+  totalDiscrepancyValue?: number;
+  discrepancyStatus?: "NO_DISCREPANCY" | "SHORTAGE" | "OVERAGE" | "DAMAGED";
+  discrepancyResolved?: boolean;
+  discrepancyResolutionNotes?: string;
+  discrepancyResolvedBy?: string;
+  discrepancyResolvedAt?: Date;
   dispatchedBy?: string;
   dispatchedAt?: Date;
   receivedBy?: string;
@@ -35,8 +69,14 @@ export interface IStockTransfer extends Document {
   cancelledBy?: string;
   cancelledAt?: Date;
   cancellationReason?: string;
-  carrierName?: string; // e.g. "Store Van WP-CAB-1234", "PromptX Courier"
+  carrierName?: string; // e.g. "Company Logistics", "PromptX"
+  vehicleNumber?: string; // e.g. "WP-CAB-4921"
+  driverName?: string;
+  driverPhone?: string;
+  gatePassOutTime?: Date;
+  estimatedArrival?: Date;
   trackingReference?: string;
+  manifestToken?: string;
   pickListId?: Types.ObjectId;
   pickListNumber?: string;
   notes?: string;
@@ -65,6 +105,10 @@ const StockTransferItemSchema = new Schema<IStockTransferItem>(
       default: "pcs",
       trim: true,
     },
+    barcode: {
+      type: String,
+      trim: true,
+    },
     quantitySent: {
       type: Number,
       required: true,
@@ -74,10 +118,56 @@ const StockTransferItemSchema = new Schema<IStockTransferItem>(
       type: Number,
       min: 0,
     },
+    quantityDamagedInTransit: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    discrepancyReason: {
+      type: String,
+      enum: [
+        "SHORTAGE_IN_TRANSIT",
+        "DAMAGED_IN_TRANSIT",
+        "WRONG_ITEM",
+        "OVER_DELIVERED",
+        "NONE",
+      ],
+      default: "NONE",
+    },
+    discrepancyAction: {
+      type: String,
+      enum: [
+        "ACCEPT_SHORTAGE",
+        "CLAIM_DRIVER",
+        "RETURN_TO_SENDER",
+        "RECONCILED",
+      ],
+    },
+    discrepancyNotes: {
+      type: String,
+      trim: true,
+    },
     unitCost: {
       type: Number,
       default: 0,
       min: 0,
+    },
+    totalSentCost: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalReceivedCost: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    batchNumber: {
+      type: String,
+      trim: true,
+    },
+    expiryDate: {
+      type: Date,
     },
     notes: {
       type: String,
@@ -143,6 +233,41 @@ const StockTransferSchema = new Schema<IStockTransfer>(
       type: Number,
       min: 0,
     },
+    totalTransitValue: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalReceivedValue: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalDiscrepancyValue: {
+      type: Number,
+      default: 0,
+    },
+    discrepancyStatus: {
+      type: String,
+      enum: ["NO_DISCREPANCY", "SHORTAGE", "OVERAGE", "DAMAGED"],
+      default: "NO_DISCREPANCY",
+      index: true,
+    },
+    discrepancyResolved: {
+      type: Boolean,
+      default: true,
+    },
+    discrepancyResolutionNotes: {
+      type: String,
+      trim: true,
+    },
+    discrepancyResolvedBy: {
+      type: String,
+      trim: true,
+    },
+    discrepancyResolvedAt: {
+      type: Date,
+    },
     dispatchedBy: {
       type: String,
       trim: true,
@@ -172,9 +297,33 @@ const StockTransferSchema = new Schema<IStockTransfer>(
       type: String,
       trim: true,
     },
+    vehicleNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
+    },
+    driverName: {
+      type: String,
+      trim: true,
+    },
+    driverPhone: {
+      type: String,
+      trim: true,
+    },
+    gatePassOutTime: {
+      type: Date,
+    },
+    estimatedArrival: {
+      type: Date,
+    },
     trackingReference: {
       type: String,
       trim: true,
+    },
+    manifestToken: {
+      type: String,
+      trim: true,
+      index: true,
     },
     pickListId: {
       type: Schema.Types.ObjectId,

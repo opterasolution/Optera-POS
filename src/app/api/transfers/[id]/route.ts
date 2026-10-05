@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import mongoose from "mongoose";
 import { connectToDatabase } from "@/lib/db";
-import { StockTransfer } from "@/models/StockTransfer";
+import { StockTransfer, generateTransferManifestToken } from "@/models/StockTransfer";
 import { BranchStock } from "@/models/BranchStock";
 import { InventoryMovement } from "@/models/InventoryMovement";
 import { AuditLog } from "@/models/AuditLog";
@@ -16,7 +17,16 @@ export async function GET(
 
     if (Boolean(process.env.MONGODB_URI)) {
       await connectToDatabase();
-      const transfer = await StockTransfer.findOne({ _id: id, businessId: context.businessId }).lean();
+      const isObjectId = mongoose.Types.ObjectId.isValid(id);
+      const query: any = { businessId: context.businessId };
+
+      if (isObjectId) {
+        query.$or = [{ _id: id }, { manifestToken: id }, { transferNumber: id }];
+      } else {
+        query.$or = [{ manifestToken: id }, { transferNumber: id }];
+      }
+
+      const transfer = await StockTransfer.findOne(query).lean();
       if (!transfer) {
         return NextResponse.json({ success: false, error: "Transfer not found" }, { status: 404 });
       }
@@ -42,9 +52,9 @@ export async function PATCH(
     const body = await req.json();
     const { action } = body;
 
-    if (!["DISPATCH", "RECEIVE", "CANCEL"].includes(action)) {
+    if (!["DISPATCH", "RECEIVE", "CANCEL", "RESOLVE_DISCREPANCY"].includes(action)) {
       return NextResponse.json(
-        { success: false, error: "Invalid action. Supported actions: DISPATCH, RECEIVE, CANCEL." },
+        { success: false, error: "Invalid action. Supported actions: DISPATCH, RECEIVE, CANCEL, RESOLVE_DISCREPANCY." },
         { status: 400 }
       );
     }
@@ -53,7 +63,15 @@ export async function PATCH(
       await connectToDatabase();
       const businessId = context.businessId;
 
-      const transfer = await StockTransfer.findOne({ _id: id, businessId });
+      const isObjectId = mongoose.Types.ObjectId.isValid(id);
+      const query: any = { businessId };
+      if (isObjectId) {
+        query.$or = [{ _id: id }, { manifestToken: id }, { transferNumber: id }];
+      } else {
+        query.$or = [{ manifestToken: id }, { transferNumber: id }];
+      }
+
+      const transfer = await StockTransfer.findOne(query);
       if (!transfer) {
         return NextResponse.json({ success: false, error: "Transfer not found." }, { status: 404 });
       }
@@ -126,9 +144,23 @@ export async function PATCH(
         transfer.status = "IN_TRANSIT";
         transfer.dispatchedBy = context.username || "Manager";
         transfer.dispatchedAt = new Date();
+        transfer.gatePassOutTime = body.gatePassOutTime ? new Date(body.gatePassOutTime) : new Date();
+
         if (body.carrierName) transfer.carrierName = body.carrierName.trim();
         if (body.trackingReference) transfer.trackingReference = body.trackingReference.trim();
+        if (body.vehicleNumber) transfer.vehicleNumber = body.vehicleNumber.trim();
+        if (body.driverName) transfer.driverName = body.driverName.trim();
+        if (body.driverPhone) transfer.driverPhone = body.driverPhone.trim();
+        if (body.estimatedArrival) transfer.estimatedArrival = new Date(body.estimatedArrival);
+        if (!transfer.manifestToken) transfer.manifestToken = generateTransferManifestToken();
         if (body.notes) transfer.notes = body.notes.trim();
+
+        // Calculate totalTransitValue if missing
+        if (!transfer.totalTransitValue || transfer.totalTransitValue === 0) {
+          transfer.totalTransitValue = Math.round(
+            transfer.items.reduce((sum, it) => sum + (it.quantitySent * (it.unitCost || 0)), 0) * 100
+          ) / 100;
+        }
 
         await transfer.save();
 
@@ -138,13 +170,19 @@ export async function PATCH(
           entity: "STOCK_TRANSFER",
           entityId: transfer._id.toString(),
           userId: context.userId,
-          details: { transferNumber: transfer.transferNumber, carrier: transfer.carrierName },
+          details: {
+            transferNumber: transfer.transferNumber,
+            carrier: transfer.carrierName,
+            vehicleNumber: transfer.vehicleNumber,
+            driverName: transfer.driverName,
+            totalTransitValue: transfer.totalTransitValue,
+          },
         });
 
         return NextResponse.json({
           success: true,
           transfer,
-          message: `Transfer ${transfer.transferNumber} marked as IN_TRANSIT.`,
+          message: `Transfer ${transfer.transferNumber} marked as IN_TRANSIT with Gate Pass generated.`,
         });
       }
 
@@ -157,16 +195,28 @@ export async function PATCH(
           );
         }
 
-        const receivedItemsMap = new Map<string, number>();
+        const receivedItemsMap = new Map<string, any>();
         if (Array.isArray(body.receivedItems)) {
           body.receivedItems.forEach((ri: any) => {
-            if (ri.productId && typeof ri.quantityReceived === "number") {
-              receivedItemsMap.set(ri.productId.toString(), Math.max(0, ri.quantityReceived));
+            if (ri.productId) {
+              receivedItemsMap.set(ri.productId.toString(), {
+                quantityReceived: typeof ri.quantityReceived === "number" ? Math.max(0, ri.quantityReceived) : undefined,
+                quantityDamagedInTransit: typeof ri.quantityDamagedInTransit === "number" ? Math.max(0, ri.quantityDamagedInTransit) : 0,
+                discrepancyReason: ri.discrepancyReason || undefined,
+                discrepancyAction: ri.discrepancyAction || undefined,
+                discrepancyNotes: ri.discrepancyNotes?.trim() || undefined,
+                batchNumber: ri.batchNumber?.trim() || undefined,
+                expiryDate: ri.expiryDate ? new Date(ri.expiryDate) : undefined,
+              });
             }
           });
         }
 
         let totalReceived = 0;
+        let totalReceivedValue = 0;
+        let hasShortage = false;
+        let hasOverage = false;
+        let hasDamaged = false;
         const updatedItems = [];
 
         // Fetch destination branch stock records
@@ -180,13 +230,38 @@ export async function PATCH(
 
         for (const item of transfer.items) {
           const pidStr = item.productId.toString();
-          const qtyRec = receivedItemsMap.has(pidStr)
-            ? (receivedItemsMap.get(pidStr) as number)
-            : item.quantitySent;
+          const receivedData = receivedItemsMap.get(pidStr);
+
+          const qtyRec =
+            receivedData && typeof receivedData.quantityReceived === "number"
+              ? receivedData.quantityReceived
+              : item.quantitySent;
+          const qtyDamaged = receivedData?.quantityDamagedInTransit || 0;
+
+          const unitCost = item.unitCost || 0;
+          const itemSentCost = item.totalSentCost || Math.round(item.quantitySent * unitCost * 100) / 100;
+          const itemRecCost = Math.round(qtyRec * unitCost * 100) / 100;
+
+          // Determine line discrepancy reason & action
+          let reason = receivedData?.discrepancyReason || "NONE";
+          let actionToTake = receivedData?.discrepancyAction || "NONE";
+
+          if (qtyDamaged > 0) {
+            hasDamaged = true;
+            if (reason === "NONE") reason = "DAMAGED_IN_TRANSIT";
+          }
+          if (qtyRec < item.quantitySent) {
+            hasShortage = true;
+            if (reason === "NONE") reason = "SHORTAGE_IN_TRANSIT";
+          } else if (qtyRec > item.quantitySent) {
+            hasOverage = true;
+            if (reason === "NONE") reason = "OVER_DELIVERED";
+          }
 
           totalReceived += qtyRec;
+          totalReceivedValue += itemRecCost;
 
-          // Increment destination branch stock
+          // Increment destination branch stock by qtyRec
           let dStock = destStockMap.get(pidStr);
           const prev = dStock ? dStock.quantity : 0;
           const next = prev + qtyRec;
@@ -222,19 +297,53 @@ export async function PATCH(
             productId: item.productId,
             name: item.name,
             sku: item.sku,
+            barcode: item.barcode || item.sku,
             unit: item.unit,
             quantitySent: item.quantitySent,
             quantityReceived: qtyRec,
-            unitCost: item.unitCost,
+            quantityDamagedInTransit: qtyDamaged,
+            unitCost,
+            totalSentCost: itemSentCost,
+            totalReceivedCost: itemRecCost,
+            discrepancyReason: reason,
+            discrepancyAction: actionToTake,
+            discrepancyNotes: receivedData?.discrepancyNotes || item.discrepancyNotes,
+            batchNumber: receivedData?.batchNumber || item.batchNumber,
+            expiryDate: receivedData?.expiryDate || item.expiryDate,
             notes: item.notes,
           });
         }
 
         transfer.items = updatedItems as any;
         transfer.totalItemsReceived = totalReceived;
+        transfer.totalReceivedValue = Math.round(totalReceivedValue * 100) / 100;
+
+        const transitVal =
+          transfer.totalTransitValue ||
+          Math.round(
+            transfer.items.reduce((sum, it) => sum + (it.quantitySent * (it.unitCost || 0)), 0) * 100
+          ) / 100;
+        transfer.totalTransitValue = transitVal;
+
+        // Discrepancy value
+        const discrepancyVal = Math.max(0, Math.round((transitVal - totalReceivedValue) * 100) / 100);
+        transfer.totalDiscrepancyValue = discrepancyVal;
+
+        let discrepancyStatus: "NO_DISCREPANCY" | "SHORTAGE" | "OVERAGE" | "DAMAGED" = "NO_DISCREPANCY";
+        if (hasDamaged) {
+          discrepancyStatus = "DAMAGED";
+        } else if (hasShortage) {
+          discrepancyStatus = "SHORTAGE";
+        } else if (hasOverage) {
+          discrepancyStatus = "OVERAGE";
+        }
+
+        transfer.discrepancyStatus = discrepancyStatus;
+        transfer.discrepancyResolved = discrepancyStatus === "NO_DISCREPANCY";
         transfer.status = "COMPLETED";
         transfer.receivedBy = context.username || "Receiving Officer";
         transfer.receivedAt = new Date();
+        if (body.notes) transfer.notes = body.notes.trim();
 
         await transfer.save();
 
@@ -248,14 +357,75 @@ export async function PATCH(
             transferNumber: transfer.transferNumber,
             totalSent: transfer.totalItemsSent,
             totalReceived,
-            discrepancy: transfer.totalItemsSent - totalReceived,
+            discrepancyStatus,
+            totalTransitValue: transitVal,
+            totalReceivedValue,
+            totalDiscrepancyValue: discrepancyVal,
           },
         });
 
         return NextResponse.json({
           success: true,
           transfer,
-          message: `Transfer ${transfer.transferNumber} received successfully at ${transfer.destinationBranchName}.`,
+          message: `Transfer ${transfer.transferNumber} received successfully with discrepancy status: ${discrepancyStatus}.`,
+        });
+      }
+
+      // ----------------- ACTION: RESOLVE_DISCREPANCY -----------------
+      if (action === "RESOLVE_DISCREPANCY") {
+        if (transfer.status !== "COMPLETED") {
+          return NextResponse.json(
+            { success: false, error: "Only completed transfers can have discrepancies resolved." },
+            { status: 400 }
+          );
+        }
+
+        const { resolutionNotes, resolutionAction, itemsResolution } = body;
+
+        transfer.discrepancyResolved = true;
+        transfer.discrepancyResolvedBy = context.username || "Manager";
+        transfer.discrepancyResolvedAt = new Date();
+        transfer.discrepancyResolutionNotes = resolutionNotes?.trim() || "Discrepancy settled and reconciled.";
+
+        if (Array.isArray(itemsResolution)) {
+          const resMap = new Map(itemsResolution.map((r: any) => [r.productId?.toString(), r]));
+          transfer.items = transfer.items.map((it) => {
+            const rData = resMap.get(it.productId?.toString());
+            if (rData) {
+              if (rData.discrepancyAction) it.discrepancyAction = rData.discrepancyAction;
+              if (rData.discrepancyNotes) it.discrepancyNotes = rData.discrepancyNotes;
+            } else if (resolutionAction) {
+              it.discrepancyAction = resolutionAction;
+            }
+            return it;
+          }) as any;
+        } else if (resolutionAction) {
+          transfer.items = transfer.items.map((it) => {
+            it.discrepancyAction = resolutionAction;
+            return it;
+          }) as any;
+        }
+
+        await transfer.save();
+
+        await AuditLog.create({
+          businessId,
+          action: "STOCK_TRANSFER_DISCREPANCY_RESOLVED",
+          entity: "STOCK_TRANSFER",
+          entityId: transfer._id.toString(),
+          userId: context.userId,
+          details: {
+            transferNumber: transfer.transferNumber,
+            resolutionNotes: transfer.discrepancyResolutionNotes,
+            resolutionAction: resolutionAction || "RECONCILED",
+            resolvedBy: transfer.discrepancyResolvedBy,
+          },
+        });
+
+        return NextResponse.json({
+          success: true,
+          transfer,
+          message: `Discrepancy for ${transfer.transferNumber} has been successfully resolved.`,
         });
       }
 

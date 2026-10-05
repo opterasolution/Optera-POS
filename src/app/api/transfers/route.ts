@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/db";
-import { StockTransfer, IStockTransferItem } from "@/models/StockTransfer";
+import { StockTransfer, IStockTransferItem, generateTransferManifestToken } from "@/models/StockTransfer";
 import { Branch } from "@/models/Branch";
 import { BranchStock } from "@/models/BranchStock";
 import { Product } from "@/models/Product";
@@ -41,20 +41,45 @@ export async function GET(req: Request) {
           { transferNumber: { $regex: search, $options: "i" } },
           { carrierName: { $regex: search, $options: "i" } },
           { trackingReference: { $regex: search, $options: "i" } },
+          { vehicleNumber: { $regex: search, $options: "i" } },
+          { driverName: { $regex: search, $options: "i" } },
+          { manifestToken: { $regex: search, $options: "i" } },
           { sourceBranchName: { $regex: search, $options: "i" } },
           { destinationBranchName: { $regex: search, $options: "i" } },
         ];
       }
 
-      const [transfers, totalCount, inTransitCount, completedCount, draftCount, cancelledCount] =
-        await Promise.all([
-          StockTransfer.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
-          StockTransfer.countDocuments(query),
-          StockTransfer.countDocuments({ businessId, status: "IN_TRANSIT" }),
-          StockTransfer.countDocuments({ businessId, status: "COMPLETED" }),
-          StockTransfer.countDocuments({ businessId, status: "DRAFT" }),
-          StockTransfer.countDocuments({ businessId, status: "CANCELLED" }),
-        ]);
+      const [
+        transfers,
+        totalCount,
+        inTransitCount,
+        completedCount,
+        draftCount,
+        cancelledCount,
+        inTransitAggregate,
+        discrepanciesPendingCount,
+      ] = await Promise.all([
+        StockTransfer.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+        StockTransfer.countDocuments(query),
+        StockTransfer.countDocuments({ businessId, status: "IN_TRANSIT" }),
+        StockTransfer.countDocuments({ businessId, status: "COMPLETED" }),
+        StockTransfer.countDocuments({ businessId, status: "DRAFT" }),
+        StockTransfer.countDocuments({ businessId, status: "CANCELLED" }),
+        StockTransfer.aggregate([
+          { $match: { businessId, status: "IN_TRANSIT" } },
+          { $group: { _id: null, totalValuation: { $sum: "$totalTransitValue" } } },
+        ]),
+        StockTransfer.countDocuments({
+          businessId,
+          discrepancyStatus: { $in: ["SHORTAGE", "OVERAGE", "DAMAGED"] },
+          discrepancyResolved: false,
+        }),
+      ]);
+
+      const inTransitValuation =
+        inTransitAggregate.length > 0 && inTransitAggregate[0].totalValuation
+          ? Math.round(inTransitAggregate[0].totalValuation * 100) / 100
+          : 0;
 
       return NextResponse.json({
         success: true,
@@ -65,6 +90,8 @@ export async function GET(req: Request) {
           draftCount,
           cancelledCount,
           totalCount,
+          inTransitValuation,
+          discrepanciesPendingCount,
         },
         pagination: {
           page,
@@ -85,6 +112,8 @@ export async function GET(req: Request) {
         draftCount: 0,
         cancelledCount: 0,
         totalCount: 0,
+        inTransitValuation: 0,
+        discrepanciesPendingCount: 0,
       },
       pagination: { page: 1, limit: 30, totalPages: 1, totalCount: 0 },
     });
@@ -109,6 +138,11 @@ export async function POST(req: Request) {
       dispatchImmediately = false,
       carrierName,
       trackingReference,
+      vehicleNumber,
+      driverName,
+      driverPhone,
+      gatePassOutTime,
+      estimatedArrival,
       notes,
     } = body;
 
@@ -174,6 +208,7 @@ export async function POST(req: Request) {
 
       const transferItems: IStockTransferItem[] = [];
       let totalQty = 0;
+      let totalTransitValue = 0;
 
       for (const item of items) {
         const prod = productMap.get(item.productId);
@@ -206,24 +241,34 @@ export async function POST(req: Request) {
           }
         }
 
+        const unitCost = prod.costPrice || 0;
+        const totalSentCost = Math.round(qty * unitCost * 100) / 100;
+        totalTransitValue += totalSentCost;
+
         transferItems.push({
           productId: prod._id,
           name: prod.name,
           sku: prod.sku,
+          barcode: prod.barcode || prod.sku,
           unit: prod.unit || "pcs",
           quantitySent: qty,
-          unitCost: prod.costPrice || 0,
+          unitCost,
+          totalSentCost,
           notes: item.notes?.trim() || undefined,
+          batchNumber: item.batchNumber?.trim() || undefined,
+          expiryDate: item.expiryDate ? new Date(item.expiryDate) : undefined,
         });
 
         totalQty += qty;
       }
 
       const initialStatus = dispatchImmediately ? "IN_TRANSIT" : "DRAFT";
+      const manifestToken = generateTransferManifestToken();
 
       const transfer = await StockTransfer.create({
         businessId,
         transferNumber,
+        manifestToken,
         sourceBranchId: sourceBranch._id,
         sourceBranchName: sourceBranch.name,
         destinationBranchId: destBranch._id,
@@ -231,8 +276,14 @@ export async function POST(req: Request) {
         status: initialStatus,
         items: transferItems,
         totalItemsSent: totalQty,
+        totalTransitValue: Math.round(totalTransitValue * 100) / 100,
         dispatchedBy: dispatchImmediately ? context.username || "Manager" : undefined,
         dispatchedAt: dispatchImmediately ? new Date() : undefined,
+        gatePassOutTime: dispatchImmediately ? (gatePassOutTime ? new Date(gatePassOutTime) : new Date()) : undefined,
+        estimatedArrival: estimatedArrival ? new Date(estimatedArrival) : undefined,
+        vehicleNumber: vehicleNumber?.trim() || undefined,
+        driverName: driverName?.trim() || undefined,
+        driverPhone: driverPhone?.trim() || undefined,
         carrierName: carrierName?.trim() || undefined,
         trackingReference: trackingReference?.trim() || undefined,
         notes: notes?.trim() || undefined,
