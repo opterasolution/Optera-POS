@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document, Model, Types } from "mongoose";
 
-export type CreditTransactionType = "CREDIT_SALE" | "PAYMENT" | "ADJUSTMENT";
-export type CreditPaymentMethod = "CASH" | "CARD" | "QR" | "BANK_TRANSFER";
+export type CreditTransactionType = "CREDIT_SALE" | "PAYMENT" | "ADJUSTMENT" | "CHEQUE_RETURN";
+export type CreditPaymentMethod = "CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CHEQUE";
 
 export interface ICreditTransaction extends Document {
   businessId: Types.ObjectId;
@@ -15,6 +15,8 @@ export interface ICreditTransaction extends Document {
   invoiceNumber?: string;
   paymentMethod?: CreditPaymentMethod;
   paymentReference?: string;
+  chequeId?: Types.ObjectId;
+  chequeNumber?: string;
   shiftId?: Types.ObjectId;
   registerId?: Types.ObjectId;
   registerName?: string;
@@ -45,7 +47,7 @@ const CreditTransactionSchema = new Schema<ICreditTransaction>(
     },
     type: {
       type: String,
-      enum: ["CREDIT_SALE", "PAYMENT", "ADJUSTMENT"],
+      enum: ["CREDIT_SALE", "PAYMENT", "ADJUSTMENT", "CHEQUE_RETURN"],
       required: true,
       index: true,
     },

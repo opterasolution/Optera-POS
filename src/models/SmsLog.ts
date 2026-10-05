@@ -13,6 +13,7 @@ export type SmsEventType =
   | "BROADCAST"
   | "PROMOTIONAL_CAMPAIGN"
   | "DELIVERY_DISPATCH"
+  | "CHEQUE_RETURN"
   | "CUSTOM"
   | "TEST";
 
@@ -65,6 +66,8 @@ const SmsLogSchema = new Schema<ISmsLog>(
         "QUOTATION_ALERT",
         "BROADCAST",
         "PROMOTIONAL_CAMPAIGN",
+        "DELIVERY_DISPATCH",
+        "CHEQUE_RETURN",
         "CUSTOM",
         "TEST",
       ],

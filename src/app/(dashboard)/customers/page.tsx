@@ -231,7 +231,7 @@ export default function CustomersPage() {
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [paymentCustomer, setPaymentCustomer] = useState<CustomerRecord | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "QR" | "BANK_TRANSFER">("CASH");
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "QR" | "BANK_TRANSFER" | "CHEQUE">("CASH");
   const [paymentRef, setPaymentRef] = useState("");
   const [paymentNotes, setPaymentNotes] = useState("");
   const [submittingPayment, setSubmittingPayment] = useState(false);
@@ -3209,9 +3209,10 @@ export default function CustomersPage() {
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Payment Method
                   </label>
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-5 gap-1.5">
                     {[
                       { id: "CASH", label: "Cash" },
+                      { id: "CHEQUE", label: "Cheque" },
                       { id: "CARD", label: "Card" },
                       { id: "QR", label: "LankaQR" },
                       { id: "BANK_TRANSFER", label: "Bank" },
@@ -3233,6 +3234,11 @@ export default function CustomersPage() {
                   {paymentMethod === "CASH" && (
                     <p className="text-[10px] text-emerald-700 mt-1">
                       Cash payments automatically sync into the active cash drawer shift as a Pay-In.
+                    </p>
+                  )}
+                  {paymentMethod === "CHEQUE" && (
+                    <p className="text-[10px] text-blue-700 mt-1">
+                      Cheque settlements, post-dated cheques, and realization deposits are managed in Cheques & PDCs.
                     </p>
                   )}
                 </div>

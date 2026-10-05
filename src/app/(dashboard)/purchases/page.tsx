@@ -6,6 +6,7 @@ import AppLayout from "@/components/layout/AppLayout";
 import {
   FileText,
   Barcode,
+  Landmark,
   Building2,
   Plus,
   Search,
@@ -2004,6 +2005,15 @@ export default function PurchasesPage() {
                     className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   />
                 </div>
+
+                <Link
+                  href="/cheques?direction=OUTWARD"
+                  className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-xl font-bold transition flex items-center gap-1.5 whitespace-nowrap text-xs"
+                  title="Open Outward Supplier Cheques in Realization Hub"
+                >
+                  <Landmark className="w-3.5 h-3.5" />
+                  <span>Cheque Clearing Hub</span>
+                </Link>
               </div>
             </div>
 

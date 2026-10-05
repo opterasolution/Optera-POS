@@ -35,6 +35,7 @@ import {
   UtensilsCrossed,
   Database,
   ClipboardCheck,
+  Landmark,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n/LanguageContext";
@@ -98,6 +99,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { label: t("nav.returns", "Returns & Credit Notes"), href: "/returns", icon: RotateCcw },
     { label: t("nav.shifts", "Shifts & Drawers"), href: "/shifts", icon: Clock },
     { label: t("nav.expenses", "Expenses & Petty Cash"), href: "/expenses", icon: Wallet, allowed: isManager || isSupervisor || isAccountant },
+    { label: t("nav.cheques", "Cheques & PDCs"), href: "/cheques", icon: Landmark, allowed: isManager || isSupervisor || isAccountant },
     { label: t("nav.customers", "Customers"), href: "/customers", icon: Users },
     { label: t("nav.promotions", "Promotions & Loyalty"), href: "/promotions", icon: Tag, allowed: isManager || isSupervisor },
     { label: t("nav.sms", "SMS & Notifications"), href: "/sms", icon: MessageSquare, allowed: isOwner || isManager || isSupervisor },
