@@ -39,6 +39,7 @@ import {
   ShieldCheck,
   Sparkles,
   Globe,
+  ExternalLink,
 } from "lucide-react";
 import PurchaseOrderReceipt, { PurchaseOrderData } from "@/components/receipts/PurchaseOrderReceipt";
 import SupplierPaymentReceipt, { SupplierPaymentData } from "@/components/receipts/SupplierPaymentReceipt";
@@ -46,6 +47,7 @@ import GoodsReceivedNoteReceipt, { GoodsReceivedNoteData } from "@/components/re
 import RfqBiddingManager from "@/components/purchases/RfqBiddingManager";
 import VendorPortalShareModal from "@/components/purchases/VendorPortalShareModal";
 import AutomatedReorderPlanner from "@/components/purchases/AutomatedReorderPlanner";
+import PoDispatchModal from "@/components/purchases/PoDispatchModal";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
 
 
@@ -75,6 +77,9 @@ interface PurchaseOrderItem {
   unitCost: number;
   total: number;
   notes?: string;
+  vendorAvailability?: "AVAILABLE" | "SHORTAGE" | "OUT_OF_STOCK";
+  vendorConfirmedQuantity?: number;
+  vendorNotes?: string;
 }
 
 interface PurchaseOrder {
@@ -98,6 +103,28 @@ interface PurchaseOrder {
   notes?: string;
   createdBy: string;
   createdAt: string;
+  vendorAccessToken?: string;
+  dispatchDetails?: {
+    dispatchedAt?: string;
+    dispatchedBy?: string;
+    channel?: "WHATSAPP" | "EMAIL" | "MANUAL_LINK";
+    recipientPhone?: string;
+    recipientEmail?: string;
+  };
+  vendorAcknowledgement?: {
+    status?: "PENDING" | "ACKNOWLEDGED" | "IN_TRANSIT" | "REJECTED";
+    acknowledgedAt?: string;
+    estimatedDeliveryDate?: string;
+    vendorReferenceNumber?: string;
+    repName?: string;
+    repPhone?: string;
+    rejectionReason?: string;
+    dispatchInvoiceNumber?: string;
+    vehicleNumber?: string;
+    driverName?: string;
+    driverPhone?: string;
+    dispatchedAt?: string;
+  };
 }
 
 interface Branch {
@@ -271,6 +298,10 @@ export default function PurchasesPage() {
 
   // Vendor Portal Share Modal State
   const [sharingSupplierPortal, setSharingSupplierPortal] = useState<Supplier | null>(null);
+
+  // PO Dispatch Modal State
+  const [dispatchingPo, setDispatchingPo] = useState<PurchaseOrder | null>(null);
+  const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
 
   // Load Data
   const loadData = async () => {
@@ -1256,21 +1287,54 @@ export default function PurchasesPage() {
                             </td>
 
                             <td className="py-3 px-4 text-center">
-                              <span
-                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                                  po.status === "RECEIVED"
-                                    ? "bg-emerald-100 text-emerald-800"
-                                    : po.status === "PARTIALLY_RECEIVED"
-                                    ? "bg-amber-100 text-amber-800"
-                                    : po.status === "SENT"
-                                    ? "bg-blue-100 text-blue-800"
-                                    : po.status === "CANCELLED"
-                                    ? "bg-rose-100 text-rose-800"
-                                    : "bg-slate-100 text-slate-800"
-                                }`}
-                              >
-                                {po.status.replace("_", " ")}
-                              </span>
+                              <div className="flex flex-col items-center gap-1">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                    po.status === "RECEIVED"
+                                      ? "bg-emerald-100 text-emerald-800"
+                                      : po.status === "PARTIALLY_RECEIVED"
+                                      ? "bg-amber-100 text-amber-800"
+                                      : po.status === "SENT"
+                                      ? "bg-blue-100 text-blue-800"
+                                      : po.status === "CANCELLED"
+                                      ? "bg-rose-100 text-rose-800"
+                                      : "bg-slate-100 text-slate-800"
+                                  }`}
+                                >
+                                  {po.status.replace("_", " ")}
+                                </span>
+
+                                {po.vendorAcknowledgement?.status === "IN_TRANSIT" ? (
+                                  <span
+                                    title={`Driver: ${po.vendorAcknowledgement.driverName || "Distributor Delivery"} (${po.vendorAcknowledgement.driverPhone || "N/A"})\nInv: ${po.vendorAcknowledgement.dispatchInvoiceNumber || "N/A"}`}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-bold bg-amber-500 text-white animate-pulse"
+                                  >
+                                    <Truck className="w-2.5 h-2.5" />
+                                    Van: {po.vendorAcknowledgement.vehicleNumber || "En Route"}
+                                  </span>
+                                ) : po.vendorAcknowledgement?.status === "ACKNOWLEDGED" ? (
+                                  <span
+                                    title={`Order confirmed by rep ${po.vendorAcknowledgement.repName || "distributor"}. Ref #${po.vendorAcknowledgement.vendorReferenceNumber || "N/A"}`}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                  >
+                                    <CheckCircle2 className="w-2.5 h-2.5" />
+                                    Vendor Confirmed
+                                  </span>
+                                ) : po.vendorAcknowledgement?.status === "REJECTED" ? (
+                                  <span
+                                    title={po.vendorAcknowledgement.rejectionReason || "Order rejected by vendor"}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-semibold bg-rose-50 text-rose-700 border border-rose-200"
+                                  >
+                                    <AlertTriangle className="w-2.5 h-2.5" />
+                                    Vendor Rejected
+                                  </span>
+                                ) : po.status === "SENT" ? (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] text-slate-400">
+                                    <Clock className="w-2.5 h-2.5" />
+                                    Awaiting Vendor
+                                  </span>
+                                ) : null}
+                              </div>
                             </td>
 
                             <td className="py-3 px-4 text-right">
@@ -1294,6 +1358,21 @@ export default function PurchasesPage() {
                                 >
                                   <Printer className="w-3.5 h-3.5" />
                                 </button>
+
+                                {/* Dispatch PO via WhatsApp / Email */}
+                                {(po.status === "DRAFT" || po.status === "SENT" || po.status === "PARTIALLY_RECEIVED") && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setDispatchingPo(po);
+                                      setIsDispatchModalOpen(true);
+                                    }}
+                                    title="Dispatch PO via WhatsApp / Email & Vendor Fulfillment Link"
+                                    className="p-1.5 rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition"
+                                  >
+                                    <Send className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
 
                                 {/* Receive Stock (GRN) */}
                                 {(po.status === "SENT" || po.status === "PARTIALLY_RECEIVED" || po.status === "DRAFT") && (
@@ -2874,6 +2953,87 @@ export default function PurchasesPage() {
                 </div>
               </div>
 
+              {/* Vendor Fulfillment & Advance Shipping Notice (ASN) Card */}
+              {(viewingPO.vendorAcknowledgement || viewingPO.dispatchDetails) && (
+                <div className="p-3.5 bg-indigo-50/60 border border-indigo-200 rounded-xl space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Truck className="w-4 h-4 text-indigo-700" />
+                      <span className="font-bold text-indigo-950">Vendor Self-Fulfillment & Logistics Tracking</span>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        viewingPO.vendorAcknowledgement?.status === "IN_TRANSIT"
+                          ? "bg-amber-500 text-white animate-pulse"
+                          : viewingPO.vendorAcknowledgement?.status === "ACKNOWLEDGED"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : viewingPO.vendorAcknowledgement?.status === "REJECTED"
+                          ? "bg-rose-100 text-rose-800"
+                          : "bg-slate-200 text-slate-700"
+                      }`}
+                    >
+                      {viewingPO.vendorAcknowledgement?.status || "Awaiting Dispatch"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">Est. Delivery</span>
+                      <span className="font-semibold text-slate-800">
+                        {viewingPO.vendorAcknowledgement?.estimatedDeliveryDate
+                          ? new Date(viewingPO.vendorAcknowledgement.estimatedDeliveryDate).toLocaleDateString()
+                          : "Not confirmed"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">Vendor Ref / SO #</span>
+                      <span className="font-mono font-semibold text-slate-800">
+                        {viewingPO.vendorAcknowledgement?.vendorReferenceNumber || "—"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">Delivery Vehicle (ASN)</span>
+                      <span className="font-mono font-bold text-indigo-900">
+                        {viewingPO.vendorAcknowledgement?.vehicleNumber || "—"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">Driver / Contact</span>
+                      <span className="font-semibold text-slate-800">
+                        {viewingPO.vendorAcknowledgement?.driverName
+                          ? `${viewingPO.vendorAcknowledgement.driverName} (${viewingPO.vendorAcknowledgement.driverPhone || ""})`
+                          : "—"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {viewingPO.vendorAcknowledgement?.rejectionReason && (
+                    <div className="text-rose-700 font-medium text-[11px] bg-rose-50 p-2 rounded-lg border border-rose-200">
+                      Reason for rejection: {viewingPO.vendorAcknowledgement.rejectionReason}
+                    </div>
+                  )}
+
+                  {viewingPO.dispatchDetails?.dispatchedAt && (
+                    <div className="text-[10px] text-slate-500 flex items-center justify-between border-t border-indigo-100 pt-1.5">
+                      <span>
+                        Dispatched via {viewingPO.dispatchDetails.channel} on{" "}
+                        {formatSLDateTime(viewingPO.dispatchDetails.dispatchedAt)}
+                      </span>
+                      {viewingPO.vendorAccessToken && (
+                        <Link
+                          href={`/portal/vendor/po/${viewingPO.vendorAccessToken}`}
+                          target="_blank"
+                          className="text-indigo-600 hover:text-indigo-800 font-bold underline flex items-center gap-1"
+                        >
+                          <span>Open Vendor Portal Link</span>
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </Link>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Items Table */}
               <div className="overflow-hidden border border-slate-200 rounded-xl">
                 <table className="w-full text-xs text-left">
@@ -2940,17 +3100,34 @@ export default function PurchasesPage() {
 
               {/* Actions */}
               <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActivePrintPO(viewingPO);
-                    setViewingPO(null);
-                  }}
-                  className="px-3.5 py-2 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Print PO</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActivePrintPO(viewingPO);
+                      setViewingPO(null);
+                    }}
+                    className="px-3.5 py-2 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Print PO</span>
+                  </button>
+                  {(viewingPO.status === "DRAFT" || viewingPO.status === "SENT" || viewingPO.status === "PARTIALLY_RECEIVED") && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const poToDispatch = viewingPO;
+                        setViewingPO(null);
+                        setDispatchingPo(poToDispatch);
+                        setIsDispatchModalOpen(true);
+                      }}
+                      className="px-3.5 py-2 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center gap-1.5 transition"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Dispatch (WhatsApp / Link)</span>
+                    </button>
+                  )}
+                </div>
 
                 <div className="flex items-center gap-2">
                   <button
@@ -3605,6 +3782,31 @@ export default function PurchasesPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* ================= MODAL: PO DISPATCH (WHATSAPP & VENDOR LINK) ================= */}
+        {isDispatchModalOpen && dispatchingPo && (
+          <PoDispatchModal
+            po={dispatchingPo}
+            supplier={suppliers.find((s) => s._id === dispatchingPo.supplierId)}
+            storeName={business?.name || "Corner Store"}
+            onClose={() => {
+              setIsDispatchModalOpen(false);
+              setDispatchingPo(null);
+            }}
+            onDispatched={(updatedPo) => {
+              setPurchaseOrders((prev) =>
+                prev.map((p) => (p._id === updatedPo._id ? { ...p, ...updatedPo } : p))
+              );
+              if (viewingPO && viewingPO._id === updatedPo._id) {
+                setViewingPO((prev) => (prev ? { ...prev, ...updatedPo } : null));
+              }
+              setStatusMessage({
+                type: "success",
+                text: `Purchase Order ${updatedPo.poNumber} successfully dispatched via ${updatedPo.dispatchDetails?.channel || "WhatsApp"}!`,
+              });
+            }}
+          />
         )}
       </div>
 

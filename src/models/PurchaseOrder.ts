@@ -2,6 +2,8 @@ import mongoose, { Schema, Document, Model, Types } from "mongoose";
 
 export type PurchaseOrderStatus = "DRAFT" | "SENT" | "PARTIALLY_RECEIVED" | "RECEIVED" | "CANCELLED";
 
+export type VendorFulfillmentStatus = "PENDING" | "ACKNOWLEDGED" | "IN_TRANSIT" | "REJECTED";
+
 export interface IPurchaseOrderItem {
   productId: Types.ObjectId;
   name: string;
@@ -15,6 +17,9 @@ export interface IPurchaseOrderItem {
   manufacturingDate?: Date;
   expiryDate?: Date;
   notes?: string;
+  vendorAvailability?: "AVAILABLE" | "SHORTAGE" | "OUT_OF_STOCK";
+  vendorConfirmedQuantity?: number;
+  vendorNotes?: string;
 }
 
 export interface IPurchaseOrder extends Document {
@@ -33,13 +38,26 @@ export interface IPurchaseOrder extends Document {
   supplierInvoiceNumber?: string; // Bill number from supplier delivery invoice
   rfqId?: Types.ObjectId;
   rfqNumber?: string;
+  vendorAccessToken?: string;
+  dispatchDetails?: {
+    dispatchedAt?: Date;
+    dispatchedBy?: string;
+    channel?: "WHATSAPP" | "EMAIL" | "DIRECT_LINK" | "MANUAL";
+    recipientPhone?: string;
+    recipientEmail?: string;
+  };
   vendorAcknowledgement?: {
-    status: "PENDING" | "ACKNOWLEDGED" | "REJECTED";
+    status: VendorFulfillmentStatus;
     acknowledgedAt?: Date;
     estimatedDeliveryDate?: Date;
+    vendorReferenceNumber?: string;
+    repName?: string;
+    repPhone?: string;
     dispatchInvoiceNumber?: string;
+    vehicleNumber?: string;
     driverName?: string;
     driverPhone?: string;
+    dispatchedAt?: Date;
     notes?: string;
   };
   receivedAt?: Date;
@@ -105,6 +123,17 @@ const PurchaseOrderItemSchema = new Schema<IPurchaseOrderItem>(
       type: Date,
     },
     notes: {
+      type: String,
+      trim: true,
+    },
+    vendorAvailability: {
+      type: String,
+      enum: ["AVAILABLE", "SHORTAGE", "OUT_OF_STOCK"],
+    },
+    vendorConfirmedQuantity: {
+      type: Number,
+    },
+    vendorNotes: {
       type: String,
       trim: true,
     },
@@ -188,17 +217,37 @@ const PurchaseOrderSchema = new Schema<IPurchaseOrder>(
       type: String,
       trim: true,
     },
+    vendorAccessToken: {
+      type: String,
+      trim: true,
+      index: true,
+    },
+    dispatchDetails: {
+      dispatchedAt: { type: Date },
+      dispatchedBy: { type: String, trim: true },
+      channel: {
+        type: String,
+        enum: ["WHATSAPP", "EMAIL", "DIRECT_LINK", "MANUAL"],
+      },
+      recipientPhone: { type: String, trim: true },
+      recipientEmail: { type: String, trim: true },
+    },
     vendorAcknowledgement: {
       status: {
         type: String,
-        enum: ["PENDING", "ACKNOWLEDGED", "REJECTED"],
+        enum: ["PENDING", "ACKNOWLEDGED", "IN_TRANSIT", "REJECTED"],
         default: "PENDING",
       },
       acknowledgedAt: { type: Date },
       estimatedDeliveryDate: { type: Date },
+      vendorReferenceNumber: { type: String, trim: true },
+      repName: { type: String, trim: true },
+      repPhone: { type: String, trim: true },
       dispatchInvoiceNumber: { type: String, trim: true },
+      vehicleNumber: { type: String, trim: true },
       driverName: { type: String, trim: true },
       driverPhone: { type: String, trim: true },
+      dispatchedAt: { type: Date },
       notes: { type: String, trim: true },
     },
     receivedAt: {
@@ -240,5 +289,12 @@ PurchaseOrderSchema.index({ businessId: 1, createdAt: -1 });
 
 export const PurchaseOrder: Model<IPurchaseOrder> =
   mongoose.models.PurchaseOrder || mongoose.model<IPurchaseOrder>("PurchaseOrder", PurchaseOrderSchema);
+
+import crypto from "crypto";
+
+export function generatePoAccessToken(poId: string): string {
+  const hash = crypto.randomBytes(12).toString("hex");
+  return `po_${poId.slice(-6)}_${hash}`;
+}
 
 export default PurchaseOrder;

@@ -15,7 +15,14 @@ export { Branch, type IBranch, type BranchType } from "./Branch";
 export { BranchStock, type IBranchStock } from "./BranchStock";
 export { StockTransfer, type IStockTransfer, type StockTransferStatus, type IStockTransferItem } from "./StockTransfer";
 export { Supplier, type ISupplier } from "./Supplier";
-export { PurchaseOrder, type IPurchaseOrder, type PurchaseOrderStatus, type IPurchaseOrderItem } from "./PurchaseOrder";
+export {
+  PurchaseOrder,
+  type IPurchaseOrder,
+  type PurchaseOrderStatus,
+  type IPurchaseOrderItem,
+  type VendorFulfillmentStatus,
+  generatePoAccessToken,
+} from "./PurchaseOrder";
 export { SupplierPayment, type ISupplierPayment, type SupplierPaymentMethod } from "./SupplierPayment";
 export { Promotion, type IPromotion, type PromotionType, type PromoDiscountType } from "./Promotion";
 export { SaleReturn, type ISaleReturn, type ISaleReturnItem, type ReturnCondition, type RefundMethod } from "./SaleReturn";
