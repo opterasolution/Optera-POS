@@ -34,6 +34,7 @@ import {
   ChefHat,
   UtensilsCrossed,
   Database,
+  ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n/LanguageContext";
@@ -89,6 +90,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     { label: t("nav.batches", "Batches & Expiry"), href: "/batches", icon: Calendar, allowed: isManager || isInventoryClerk },
     { label: t("nav.labels", "Barcode & Labels"), href: "/labels", icon: Barcode, allowed: isManager || isInventoryClerk },
     { label: t("nav.purchases", "Purchases & Vendors"), href: "/purchases", icon: FileText, allowed: isManager || isInventoryClerk },
+    { label: t("nav.grn", "Goods Receiving (GRN)"), href: "/grn", icon: ClipboardCheck, allowed: isManager || isInventoryClerk },
     { label: t("nav.transfers", "Transfers & Branches"), href: "/transfers", icon: Truck, allowed: isManager || isInventoryClerk },
     { label: t("nav.salesHistory", "Sales History"), href: "/sales", icon: Receipt },
     { label: t("nav.invoices", "Invoices & B2B"), href: "/invoices", icon: FileSpreadsheet, allowed: isManager || isSupervisor || isAccountant },

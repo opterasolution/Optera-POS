@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import AppLayout from "@/components/layout/AppLayout";
 import {
   FileText,
+  Barcode,
   Building2,
   Plus,
   Search,
@@ -881,6 +883,15 @@ export default function PurchasesPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Link
+              href="/grn/scan"
+              className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm shadow-purple-500/20 transition"
+              title="Launch Mobile Barcode Receiving Scanner"
+            >
+              <Barcode className="w-3.5 h-3.5" />
+              <span>Mobile Scanner</span>
+            </Link>
+
             <button
               type="button"
               onClick={() => {
@@ -1285,13 +1296,22 @@ export default function PurchasesPage() {
 
                                 {/* Receive Stock (GRN) */}
                                 {(po.status === "SENT" || po.status === "PARTIALLY_RECEIVED" || po.status === "DRAFT") && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenReceiveModal(po)}
-                                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
-                                  >
-                                    <Check className="w-3 h-3" /> Receive (GRN)
-                                  </button>
+                                  <>
+                                    <Link
+                                      href={`/grn/scan?poId=${po._id}`}
+                                      title="Scan in Delivery with Mobile Barcode Scanner"
+                                      className="p-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                                    >
+                                      <Barcode className="w-3.5 h-3.5" />
+                                    </Link>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenReceiveModal(po)}
+                                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                                    >
+                                      <Check className="w-3 h-3" /> Receive (GRN)
+                                    </button>
+                                  </>
                                 )}
 
                                 {/* Cancel */}
@@ -1427,6 +1447,13 @@ export default function PurchasesPage() {
                 >
                   Refresh
                 </button>
+                <Link
+                  href="/grn/scan"
+                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+                >
+                  <Barcode className="w-3.5 h-3.5" />
+                  <span>Mobile Barcode Intake</span>
+                </Link>
                 <button
                   type="button"
                   onClick={() => setActiveTab("ORDERS")}
