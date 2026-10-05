@@ -40,7 +40,9 @@ import {
   Info,
   Scale,
   Cpu,
+  Server,
 } from "lucide-react";
+import Link from "next/link";
 import { formatCurrency, isValidSLPhone } from "@/lib/formatters";
 import SubscriptionInvoiceReceipt, {
   SubscriptionInvoiceData,
@@ -1007,6 +1009,13 @@ export default function SettingsPage() {
           >
             <CreditCard className="w-4 h-4" /> Subscription & License
           </button>
+          <Link
+            href="/system"
+            className="pb-3 px-3 text-xs font-semibold border-b-2 border-transparent text-emerald-600 hover:text-emerald-700 transition-all flex items-center gap-1.5 whitespace-nowrap bg-emerald-50/50 rounded-t-lg"
+          >
+            <Server className="w-4 h-4 text-emerald-600" />
+            <span>Launch Diagnostics & Seeder</span>
+          </Link>
         </div>
 
         {statusMessage && (
