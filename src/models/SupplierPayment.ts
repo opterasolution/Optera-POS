@@ -7,7 +7,11 @@ export interface ISupplierPayment extends Document {
   paymentNumber: string; // e.g. "PV-20260930-0001"
   supplierId: Types.ObjectId;
   supplierName: string;
-  amount: number;
+  amount: number; // actual net cash/cheque/transfer disbursed in LKR
+  grossBillAmount?: number; // total gross debt amount before discount (e.g. Rs. 100,000)
+  discountPercentage?: number; // prompt settlement discount percentage applied (e.g. 2%)
+  discountAmount?: number; // prompt settlement discount deducted (e.g. Rs. 2,000)
+  totalDebtOffset?: number; // full debt reduction (amount + discountAmount = Rs. 100,000)
   balanceBefore: number;
   balanceAfter: number;
   paymentMethod: SupplierPaymentMethod;
@@ -17,6 +21,8 @@ export interface ISupplierPayment extends Document {
   referenceNumber?: string;
   purchaseOrderId?: Types.ObjectId;
   poNumber?: string;
+  allocatedPurchaseOrderIds?: Types.ObjectId[];
+  earlyPaymentPnlRecorded?: boolean;
   notes?: string;
   paidBy: string;
   createdAt: Date;
@@ -53,6 +59,25 @@ const SupplierPaymentSchema = new Schema<ISupplierPayment>(
       required: true,
       min: 0.01,
     },
+    grossBillAmount: {
+      type: Number,
+      min: 0,
+    },
+    discountPercentage: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    discountAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalDebtOffset: {
+      type: Number,
+      min: 0,
+    },
     balanceBefore: {
       type: Number,
       required: true,
@@ -88,6 +113,16 @@ const SupplierPaymentSchema = new Schema<ISupplierPayment>(
     poNumber: {
       type: String,
       trim: true,
+    },
+    allocatedPurchaseOrderIds: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "PurchaseOrder",
+      },
+    ],
+    earlyPaymentPnlRecorded: {
+      type: Boolean,
+      default: true,
     },
     notes: {
       type: String,

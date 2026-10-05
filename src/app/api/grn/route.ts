@@ -430,11 +430,25 @@ export async function POST(req: Request) {
           }
         }
 
-        // Update PO status
+        // Update PO status & early payment discount deadline
         po.status = allPoItemsFullyReceived ? "RECEIVED" : "PARTIALLY_RECEIVED";
         po.receivedAt = new Date();
         po.receivedBy = context.username || "Warehouse Manager";
         if (supplierInvoiceNumber) po.supplierInvoiceNumber = supplierInvoiceNumber.trim();
+
+        const discDays = po.earlyPaymentDiscountDays || supplier?.earlyPaymentDiscountDays || 0;
+        const discPct = po.earlyPaymentDiscountPercentage || supplier?.earlyPaymentDiscountPercentage || 0;
+        if (!po.earlyPaymentDiscountDays && discDays > 0) po.earlyPaymentDiscountDays = discDays;
+        if (!po.earlyPaymentDiscountPercentage && discPct > 0) po.earlyPaymentDiscountPercentage = discPct;
+        if (discDays > 0) {
+          po.discountDeadline = new Date(Date.now() + discDays * 24 * 60 * 60 * 1000);
+        }
+        if (discPct > 0) {
+          po.eligibleDiscountAmount = (po.netTotal || totalAcceptedCost) * (discPct / 100);
+        }
+        if (!po.paymentStatus) {
+          po.paymentStatus = "UNPAID";
+        }
         await po.save();
 
         // 6. Credit Supplier Accounts Payable balance with accepted total

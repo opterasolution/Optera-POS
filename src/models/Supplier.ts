@@ -10,6 +10,8 @@ export interface ISupplier extends Document {
   address?: string;
   taxNumber?: string; // VAT / TIN
   paymentTermsDays: number; // e.g. 0 for Cash On Delivery (COD), 7, 14, 30, 60
+  earlyPaymentDiscountPercentage?: number; // e.g. 2.0 for 2% prompt settlement discount
+  earlyPaymentDiscountDays?: number; // e.g. 10 days ("2/10 Net 30")
   creditLimit: number;
   currentBalance: number; // outstanding accounts payable debt owed in LKR
   portalToken?: string; // secure access token for Supplier Self-Service Portal
@@ -74,6 +76,17 @@ const SupplierSchema = new Schema<ISupplier>(
     paymentTermsDays: {
       type: Number,
       default: 30,
+      min: 0,
+    },
+    earlyPaymentDiscountPercentage: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    earlyPaymentDiscountDays: {
+      type: Number,
+      default: 0,
       min: 0,
     },
     creditLimit: {

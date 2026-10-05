@@ -2,6 +2,8 @@ import mongoose, { Schema, Document, Model, Types } from "mongoose";
 
 export type PurchaseOrderStatus = "DRAFT" | "SENT" | "PARTIALLY_RECEIVED" | "RECEIVED" | "CANCELLED";
 
+export type PurchaseOrderPaymentStatus = "UNPAID" | "PARTIALLY_PAID" | "PAID";
+
 export type VendorFulfillmentStatus = "PENDING" | "ACKNOWLEDGED" | "IN_TRANSIT" | "REJECTED";
 
 export interface IPurchaseOrderItem {
@@ -34,6 +36,15 @@ export interface IPurchaseOrder extends Document {
   subtotal: number;
   taxTotal: number;
   netTotal: number;
+  earlyPaymentDiscountPercentage?: number; // e.g. 2.0 for 2%
+  earlyPaymentDiscountDays?: number; // e.g. 10 days ("2/10 Net 30")
+  discountDeadline?: Date; // calculated discount cut-off date
+  eligibleDiscountAmount?: number; // netTotal * (discountPercentage / 100)
+  discountApplied?: boolean; // whether discount was claimed
+  discountAmountTaken?: number; // actual cash discount deducted
+  paidAmount?: number; // actual net cash disbursed
+  paymentStatus?: PurchaseOrderPaymentStatus; // UNPAID, PARTIALLY_PAID, PAID
+  totalDebtOffset?: number; // paidAmount + discountAmountTaken
   expectedDeliveryDate?: Date;
   supplierInvoiceNumber?: string; // Bill number from supplier delivery invoice
   rfqId?: Types.ObjectId;
@@ -199,6 +210,51 @@ const PurchaseOrderSchema = new Schema<IPurchaseOrder>(
     netTotal: {
       type: Number,
       required: true,
+      min: 0,
+    },
+    earlyPaymentDiscountPercentage: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    earlyPaymentDiscountDays: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    discountDeadline: {
+      type: Date,
+      index: true,
+    },
+    eligibleDiscountAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    discountApplied: {
+      type: Boolean,
+      default: false,
+    },
+    discountAmountTaken: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    paidAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    paymentStatus: {
+      type: String,
+      enum: ["UNPAID", "PARTIALLY_PAID", "PAID"],
+      default: "UNPAID",
+      index: true,
+    },
+    totalDebtOffset: {
+      type: Number,
+      default: 0,
       min: 0,
     },
     expectedDeliveryDate: {

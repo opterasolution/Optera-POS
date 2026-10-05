@@ -4,6 +4,7 @@ import { Sale } from "@/models/Sale";
 import { SaleReturn } from "@/models/SaleReturn";
 import { Expense, ExpenseCategory } from "@/models/Expense";
 import { Product } from "@/models/Product";
+import { SupplierPayment } from "@/models/SupplierPayment";
 import { requireRole } from "@/lib/tenant";
 
 export async function GET(req: Request) {
@@ -72,6 +73,13 @@ export async function GET(req: Request) {
       const expenses = await Expense.find({
         businessId,
         date: { $gte: startDate, $lte: endDate },
+      }).lean();
+
+      // 4. Fetch Supplier Payments with Prompt Settlement Discounts (Skonto Income)
+      const supplierPayments = await SupplierPayment.find({
+        businessId,
+        createdAt: { $gte: startDate, $lte: endDate },
+        discountAmount: { $gt: 0 },
       }).lean();
 
       // Build product cost lookup for returns
@@ -185,13 +193,19 @@ export async function GET(req: Request) {
         trendMap[dayKey].expenses += e.amount || 0;
       });
 
+      // Supplier Prompt Settlement Discounts Received (Financial Income)
+      let totalEarlyDiscountsReceived = 0;
+      supplierPayments.forEach((p) => {
+        totalEarlyDiscountsReceived += p.discountAmount || 0;
+      });
+
       // Consolidated Accounting Figures
       const netSalesRevenue = Math.max(0, grossSalesRevenue - totalDiscountsGiven - totalCustomerRefunds);
       const adjustedCOGS = Math.max(0, baseCOGS - restockedCOGSReduction + damagedStockLoss);
       const grossProfit = netSalesRevenue - adjustedCOGS;
       const grossMarginPercent = netSalesRevenue > 0 ? (grossProfit / netSalesRevenue) * 100 : 0;
 
-      const netOperatingProfit = grossProfit - totalOperatingExpenses;
+      const netOperatingProfit = grossProfit - totalOperatingExpenses + totalEarlyDiscountsReceived;
       const netMarginPercent = netSalesRevenue > 0 ? (netOperatingProfit / netSalesRevenue) * 100 : 0;
 
       // Sort Daily Trend
@@ -244,6 +258,9 @@ export async function GET(req: Request) {
           expensesByCategory,
           expensesBySource,
 
+          // Prompt Settlement Discounts Received (Other Financial Income)
+          totalEarlyDiscountsReceived: Math.round(totalEarlyDiscountsReceived * 100) / 100,
+
           // Net Operating Profit
           netOperatingProfit: Math.round(netOperatingProfit * 100) / 100,
           netMarginPercent: Math.round(netMarginPercent * 10) / 10,
@@ -263,7 +280,8 @@ export async function GET(req: Request) {
     const demoCOGS = Math.round(demoNetSales * 0.72);
     const demoGrossProfit = demoNetSales - demoCOGS;
     const demoExpenses = range === "today" ? 2850 : range === "this_week" ? 18500 : 72400;
-    const demoNetProfit = demoGrossProfit - demoExpenses;
+    const demoEarlyDiscounts = range === "today" ? 350 : range === "this_week" ? 1800 : 6450;
+    const demoNetProfit = demoGrossProfit - demoExpenses + demoEarlyDiscounts;
 
     return NextResponse.json({
       success: true,
@@ -303,6 +321,7 @@ export async function GET(req: Request) {
           STORE_PETTY_CASH: Math.round(demoExpenses * 0.4),
           BANK_ACCOUNT: Math.round(demoExpenses * 0.15),
         },
+        totalEarlyDiscountsReceived: demoEarlyDiscounts,
         netOperatingProfit: demoNetProfit,
         netMarginPercent: Math.round((demoNetProfit / demoNetSales) * 1000) / 10,
         totalTaxesCollected: 0,

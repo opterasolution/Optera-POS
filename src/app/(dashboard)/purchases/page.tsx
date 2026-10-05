@@ -40,15 +40,19 @@ import {
   Sparkles,
   Globe,
   ExternalLink,
+  Percent,
 } from "lucide-react";
 import PurchaseOrderReceipt, { PurchaseOrderData } from "@/components/receipts/PurchaseOrderReceipt";
 import SupplierPaymentReceipt, { SupplierPaymentData } from "@/components/receipts/SupplierPaymentReceipt";
+import SupplierPaymentVoucherReceipt, { SupplierPaymentVoucherData } from "@/components/receipts/SupplierPaymentVoucherReceipt";
 import GoodsReceivedNoteReceipt, { GoodsReceivedNoteData } from "@/components/receipts/GoodsReceivedNoteReceipt";
 import RfqBiddingManager from "@/components/purchases/RfqBiddingManager";
 import VendorPortalShareModal from "@/components/purchases/VendorPortalShareModal";
 import AutomatedReorderPlanner from "@/components/purchases/AutomatedReorderPlanner";
 import PoDispatchModal from "@/components/purchases/PoDispatchModal";
 import DebitNoteManager from "@/components/purchases/DebitNoteManager";
+import EarlyPaymentDiscountsHub from "@/components/purchases/EarlyPaymentDiscountsHub";
+import type { EarlyDiscountOpportunity } from "@/app/api/purchases/early-discounts/route";
 import { formatCurrency, formatSLDateTime } from "@/lib/formatters";
 
 
@@ -62,6 +66,8 @@ interface Supplier {
   address?: string;
   taxNumber?: string;
   paymentTermsDays: number;
+  earlyPaymentDiscountPercentage?: number;
+  earlyPaymentDiscountDays?: number;
   creditLimit: number;
   currentBalance: number;
   portalToken?: string;
@@ -168,7 +174,7 @@ export interface DockInspectionItemInput {
 
 export default function PurchasesPage() {
   const [activeTab, setActiveTab] = useState<
-    "ORDERS" | "REORDER_PLANNER" | "GRN" | "DEBIT_NOTES" | "RFQ" | "SUPPLIERS" | "VOUCHERS"
+    "ORDERS" | "EARLY_DISCOUNTS" | "REORDER_PLANNER" | "GRN" | "DEBIT_NOTES" | "RFQ" | "SUPPLIERS" | "VOUCHERS"
   >("ORDERS");
 
   // Data
@@ -273,6 +279,8 @@ export default function PurchasesPage() {
     address: "",
     taxNumber: "",
     paymentTermsDays: 30,
+    earlyPaymentDiscountPercentage: 0,
+    earlyPaymentDiscountDays: 0,
     creditLimit: 0,
     notes: "",
   });
@@ -281,6 +289,12 @@ export default function PurchasesPage() {
   // Settle Supplier Debt Modal State
   const [payingSupplier, setPayingSupplier] = useState<Supplier | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentGrossAmount, setPaymentGrossAmount] = useState("");
+  const [applyEarlyDiscount, setApplyEarlyDiscount] = useState(false);
+  const [paymentDiscountPercentage, setPaymentDiscountPercentage] = useState("0");
+  const [paymentDiscountAmount, setPaymentDiscountAmount] = useState("0");
+  const [paymentPoId, setPaymentPoId] = useState<string | null>(null);
+  const [paymentPoNumber, setPaymentPoNumber] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"CHEQUE" | "BANK_TRANSFER" | "CASH">("CHEQUE");
   const [chequeNumber, setChequeNumber] = useState("");
   const [chequeDate, setChequeDate] = useState("");
@@ -296,6 +310,7 @@ export default function PurchasesPage() {
   // Printable Slips
   const [activePrintPO, setActivePrintPO] = useState<PurchaseOrder | null>(null);
   const [activePrintPayment, setActivePrintPayment] = useState<SupplierPaymentData | null>(null);
+  const [activePrintVoucher, setActivePrintVoucher] = useState<SupplierPaymentVoucherData | null>(null);
 
   // Vendor Portal Share Modal State
   const [sharingSupplierPortal, setSharingSupplierPortal] = useState<Supplier | null>(null);
@@ -850,6 +865,11 @@ export default function PurchasesPage() {
       return;
     }
 
+    const discAmt = applyEarlyDiscount ? (parseFloat(paymentDiscountAmount) || 0) : 0;
+    const discPct = applyEarlyDiscount ? (parseFloat(paymentDiscountPercentage) || 0) : 0;
+    const grossAmt = parseFloat(paymentGrossAmount) || (amt + discAmt);
+    const totalDebtOffset = amt + discAmt;
+
     setSubmittingPayment(true);
     try {
       const res = await fetch(`/api/suppliers/${payingSupplier._id}/payments`, {
@@ -857,6 +877,10 @@ export default function PurchasesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amount: amt,
+          grossBillAmount: grossAmt,
+          discountPercentage: discPct,
+          discountAmount: discAmt,
+          purchaseOrderId: paymentPoId || undefined,
           paymentMethod,
           chequeNumber: chequeNumber.trim() || undefined,
           chequeDate: chequeDate || undefined,
@@ -867,8 +891,18 @@ export default function PurchasesPage() {
 
       const data = await res.json();
       if (data.success) {
+        const savedPayment = data.payment;
+        const currentPayingSup = payingSupplier;
+        const currPoNumber = paymentPoNumber;
+
         setPayingSupplier(null);
         setPaymentAmount("");
+        setPaymentGrossAmount("");
+        setApplyEarlyDiscount(false);
+        setPaymentDiscountPercentage("0");
+        setPaymentDiscountAmount("0");
+        setPaymentPoId(null);
+        setPaymentPoNumber(null);
         setChequeNumber("");
         setBankName("");
         setPaymentNotes("");
@@ -877,18 +911,28 @@ export default function PurchasesPage() {
           text: data.message || "Supplier payment voucher recorded.",
         });
 
-        // Open printable payment voucher
-        if (data.payment) {
-          setActivePrintPayment({
-            paymentNumber: data.payment.paymentNumber,
-            supplierName: payingSupplier.name,
+        // Open comprehensive formal A4 Remittance & 80mm slip
+        if (savedPayment) {
+          setActivePrintVoucher({
+            paymentNumber: savedPayment.paymentNumber,
+            supplierName: currentPayingSup.name,
+            supplierCode: currentPayingSup.code,
+            supplierAddress: currentPayingSup.address,
+            supplierPhone: currentPayingSup.phone,
+            supplierTaxNumber: currentPayingSup.taxNumber,
             amount: amt,
-            balanceBefore: data.supplier?.previousBalance ?? payingSupplier.currentBalance,
-            balanceAfter: data.supplier?.currentBalance ?? Math.max(0, payingSupplier.currentBalance - amt),
+            grossBillAmount: grossAmt,
+            discountPercentage: discPct,
+            discountAmount: discAmt,
+            totalDebtOffset,
+            balanceBefore: data.supplier?.previousBalance ?? currentPayingSup.currentBalance,
+            balanceAfter: data.supplier?.currentBalance ?? Math.max(0, currentPayingSup.currentBalance - totalDebtOffset),
             paymentMethod,
             chequeNumber: chequeNumber.trim() || undefined,
             chequeDate: chequeDate || undefined,
             bankName: bankName.trim() || undefined,
+            poNumber: currPoNumber || savedPayment.poNumber,
+            notes: paymentNotes.trim() || undefined,
             paidBy: "Store Accountant",
             createdAt: new Date(),
           });
@@ -948,6 +992,8 @@ export default function PurchasesPage() {
                   address: "",
                   taxNumber: "",
                   paymentTermsDays: 30,
+                  earlyPaymentDiscountPercentage: 0,
+                  earlyPaymentDiscountDays: 0,
                   creditLimit: 0,
                   notes: "",
                 });
@@ -1128,6 +1174,22 @@ export default function PurchasesPage() {
           >
             <Sparkles className="w-4 h-4 text-purple-600" />
             <span>e-Bidding & RFQs</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("EARLY_DISCOUNTS")}
+            className={`pb-3 text-xs font-bold flex items-center gap-2 border-b-2 transition ${
+              activeTab === "EARLY_DISCOUNTS"
+                ? "border-emerald-600 text-emerald-600"
+                : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            <Percent className="w-4 h-4 text-emerald-600" />
+            <span>Early Discounts & AP Rebates</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-100 font-mono text-emerald-800 font-bold">
+              Skonto
+            </span>
           </button>
 
           <button
@@ -1445,6 +1507,39 @@ export default function PurchasesPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* ================= TAB: EARLY PAYMENT SETTLEMENT DISCOUNTS (SKONTO) ================= */}
+        {activeTab === "EARLY_DISCOUNTS" && (
+          <EarlyPaymentDiscountsHub
+            onPayBill={(opportunity) => {
+              const matchedSup = suppliers.find((s) => s._id === opportunity.supplierId) || {
+                _id: opportunity.supplierId,
+                name: opportunity.supplierName,
+                phone: "",
+                paymentTermsDays: 30,
+                creditLimit: 0,
+                currentBalance: opportunity.outstandingBalance,
+                isActive: true,
+              };
+              setPayingSupplier(matchedSup);
+              setPaymentPoId(opportunity.purchaseOrderId);
+              setPaymentPoNumber(opportunity.poNumber);
+              setPaymentGrossAmount(opportunity.outstandingBalance.toString());
+              if (opportunity.potentialSavingsLkr > 0) {
+                setApplyEarlyDiscount(true);
+                setPaymentDiscountPercentage(opportunity.earlyPaymentDiscountPercentage.toString());
+                setPaymentDiscountAmount(opportunity.potentialSavingsLkr.toString());
+                setPaymentAmount(opportunity.netSettlementAmountLkr.toString());
+              } else {
+                setApplyEarlyDiscount(false);
+                setPaymentDiscountPercentage("0");
+                setPaymentDiscountAmount("0");
+                setPaymentAmount(opportunity.outstandingBalance.toString());
+              }
+            }}
+            onRefresh={loadData}
+          />
         )}
 
         {/* ================= TAB: AUTO-REORDER INTELLIGENCE ENGINE ================= */}
@@ -2025,6 +2120,8 @@ export default function PurchasesPage() {
                                       address: s.address || "",
                                       taxNumber: s.taxNumber || "",
                                       paymentTermsDays: s.paymentTermsDays,
+                                      earlyPaymentDiscountPercentage: s.earlyPaymentDiscountPercentage || 0,
+                                      earlyPaymentDiscountDays: s.earlyPaymentDiscountDays || 0,
                                       creditLimit: s.creditLimit,
                                       notes: (s as any).notes || "",
                                     });
@@ -2258,31 +2355,59 @@ export default function PurchasesPage() {
                           </td>
 
                           <td className="py-3 px-4 text-right">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setActivePrintPayment({
-                                  paymentNumber: v.paymentNumber,
-                                  supplierName: v.supplierName,
-                                  amount: v.amount,
-                                  balanceBefore: v.balanceBefore,
-                                  balanceAfter: v.balanceAfter,
-                                  paymentMethod: v.paymentMethod,
-                                  chequeNumber: v.chequeNumber,
-                                  chequeDate: v.chequeDate,
-                                  bankName: v.bankName,
-                                  referenceNumber: v.referenceNumber,
-                                  poNumber: v.poNumber,
-                                  notes: v.notes,
-                                  paidBy: v.paidBy || "Store Accountant",
-                                  createdAt: v.createdAt,
-                                })
-                              }
-                              className="px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-semibold flex items-center gap-1 ml-auto shadow-xs"
-                            >
-                              <Printer className="w-3.5 h-3.5" />
-                              <span>Voucher</span>
-                            </button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setActivePrintVoucher({
+                                    paymentNumber: v.paymentNumber,
+                                    supplierName: v.supplierName,
+                                    amount: v.amount,
+                                    balanceBefore: v.balanceBefore,
+                                    balanceAfter: v.balanceAfter,
+                                    paymentMethod: v.paymentMethod,
+                                    chequeNumber: v.chequeNumber,
+                                    chequeDate: v.chequeDate,
+                                    bankName: v.bankName,
+                                    referenceNumber: v.referenceNumber,
+                                    poNumber: v.poNumber,
+                                    notes: v.notes,
+                                    paidBy: v.paidBy || "Store Accountant",
+                                    createdAt: v.createdAt,
+                                  })
+                                }
+                                className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold flex items-center gap-1 shadow-xs transition"
+                                title="Print A4 Remittance Advice"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                <span>A4 Advice</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setActivePrintPayment({
+                                    paymentNumber: v.paymentNumber,
+                                    supplierName: v.supplierName,
+                                    amount: v.amount,
+                                    balanceBefore: v.balanceBefore,
+                                    balanceAfter: v.balanceAfter,
+                                    paymentMethod: v.paymentMethod,
+                                    chequeNumber: v.chequeNumber,
+                                    chequeDate: v.chequeDate,
+                                    bankName: v.bankName,
+                                    referenceNumber: v.referenceNumber,
+                                    poNumber: v.poNumber,
+                                    notes: v.notes,
+                                    paidBy: v.paidBy || "Store Accountant",
+                                    createdAt: v.createdAt,
+                                  })
+                                }
+                                className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-semibold shadow-xs transition"
+                                title="Print 80mm Thermal Slip"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -3326,6 +3451,37 @@ export default function PurchasesPage() {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-2 gap-2 p-2.5 bg-emerald-50/60 border border-emerald-200 rounded-xl">
+                  <div>
+                    <label className="block text-emerald-950 font-bold mb-1 text-[11px]">
+                      Prompt Settlement Discount (%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="100"
+                      value={supplierForm.earlyPaymentDiscountPercentage}
+                      onChange={(e) => setSupplierForm({ ...supplierForm, earlyPaymentDiscountPercentage: parseFloat(e.target.value) || 0 })}
+                      placeholder="e.g. 2.0 (2%)"
+                      className="w-full px-3 py-1.5 font-mono border border-emerald-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-emerald-950 font-bold mb-1 text-[11px]">
+                      Discount Window (Days)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={supplierForm.earlyPaymentDiscountDays}
+                      onChange={(e) => setSupplierForm({ ...supplierForm, earlyPaymentDiscountDays: parseInt(e.target.value) || 0 })}
+                      placeholder="e.g. 10 (2/10 Net 30)"
+                      className="w-full px-3 py-1.5 font-mono border border-emerald-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-slate-700 font-semibold mb-1">Address / Depot</label>
                   <input
@@ -3383,11 +3539,17 @@ export default function PurchasesPage() {
               </div>
 
               {/* Debt card */}
-              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs space-y-1">
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs space-y-1.5">
                 <div className="flex justify-between">
                   <span className="text-slate-500">Supplier:</span>
                   <span className="font-bold text-slate-900">{payingSupplier.name}</span>
                 </div>
+                {paymentPoNumber && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Target PO / Invoice:</span>
+                    <span className="font-mono font-bold text-blue-800">{paymentPoNumber}</span>
+                  </div>
+                )}
                 <div className="flex justify-between font-bold pt-1 border-t border-rose-200/60">
                   <span className="text-rose-900">Total Outstanding Payable:</span>
                   <span className="font-mono text-rose-700 text-sm">
@@ -3397,8 +3559,134 @@ export default function PurchasesPage() {
               </div>
 
               <form onSubmit={handleRecordSupplierPayment} className="space-y-3 text-xs">
+                {/* Gross Amount Input */}
                 <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Payment Amount (Rs.) *</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-slate-700 font-semibold">Gross Bill / Debt Cleared (Rs.) *</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const bal = payingSupplier.currentBalance;
+                        setPaymentGrossAmount(bal.toString());
+                        if (applyEarlyDiscount) {
+                          const pct = parseFloat(paymentDiscountPercentage) || 0;
+                          const disc = Math.round(bal * (pct / 100));
+                          setPaymentDiscountAmount(disc.toString());
+                          setPaymentAmount((bal - disc).toString());
+                        } else {
+                          setPaymentAmount(bal.toString());
+                        }
+                      }}
+                      className="text-[10px] font-bold text-blue-700 hover:underline"
+                    >
+                      Clear Full Debt ({formatCurrency(payingSupplier.currentBalance)})
+                    </button>
+                  </div>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="1"
+                    required
+                    value={paymentGrossAmount || paymentAmount}
+                    onChange={(e) => {
+                      const gross = parseFloat(e.target.value) || 0;
+                      setPaymentGrossAmount(e.target.value);
+                      if (applyEarlyDiscount) {
+                        const pct = parseFloat(paymentDiscountPercentage) || 0;
+                        const disc = Math.round(gross * (pct / 100));
+                        setPaymentDiscountAmount(disc.toString());
+                        setPaymentAmount((gross - disc).toString());
+                      } else {
+                        setPaymentAmount(e.target.value);
+                      }
+                    }}
+                    placeholder="e.g. 100000"
+                    className="w-full px-3.5 py-2 text-base font-bold font-mono border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Prompt Discount Accordion / Checkbox */}
+                <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={applyEarlyDiscount}
+                      onChange={(e) => {
+                        const isChecked = e.target.checked;
+                        setApplyEarlyDiscount(isChecked);
+                        const gross = parseFloat(paymentGrossAmount) || parseFloat(paymentAmount) || 0;
+                        if (isChecked) {
+                          const pct = parseFloat(paymentDiscountPercentage) || (payingSupplier.earlyPaymentDiscountPercentage || 2);
+                          setPaymentDiscountPercentage(pct.toString());
+                          const disc = Math.round(gross * (pct / 100));
+                          setPaymentDiscountAmount(disc.toString());
+                          setPaymentAmount((gross - disc).toString());
+                        } else {
+                          setPaymentDiscountAmount("0");
+                          setPaymentAmount((gross || payingSupplier.currentBalance).toString());
+                        }
+                      }}
+                      className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                    />
+                    <div>
+                      <span className="font-bold text-emerald-950 block text-[11px]">
+                        Apply Prompt Payment Cash Discount (Skonto AP Rebate)
+                      </span>
+                      <span className="text-[10px] text-emerald-700">
+                        Offset full debt while disbursing discounted net payout
+                      </span>
+                    </div>
+                  </label>
+
+                  {applyEarlyDiscount && (
+                    <div className="pt-2 border-t border-emerald-200/60 grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <label className="block text-emerald-900 font-semibold mb-0.5 text-[11px]">
+                          Discount Rate (%)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0.1"
+                          max="100"
+                          value={paymentDiscountPercentage}
+                          onChange={(e) => {
+                            const pct = parseFloat(e.target.value) || 0;
+                            setPaymentDiscountPercentage(e.target.value);
+                            const gross = parseFloat(paymentGrossAmount) || parseFloat(paymentAmount) || 0;
+                            const disc = Math.round(gross * (pct / 100));
+                            setPaymentDiscountAmount(disc.toString());
+                            setPaymentAmount((gross - disc).toString());
+                          }}
+                          className="w-full px-2.5 py-1.5 font-mono font-bold border border-emerald-300 rounded-lg bg-white text-emerald-950"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-emerald-900 font-semibold mb-0.5 text-[11px]">
+                          Discount Deducted (Rs.)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={paymentDiscountAmount}
+                          onChange={(e) => {
+                            const disc = parseFloat(e.target.value) || 0;
+                            setPaymentDiscountAmount(e.target.value);
+                            const gross = parseFloat(paymentGrossAmount) || parseFloat(paymentAmount) || 0;
+                            setPaymentAmount(Math.max(0, gross - disc).toString());
+                          }}
+                          className="w-full px-2.5 py-1.5 font-mono font-bold border border-emerald-300 rounded-lg bg-white text-emerald-800"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Net Disbursed Payout */}
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    Net Cash / Bank Payout to Disburse (Rs.) *
+                  </label>
                   <input
                     type="number"
                     step="0.01"
@@ -3406,24 +3694,13 @@ export default function PurchasesPage() {
                     required
                     value={paymentAmount}
                     onChange={(e) => setPaymentAmount(e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-base font-bold font-mono border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    className="w-full px-3.5 py-2.5 text-base font-extrabold font-mono border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-slate-50"
                   />
-                  <div className="flex items-center gap-1.5 mt-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setPaymentAmount(payingSupplier.currentBalance.toString())}
-                      className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700"
-                    >
-                      Full Settle ({formatCurrency(payingSupplier.currentBalance)})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPaymentAmount(Math.round(payingSupplier.currentBalance / 2).toString())}
-                      className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700"
-                    >
-                      50% Settle
-                    </button>
-                  </div>
+                  {applyEarlyDiscount && (
+                    <div className="mt-1 text-[11px] text-emerald-800 font-medium">
+                      &check; Net Disbursed: <strong>{formatCurrency(parseFloat(paymentAmount) || 0)}</strong> &bull; Total Debt Cleared: <strong>{formatCurrency(parseFloat(paymentGrossAmount) || (parseFloat(paymentAmount) || 0))}</strong>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -3607,7 +3884,20 @@ export default function PurchasesPage() {
                             {entry.billAmount ? `+${formatCurrency(entry.billAmount)}` : "—"}
                           </td>
                           <td className="py-2 px-3 text-right font-bold text-emerald-700">
-                            {entry.paidAmount ? `-${formatCurrency(entry.paidAmount)}` : "—"}
+                            {entry.totalDebtOffset ? (
+                              <div>
+                                <span>-{formatCurrency(entry.totalDebtOffset)}</span>
+                                {entry.discountAmount > 0 && (
+                                  <div className="text-[10px] text-emerald-600 font-sans font-normal">
+                                    Paid {formatCurrency(entry.paidAmount)} + Disc {formatCurrency(entry.discountAmount)}
+                                  </div>
+                                )}
+                              </div>
+                            ) : entry.paidAmount ? (
+                              `-${formatCurrency(entry.paidAmount)}`
+                            ) : (
+                              "—"
+                            )}
                           </td>
                           <td className="py-2 px-3 text-right font-bold text-slate-900">
                             {formatCurrency(entry.runningBalance)}
@@ -3646,6 +3936,20 @@ export default function PurchasesPage() {
             }
             payment={activePrintPayment}
             onClose={() => setActivePrintPayment(null)}
+          />
+        )}
+
+        {/* ================= MODAL: FORMAL A4 REMITTANCE & 80MM VOUCHER ================= */}
+        {activePrintVoucher && (
+          <SupplierPaymentVoucherReceipt
+            business={
+              business || {
+                name: "Sri Lanka Commercial Store",
+                address: "Commercial & Procurement Division",
+              }
+            }
+            voucher={activePrintVoucher}
+            onClose={() => setActivePrintVoucher(null)}
           />
         )}
 

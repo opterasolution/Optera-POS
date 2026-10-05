@@ -27,6 +27,7 @@ export {
   PurchaseOrder,
   type IPurchaseOrder,
   type PurchaseOrderStatus,
+  type PurchaseOrderPaymentStatus,
   type IPurchaseOrderItem,
   type VendorFulfillmentStatus,
   generatePoAccessToken,

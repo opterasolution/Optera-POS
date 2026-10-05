@@ -202,6 +202,17 @@ export async function POST(req: Request) {
         ? "DRAFT"
         : "SENT";
 
+      const discPct = body.earlyPaymentDiscountPercentage !== undefined
+        ? Number(body.earlyPaymentDiscountPercentage)
+        : (supplier.earlyPaymentDiscountPercentage || 0);
+      const discDays = body.earlyPaymentDiscountDays !== undefined
+        ? Number(body.earlyPaymentDiscountDays)
+        : (supplier.earlyPaymentDiscountDays || 0);
+      const discountDeadline = (receiveImmediately && discDays > 0)
+        ? new Date(now.getTime() + discDays * 24 * 60 * 60 * 1000)
+        : undefined;
+      const eligibleDiscountAmount = subtotal * (discPct / 100);
+
       const purchaseOrder = await PurchaseOrder.create({
         businessId,
         poNumber,
@@ -214,6 +225,15 @@ export async function POST(req: Request) {
         subtotal,
         taxTotal: 0,
         netTotal: subtotal,
+        earlyPaymentDiscountPercentage: discPct,
+        earlyPaymentDiscountDays: discDays,
+        discountDeadline,
+        eligibleDiscountAmount,
+        discountApplied: false,
+        discountAmountTaken: 0,
+        paidAmount: 0,
+        paymentStatus: "UNPAID",
+        totalDebtOffset: 0,
         expectedDeliveryDate: expectedDeliveryDate ? new Date(expectedDeliveryDate) : undefined,
         supplierInvoiceNumber: supplierInvoiceNumber?.trim() || undefined,
         receivedAt: receiveImmediately ? now : undefined,

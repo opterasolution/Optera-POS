@@ -52,6 +52,10 @@ export async function GET(
         description: string;
         billAmount?: number;
         paidAmount?: number;
+        discountAmount?: number;
+        discountPercentage?: number;
+        totalDebtOffset?: number;
+        grossBillAmount?: number;
         paymentMethod?: string;
         chequeNumber?: string;
       }
@@ -70,13 +74,20 @@ export async function GET(
       });
 
       payments.forEach((pv) => {
+        const discStr = pv.discountAmount && pv.discountAmount > 0
+          ? ` [Prompt Discount: Rs. ${pv.discountAmount.toLocaleString()} (${pv.discountPercentage || 0}%)]`
+          : "";
         entries.push({
           id: pv._id.toString(),
           date: pv.createdAt,
           ref: pv.paymentNumber,
           type: "PAYMENT_VOUCHER",
-          description: `Payment via ${pv.paymentMethod}${pv.chequeNumber ? ` (Chq: ${pv.chequeNumber})` : ""}`,
+          description: `Payment via ${pv.paymentMethod}${pv.chequeNumber ? ` (Chq: ${pv.chequeNumber})` : ""}${discStr}`,
           paidAmount: pv.amount,
+          discountAmount: pv.discountAmount || 0,
+          discountPercentage: pv.discountPercentage || 0,
+          totalDebtOffset: pv.totalDebtOffset || (pv.amount + (pv.discountAmount || 0)),
+          grossBillAmount: pv.grossBillAmount || pv.amount,
           paymentMethod: pv.paymentMethod,
           chequeNumber: pv.chequeNumber,
         });
@@ -90,6 +101,7 @@ export async function GET(
           type: "DEBIT_NOTE",
           description: `Debit Note: Return of Damaged/Expired Stock${dn.distributorCreditNoteNumber ? ` (CN: ${dn.distributorCreditNoteNumber})` : ""}`,
           paidAmount: dn.netTotal,
+          totalDebtOffset: dn.netTotal,
           paymentMethod: "DEBIT_NOTE",
         });
       });
@@ -100,7 +112,11 @@ export async function GET(
       let running = 0;
       const ledgerWithBalance = entries.map((e) => {
         if (e.billAmount) running += e.billAmount;
-        if (e.paidAmount) running = Math.max(0, running - e.paidAmount);
+        if (e.totalDebtOffset) {
+          running = Math.max(0, running - e.totalDebtOffset);
+        } else if (e.paidAmount) {
+          running = Math.max(0, running - e.paidAmount);
+        }
         return {
           ...e,
           runningBalance: running,
@@ -145,6 +161,9 @@ export async function POST(
 
     const {
       amount,
+      grossBillAmount,
+      discountPercentage,
+      discountAmount,
       paymentMethod = "CHEQUE",
       chequeNumber,
       chequeDate,
@@ -161,6 +180,11 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    const discAmt = parseFloat(discountAmount) || 0;
+    const discPct = parseFloat(discountPercentage) || 0;
+    const grossAmt = parseFloat(grossBillAmount) || (amt + discAmt);
+    const totalDebtOffset = amt + discAmt;
 
     if (Boolean(process.env.MONGODB_URI)) {
       await connectToDatabase();
@@ -183,12 +207,24 @@ export async function POST(
       const paymentNumber = `PV-${datePart}-${seq}`;
 
       const balanceBefore = supplier.currentBalance || 0;
-      const balanceAfter = Math.max(0, balanceBefore - amt);
+      const balanceAfter = Math.max(0, balanceBefore - totalDebtOffset);
 
       let poNumber: string | undefined;
       if (purchaseOrderId) {
         const po = await PurchaseOrder.findOne({ _id: purchaseOrderId, businessId });
-        poNumber = po?.poNumber;
+        if (po) {
+          poNumber = po.poNumber;
+          po.paidAmount = (po.paidAmount || 0) + amt;
+          po.discountAmountTaken = (po.discountAmountTaken || 0) + discAmt;
+          po.totalDebtOffset = (po.totalDebtOffset || 0) + totalDebtOffset;
+          if (discAmt > 0) po.discountApplied = true;
+          if ((po.paidAmount + po.discountAmountTaken) >= po.netTotal) {
+            po.paymentStatus = "PAID";
+          } else {
+            po.paymentStatus = "PARTIALLY_PAID";
+          }
+          await po.save();
+        }
       }
 
       const payment = await SupplierPayment.create({
@@ -197,6 +233,10 @@ export async function POST(
         supplierId: supplier._id,
         supplierName: supplier.name,
         amount: amt,
+        grossBillAmount: grossAmt,
+        discountPercentage: discPct,
+        discountAmount: discAmt,
+        totalDebtOffset,
         balanceBefore,
         balanceAfter,
         paymentMethod,
@@ -206,6 +246,8 @@ export async function POST(
         referenceNumber: referenceNumber?.trim() || undefined,
         purchaseOrderId: purchaseOrderId || undefined,
         poNumber,
+        allocatedPurchaseOrderIds: purchaseOrderId ? [purchaseOrderId] : undefined,
+        earlyPaymentPnlRecorded: discAmt > 0,
         notes: notes?.trim() || undefined,
         paidBy: context.username || "Accountant",
       });
@@ -224,11 +266,17 @@ export async function POST(
           paymentNumber,
           supplierName: supplier.name,
           amount: amt,
+          discountAmount: discAmt,
+          totalDebtOffset,
           method: paymentMethod,
           balanceBefore,
           balanceAfter,
         },
       });
+
+      const discMsg = discAmt > 0
+        ? ` (Early payment discount deducted: Rs. ${discAmt.toLocaleString()}, AP debt cleared: Rs. ${totalDebtOffset.toLocaleString()})`
+        : "";
 
       return NextResponse.json({
         success: true,
@@ -239,7 +287,7 @@ export async function POST(
           previousBalance: balanceBefore,
           currentBalance: balanceAfter,
         },
-        message: `Payment of Rs. ${amt.toLocaleString()} recorded for ${supplier.name} (${paymentNumber}).`,
+        message: `Payment of Rs. ${amt.toLocaleString()} recorded for ${supplier.name} (${paymentNumber})${discMsg}.`,
       });
     }
 

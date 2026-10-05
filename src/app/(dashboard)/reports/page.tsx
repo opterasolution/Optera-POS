@@ -55,6 +55,7 @@ interface PnLData {
   expensesCount: number;
   expensesByCategory: Record<string, number>;
   expensesBySource: Record<string, number>;
+  totalEarlyDiscountsReceived?: number;
   netOperatingProfit: number;
   netMarginPercent: number;
   totalTaxesCollected: number;
@@ -211,6 +212,7 @@ export default function ReportsPage() {
       ["  - Municipal Council Taxes", pnlData.expensesByCategory?.MUNICIPAL_TAX || 0],
       ["  - Salary Advances", pnlData.expensesByCategory?.SALARY_ADVANCE || 0],
       ["  - Other Sundry Expenses", pnlData.expensesByCategory?.OTHER || 0],
+      ["Plus: Early Payment Cash Discounts Received (AP Rebates)", pnlData.totalEarlyDiscountsReceived || 0],
       ["NET OPERATING PROFIT", pnlData.netOperatingProfit],
       ["Net Margin %", `${pnlData.netMarginPercent}%`],
     ];
@@ -242,6 +244,7 @@ export default function ReportsPage() {
     expensesCount: 0,
     expensesByCategory: {},
     expensesBySource: {},
+    totalEarlyDiscountsReceived: 0,
     netOperatingProfit: 0,
     netMarginPercent: 0,
     totalTaxesCollected: 0,
@@ -336,6 +339,13 @@ export default function ReportsPage() {
                 <td className="py-1 text-right">-{formatCurrency(pnl.totalOperatingExpenses)}</td>
                 <td className="py-1 text-right">{pnl.netSalesRevenue > 0 ? ((pnl.totalOperatingExpenses / pnl.netSalesRevenue) * 100).toFixed(1) : 0}%</td>
               </tr>
+              {(pnl.totalEarlyDiscountsReceived || 0) > 0 && (
+                <tr className="font-semibold text-emerald-800">
+                  <td className="py-1 pl-4">Add: Prompt Payment Discounts Received (AP Rebates)</td>
+                  <td className="py-1 text-right text-emerald-700">+{formatCurrency(pnl.totalEarlyDiscountsReceived || 0)}</td>
+                  <td className="py-1 text-right">{pnl.netSalesRevenue > 0 ? (((pnl.totalEarlyDiscountsReceived || 0) / pnl.netSalesRevenue) * 100).toFixed(1) : 0}%</td>
+                </tr>
+              )}
               <tr className="border-t-2 border-b-2 border-slate-900 bg-slate-200 font-black text-sm">
                 <td className="py-3">NET OPERATING PROFIT (EBITDA)</td>
                 <td className="py-3 text-right">{formatCurrency(pnl.netOperatingProfit)}</td>
@@ -546,6 +556,11 @@ export default function ReportsPage() {
                   {pnl.netOperatingProfit >= 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
                   Net Margin: {pnl.netMarginPercent}%
                 </p>
+                {(pnl.totalEarlyDiscountsReceived || 0) > 0 && (
+                  <p className="text-[10px] text-emerald-700 font-medium mt-1">
+                    Incl. +{formatCurrency(pnl.totalEarlyDiscountsReceived || 0)} AP prompt discounts
+                  </p>
+                )}
               </div>
             </div>
 
@@ -600,6 +615,13 @@ export default function ReportsPage() {
                     <span>Less: Store Operating Expenses (OPEX)</span>
                     <span className="text-rose-600">-{formatCurrency(pnl.totalOperatingExpenses)}</span>
                   </div>
+
+                  {(pnl.totalEarlyDiscountsReceived || 0) > 0 && (
+                    <div className="flex justify-between py-1 text-emerald-700 pl-4 font-semibold">
+                      <span>Add: Prompt Payment Discounts Received (AP Rebates)</span>
+                      <span className="text-emerald-600">+{formatCurrency(pnl.totalEarlyDiscountsReceived || 0)}</span>
+                    </div>
+                  )}
 
                   <div className={`flex justify-between py-3 px-3 rounded-xl font-black text-sm border-2 ${
                     pnl.netOperatingProfit >= 0

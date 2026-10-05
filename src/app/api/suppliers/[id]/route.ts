@@ -84,6 +84,8 @@ export async function PATCH(
       if (body.address !== undefined) supplier.address = body.address?.trim() || undefined;
       if (body.taxNumber !== undefined) supplier.taxNumber = body.taxNumber?.trim() || undefined;
       if (body.paymentTermsDays !== undefined) supplier.paymentTermsDays = Number(body.paymentTermsDays) || 0;
+      if (body.earlyPaymentDiscountPercentage !== undefined) supplier.earlyPaymentDiscountPercentage = Number(body.earlyPaymentDiscountPercentage) || 0;
+      if (body.earlyPaymentDiscountDays !== undefined) supplier.earlyPaymentDiscountDays = Number(body.earlyPaymentDiscountDays) || 0;
       if (body.creditLimit !== undefined) supplier.creditLimit = Number(body.creditLimit) || 0;
       if (body.notes !== undefined) supplier.notes = body.notes?.trim() || undefined;
       if (body.isActive !== undefined) supplier.isActive = Boolean(body.isActive);
